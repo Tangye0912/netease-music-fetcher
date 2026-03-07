@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Centralized user-visible texts for GUI."""
+
+from __future__ import annotations
+
+APP_TITLE = "网易云音乐下载助手"
+APP_DESC = "输入网易云音乐歌曲链接后点击检测。"
+STATUS_IDLE = "状态：待输入"
+STATUS_DETECTING = "状态：检测中..."
+STATUS_DETECT_DONE = "状态：检测完成"
+STATUS_DETECT_FAILED = "状态：检测失败"
+STATUS_DOWNLOADING = "状态：下载中..."
+STATUS_DOWNLOAD_NOT_DONE = "状态：下载未完成"
+STATUS_LOGOUT = "状态：已退出登录"
+STATUS_LOGIN_UPDATED = "状态：登录已更新，可继续检测。"
+STATUS_CANCELING = "正在取消..."
+
+LOGIN_DIALOG_TITLE = "网易云音乐登录"
+LOGIN_INFO = "请先登录网易云音乐。支持网页扫码或账号密码登录。"
+LOGIN_REMEMBER = "记住登录状态（下次启动自动检测）"
+LOGIN_WEB_GROUP = "网页登录"
+LOGIN_WEB_HINT = "登录成功后点击“确认并继续”。程序会从登录页面读取 MUSIC_U 和 __csrf。"
+LOGIN_FALLBACK_HINT = "当前环境未安装 Qt WebEngine，无法内嵌登录页。请手动输入 Cookie。"
+LOGIN_MANUAL_GROUP = "手动输入（兜底）"
+LOGIN_BTN_CONFIRM = "确认并继续"
+BTN_CANCEL = "取消"
+BTN_CLOSE = "关闭"
+BTN_DOWNLOAD = "下载"
+BTN_START_DOWNLOAD = "开始下载"
+
+ACCOUNT_LABEL_NICKNAME_LOGOUT = "昵称：未登录"
+ACCOUNT_LABEL_VIP_UNKNOWN = "会员：-"
+ACCOUNT_LABEL_VIP = "会员：VIP"
+ACCOUNT_LABEL_NORMAL = "会员：普通用户"
+ACCOUNT_BTN_FALLBACK = "账户"
+ACCOUNT_MENU_SWITCH = "切换账号"
+ACCOUNT_MENU_LOGOUT = "退出当前账号"
+
+BTN_DOWNLOAD_MANAGER = "下载管理"
+BTN_DETECT = "检测"
+HELP_TOOLTIP = "支持示例：\n{url}"
+INPUT_PLACEHOLDER = "示例：{url}"
+
+TITLE_WARNING = "提示"
+TITLE_PARAM_ERROR = "参数错误"
+TITLE_LOGIN_FAIL = "登录失败"
+TITLE_LOGIN_EXPIRED = "登录过期"
+TITLE_NETWORK_CHECK_FAIL = "网络校验失败"
+TITLE_NOT_LOGIN = "未登录"
+TITLE_SWITCH_CANCELED = "未切换账号"
+TITLE_AVATAR_FAIL = "头像加载失败"
+TITLE_LOGOUT = "退出账号"
+TITLE_DETECT_FAIL = "检测失败"
+TITLE_DOWNLOAD_FAIL = "下载失败"
+TITLE_DOWNLOAD_DONE = "下载完成"
+TITLE_DOWNLOAD_CANCELED = "已取消"
+TITLE_DELETE_CONFIRM = "确认删除"
+TITLE_PATH_MISSING = "路径不存在"
+TITLE_DELETE_FAIL = "删除失败"
+TITLE_PATH_ERROR = "路径错误"
+TITLE_LOGIN_INVALID = "登录失效"
+
+MSG_NEED_LOGIN_ANY = "当前未登录任何账号，请登录任一网易云音乐账号"
+MSG_NO_LOGIN_ON_START = "未登录网易云账号，无法正常使用，请登录账号"
+MSG_SWITCH_CANCELED = "未切换账号，仍使用当前登录状态"
+MSG_AVATAR_LOAD_FAILED = "账号头像加载失败，已使用默认头像"
+MSG_LOGIN_COOKIE_MISSING = "未检测到有效的 MUSIC_U。请先登录后再继续。"
+MSG_LOGIN_INVALID = "登录态无效或已过期，请重新登录。"
+MSG_NEED_INPUT_URL = "请先输入歌曲链接或歌曲 ID。"
+MSG_NEED_PICK_DIR = "请选择有效的下载目录。"
+MSG_EMPTY_FILENAME = "文件名不能为空。"
+MSG_DOWNLOAD_CANCELED = "下载已取消。"
+MSG_LOGOUT_CONFIRM = "确定退出当前登录账号吗？"
+MSG_NOT_LOGGED_IN = "当前未登录。"
+MSG_NOT_SELECTED_RECORD = "请先选择一条下载记录。"
+MSG_DOWNLOADS_EMPTY = "暂无下载记录"
+MSG_UNSUPPORTED_FORMAT = "不支持的格式：{fmt}"
+MSG_UNKNOWN = "未知"
+MSG_OPTIONAL_RECOMMENDED = "可选，但建议填写"
+
+DOWNLOAD_OPTIONS_TITLE = "下载设置"
+DOWNLOAD_OPTIONS_DIR = "保存目录"
+DOWNLOAD_OPTIONS_NAME = "文件名（不含后缀）"
+DOWNLOAD_OPTIONS_FORMAT = "下载格式"
+DOWNLOAD_OPTIONS_PREVIEW = "预估输出：{path}"
+DOWNLOAD_DIR_PICKER_TITLE = "选择下载目录"
+DOWNLOAD_DIR_PICKER_BTN = "选择..."
+
+DOWNLOAD_PROGRESS_TITLE = "下载中"
+DOWNLOAD_PROGRESS_INIT = "准备下载..."
+DOWNLOAD_PROGRESS_SPEED = "速度：-"
+DOWNLOAD_PROGRESS_PATH = "输出路径："
+DOWNLOAD_PROGRESS_CANCEL = "取消下载"
+DOWNLOAD_PROGRESS_DONE_BODY = "文件：{name}\n大小：{size}\n路径：{path}"
+DOWNLOAD_PROGRESS_TEXT_SIMPLE = "已下载 {downloaded}"
+DOWNLOAD_PROGRESS_TEXT_FULL = "已下载 {downloaded} / {total}"
+
+SONG_CONFIRM_TITLE = "歌曲检测结果"
+SONG_CONFIRM_ID = "歌曲 ID"
+SONG_CONFIRM_NAME = "歌名"
+SONG_CONFIRM_DURATION = "时长"
+SONG_CONFIRM_STATUS = "状态"
+SONG_CONFIRM_REASON = "原因"
+SONG_CONFIRM_CAN_DOWNLOAD = "可下载"
+SONG_CONFIRM_CANT_DOWNLOAD = "不可下载"
+
+MANAGER_TITLE = "下载管理"
+MANAGER_COL_SONG = "歌曲"
+MANAGER_COL_FILENAME = "文件名"
+MANAGER_COL_SIZE = "大小"
+MANAGER_COL_TIME = "下载时间"
+MANAGER_COL_PATH = "路径"
+MANAGER_BTN_OPEN_FOLDER = "打开文件夹"
+MANAGER_BTN_DELETE_FILE = "删除文件"
+MANAGER_BTN_REFRESH = "刷新"
+MANAGER_MISSING_FOLDER = "目录不存在：{folder}"
+MANAGER_DELETE_CONFIRM = "确定删除文件并移除记录吗？\n{path}"
+
+
+def code_message(code: str, message: str) -> str:
+    return f"{code}: {message}"
+
+
+def login_network_confirm(code: str) -> str:
+    return f"登录状态在线校验失败：{code}\n是否仍然继续？"
+
+
+def detect_auth_expired(code: str, message: str) -> str:
+    return f"{code}: {message}\n请点击头像菜单切换账号。"
+
+
+def status_download_done(filename: str) -> str:
+    return f"状态：下载完成 -> {filename}"
+
+
+def speed_text(speed: str) -> str:
+    return f"速度：{speed}/s"
+
+
+def nickname_text(name: str) -> str:
+    return f"昵称：{name}"
