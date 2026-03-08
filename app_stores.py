@@ -51,6 +51,7 @@ class SessionStore:
 
     def save(self, session: AppSession) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # When "remember_login" is off, we intentionally avoid persisting cookie to disk.
         payload = {
             "cookie": session.cookie if session.remember_login else "",
             "remember_login": session.remember_login,
@@ -104,6 +105,7 @@ class DownloadHistoryStore:
 
     def add(self, record: DownloadRecord) -> None:
         records = self.load()
+        # Keep the latest successful download at the top and dedupe by output path.
         filtered = [row for row in records if row.output_path != record.output_path]
         filtered.insert(0, record)
         self.save(filtered)

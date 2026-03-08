@@ -557,6 +557,10 @@ def infer_audio_format_from_url(media_url: str) -> Optional[str]:
     return None
 
 
+def is_ffmpeg_available() -> bool:
+    return bool(shutil.which("ffmpeg"))
+
+
 def convert_audio_file(
     input_path: Path,
     output_path: Path,
@@ -631,11 +635,16 @@ def download_song_with_fallback(
     cookie: str,
     output_path: Path,
     timeout: int,
+    prefer_format: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
 ) -> PlayableCandidate:
     candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
+    if prefer_format:
+        candidates = prioritize_candidates_by_format(candidates, prefer_format=prefer_format)
     last_403: Optional[MusicFetchError] = None
+    outer_available = False
+    # Try candidate URLs from best to lower quality. Some CDN links may be rejected with 403.
     for idx, candidate in enumerate(candidates, start=1):
         logger.info(
             "Trying candidate download. song_id=%s candidate=%s/%s level=%s encode=%s",
@@ -670,8 +679,10 @@ def download_song_with_fallback(
             raise
 
     logger.info("Trying outer-url fallback download. song_id=%s", song_id)
+    # "outer/url" is a looser public endpoint and can succeed when direct API URLs fail.
     outer_url = fetch_outer_media_url(song_id, timeout=timeout)
     if outer_url:
+        outer_available = True
         try:
             _download_audio_stream(
                 outer_url,
@@ -698,11 +709,54 @@ def download_song_with_fallback(
         logger.warning("Outer-url fallback is unavailable for song. song_id=%s", song_id)
 
     if last_403:
+        # If outer-url is not available, this is usually a true resource restriction
+        # rather than a transient downloader issue.
+        if not outer_available:
+            raise MusicFetchError(
+                "SONG_UNAVAILABLE",
+                "Playable resources are blocked by CDN, and outer-url fallback is unavailable.",
+            ) from last_403
         raise MusicFetchError(
             "DOWNLOAD_FAILED",
             "All playable candidates were rejected with HTTP 403 (including outer-url fallback).",
         ) from last_403
     raise MusicFetchError("DOWNLOAD_FAILED", "Failed to download all playable candidates.")
+
+
+def prioritize_candidates_by_format(
+    candidates: list[PlayableCandidate], prefer_format: str
+) -> list[PlayableCandidate]:
+    normalized = (prefer_format or "").strip().lower()
+    if not normalized:
+        return candidates
+
+    if normalized == "m4a":
+        preferred = ("m4a", "aac")
+    elif normalized == "aac":
+        preferred = ("aac", "m4a")
+    else:
+        preferred = (normalized,)
+
+    def candidate_key(candidate: PlayableCandidate) -> tuple[int, int]:
+        fmt = infer_audio_format_from_url(candidate.media_url)
+        if not fmt:
+            encode = (candidate.encode_type or "").strip().lower()
+            if encode in {"aac", "mp4"}:
+                fmt = "m4a"
+            elif encode in {"mp3", "wav", "flac", "m4a"}:
+                fmt = encode
+
+        if fmt in preferred:
+            return (0, preferred.index(fmt))
+        return (1, 0)
+
+    sorted_candidates = sorted(candidates, key=candidate_key)
+    logger.info(
+        "Candidates reordered by preferred format. prefer=%s order=%s",
+        normalized,
+        [f"{c.level}:{c.encode_type}" for c in sorted_candidates],
+    )
+    return sorted_candidates
 
 
 def fetch_outer_media_url(song_id: str, timeout: int = 20) -> Optional[str]:
@@ -735,6 +789,8 @@ def fetch_outer_media_url(song_id: str, timeout: int = 20) -> Optional[str]:
 
 def _build_download_attempt_headers(cookie: str) -> list[dict[str, str]]:
     base_user_agent = USER_AGENT
+    # Different CDN nodes may enforce different anti-hotlink rules.
+    # We keep a deterministic header matrix and iterate through it in order.
     attempts: list[dict[str, str]] = [
         {
             "User-Agent": base_user_agent,

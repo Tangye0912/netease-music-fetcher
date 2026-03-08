@@ -17,6 +17,7 @@ from app_settings import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_GUI_TARGET_FORMAT,
     DOWNLOAD_HISTORY_FILE,
+    NETEASE_LOGIN_URL,
     SESSION_FILE,
     URL_EXAMPLE_LONG,
 )
@@ -33,6 +34,7 @@ from music_fetch import (
     download_song_with_fallback,
     fetch_account_profile,
     infer_audio_format_from_url,
+    is_ffmpeg_available,
     resolve_output_path,
     sanitize_filename,
 )
@@ -120,6 +122,43 @@ def load_avatar_icon(url: str) -> Optional[QIcon]:
     return QIcon(pixmap)
 
 
+def clear_embedded_login_state() -> None:
+    """Best-effort cleanup for embedded web login state."""
+    if not WEB_ENGINE_AVAILABLE:
+        return
+    try:
+        # Ensure the next login dialog always starts from a logged-out web context.
+        profile = QWebEngineProfile.defaultProfile()
+        profile.cookieStore().deleteAllCookies()
+        profile.clearHttpCache()
+        logger.info("Embedded login web state cleared.")
+    except Exception:  # pragma: no cover - depends on Qt runtime.
+        logger.exception("Failed to clear embedded login web state.")
+
+
+def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
+    """Build a Cookie header string from captured WebEngine cookies."""
+    music_u = (cookie_fields.get("MUSIC_U") or "").strip()
+    if not music_u:
+        return ""
+
+    parts: list[str] = []
+    seen: set[str] = set()
+    for key in ("MUSIC_U", "__csrf"):
+        value = (cookie_fields.get(key) or "").strip()
+        if value:
+            parts.append(f"{key}={value}")
+            seen.add(key)
+
+    for key in sorted(cookie_fields.keys()):
+        if key in seen:
+            continue
+        value = (cookie_fields.get(key) or "").strip()
+        if value:
+            parts.append(f"{key}={value}")
+    return "; ".join(parts)
+
+
 class InspectWorker(QThread):
     succeeded = Signal(object)
     failed = Signal(str, str)
@@ -182,6 +221,8 @@ class DownloadWorker(QThread):
             return self._cancel_requested
 
         try:
+            # Download to a temporary source file first, then convert/move to final path.
+            # This avoids exposing partial or half-converted output files to users.
             temp_source_path = self.output_path.with_name(f"{self.output_path.name}.source")
             if temp_source_path.exists():
                 temp_source_path.unlink(missing_ok=True)
@@ -191,6 +232,7 @@ class DownloadWorker(QThread):
                 cookie=self.cookie,
                 output_path=temp_source_path,
                 timeout=self.timeout,
+                prefer_format=self.target_format,
                 progress_callback=on_progress,
                 cancel_checker=should_cancel,
             )
@@ -203,6 +245,23 @@ class DownloadWorker(QThread):
             if source_format == self.target_format:
                 temp_source_path.replace(self.output_path)
             else:
+                if not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
+                    fallback_output = self.output_path.with_suffix(f".{source_format}")
+                    if fallback_output.exists():
+                        fallback_output = fallback_output.with_name(
+                            f"{fallback_output.stem}_{int(time.time())}{fallback_output.suffix}"
+                        )
+                    temp_source_path.replace(fallback_output)
+                    file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
+                    self.succeeded.emit(str(fallback_output.resolve()), file_size)
+                    logger.warning(
+                        "ffmpeg missing. saved source format directly. requested=%s source=%s output=%s",
+                        self.target_format,
+                        source_format,
+                        fallback_output,
+                    )
+                    return
+                # Conversion relies on ffmpeg and may take longer than plain download.
                 convert_audio_file(
                     temp_source_path,
                     self.output_path,
@@ -239,8 +298,8 @@ class LoginDialog(QDialog):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(T.LOGIN_DIALOG_TITLE)
-        self.resize(900, 700)
         self.cookie_fields: dict[str, str] = {}
+        self._configure_window_size()
 
         root_layout = QVBoxLayout(self)
         info = QLabel(T.LOGIN_INFO)
@@ -259,28 +318,38 @@ class LoginDialog(QDialog):
             fallback_hint.setWordWrap(True)
             root_layout.addWidget(fallback_hint)
 
-        self.manual_group = self._build_manual_group()
-        root_layout.addWidget(self.manual_group)
-
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.confirm_button = QPushButton(T.LOGIN_BTN_CONFIRM)
         self.confirm_button.clicked.connect(self._on_confirm)
+        self.confirm_button.setEnabled(False)
         cancel_button = QPushButton(T.BTN_CANCEL)
         cancel_button.clicked.connect(self.reject)
         buttons.addWidget(cancel_button)
         buttons.addWidget(self.confirm_button)
         root_layout.addLayout(buttons)
 
+    def _configure_window_size(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.resize(520, 760)
+            return
+        geometry = screen.availableGeometry()
+        width = max(500, min(760, int(geometry.width() * 0.45)))
+        height = max(700, min(980, int(geometry.height() * 0.88)))
+        self.resize(width, height)
+
     def _build_web_login_group(self) -> QGroupBox:
         group = QGroupBox(T.LOGIN_WEB_GROUP)
         layout = QVBoxLayout(group)
 
-        self.web_profile = QWebEngineProfile("music-fetch-login", group)
+        # Use an off-the-record profile so each login starts clean.
+        self.web_profile = QWebEngineProfile(group)
         self.web_page = QWebEnginePage(self.web_profile, group)
         self.web_view = QWebEngineView(group)
         self.web_view.setPage(self.web_page)
-        self.web_view.setUrl(QUrl("https://music.163.com/#/login"))
+        self.web_view.setUrl(QUrl(NETEASE_LOGIN_URL))
+        self.web_view.loadFinished.connect(self._try_focus_qr_login)
         self.web_profile.cookieStore().cookieAdded.connect(self._on_cookie_added)
 
         tip = QLabel(T.LOGIN_WEB_HINT)
@@ -289,17 +358,28 @@ class LoginDialog(QDialog):
         layout.addWidget(self.web_view, stretch=1)
         return group
 
-    def _build_manual_group(self) -> QGroupBox:
-        group = QGroupBox(T.LOGIN_MANUAL_GROUP)
-        form = QFormLayout(group)
-        self.music_u_input = QLineEdit()
-        self.music_u_input.setEchoMode(QLineEdit.Password)
-        self.csrf_input = QLineEdit()
-        self.csrf_input.setEchoMode(QLineEdit.Password)
-        self.csrf_input.setPlaceholderText(T.MSG_OPTIONAL_RECOMMENDED)
-        form.addRow("MUSIC_U", self.music_u_input)
-        form.addRow("__csrf", self.csrf_input)
-        return group
+    def _try_focus_qr_login(self, ok: bool) -> None:
+        if not ok:
+            return
+        # Best-effort: auto switch to the QR tab so users do not need extra clicks.
+        script = """
+        (() => {
+          const nodes = Array.from(document.querySelectorAll('a,button,div,span'));
+          const target = nodes.find((el) => {
+            const text = (el.innerText || el.textContent || '').trim();
+            return text.includes('扫码登录');
+          });
+          if (target) {
+            target.click();
+            return true;
+          }
+          return false;
+        })();
+        """
+        self.web_page.runJavaScript(script, self._on_qr_focus_result)
+
+    def _on_qr_focus_result(self, switched: object) -> None:
+        logger.info("Login dialog QR focus attempted. switched=%s", bool(switched))
 
     def _on_cookie_added(self, cookie) -> None:
         try:
@@ -307,19 +387,27 @@ class LoginDialog(QDialog):
             value = bytes(cookie.value()).decode("utf-8", errors="ignore")
         except Exception:
             return
-        if name in {"MUSIC_U", "__csrf"} and value:
-            self.cookie_fields[name] = value
+        if not name or not value:
+            return
+        self.cookie_fields[name] = value
+        self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
+        if name in {"MUSIC_U", "__csrf", "NMTID", "MUSIC_A"}:
+            logger.info("Captured login cookie field from web page. name=%s", name)
 
     def _on_confirm(self) -> None:
-        if self.cookie_fields.get("MUSIC_U"):
+        if not WEB_ENGINE_AVAILABLE:
+            QMessageBox.warning(self, T.TITLE_DEP_MISSING, T.MSG_LOGIN_REQUIRES_WEBENGINE)
+            return
+
+        cookie = build_cookie_from_fields(self.cookie_fields)
+        if not cookie:
             cookie = build_cookie_string(
                 self.cookie_fields.get("MUSIC_U", ""),
                 self.cookie_fields.get("__csrf", ""),
             )
-        else:
-            cookie = build_cookie_string(self.music_u_input.text(), self.csrf_input.text())
 
         if not cookie or "MUSIC_U=" not in cookie:
+            logger.info("Login confirm blocked because MUSIC_U is missing.")
             QMessageBox.warning(self, T.TITLE_LOGIN_FAIL, T.MSG_LOGIN_COOKIE_MISSING)
             return
 
@@ -393,6 +481,8 @@ class DownloadOptionsDialog(QDialog):
         self.result = result
         self.output_path: Optional[Path] = None
         self.selected_format: str = DEFAULT_GUI_TARGET_FORMAT
+        self.ffmpeg_available = is_ffmpeg_available()
+        self._format_guard = False
         self.setWindowTitle(T.DOWNLOAD_OPTIONS_TITLE)
         self.resize(640, 240)
 
@@ -425,7 +515,11 @@ class DownloadOptionsDialog(QDialog):
         self._refresh_preview()
         self.out_dir_input.textChanged.connect(self._refresh_preview)
         self.rename_input.textChanged.connect(self._refresh_preview)
+        self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.format_combo.currentTextChanged.connect(self._refresh_preview)
+
+        if not self.ffmpeg_available:
+            self._apply_ffmpeg_unavailable_constraints()
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
@@ -449,6 +543,35 @@ class DownloadOptionsDialog(QDialog):
         preview = out_dir / f"{sanitize_filename(rename)}.{selected_format}"
         self.preview_label.setText(T.DOWNLOAD_OPTIONS_PREVIEW.format(path=preview))
 
+    def _apply_ffmpeg_unavailable_constraints(self) -> None:
+        model = self.format_combo.model()
+        for idx, fmt in enumerate(SUPPORTED_GUI_AUDIO_FORMATS):
+            if fmt == "mp3":
+                continue
+            item = model.item(idx) if hasattr(model, "item") else None
+            if item is not None:
+                item.setEnabled(False)
+                item.setToolTip(T.MSG_FFMPEG_NEED_INSTALL)
+        self._set_format_safely("MP3")
+        logger.warning("ffmpeg not found. locked convertible formats in download options.")
+
+    def _set_format_safely(self, value: str) -> None:
+        self._format_guard = True
+        try:
+            self.format_combo.setCurrentText(value)
+        finally:
+            self._format_guard = False
+
+    def _on_format_changed(self, value: str) -> None:
+        if self._format_guard:
+            return
+        if self.ffmpeg_available:
+            return
+        if value.lower().strip() == "mp3":
+            return
+        QMessageBox.information(self, T.TITLE_DEP_MISSING, T.MSG_FFMPEG_NEED_INSTALL)
+        self._set_format_safely("MP3")
+
     def _on_confirm(self) -> None:
         raw_out_dir = self.out_dir_input.text().strip()
         if not raw_out_dir:
@@ -463,6 +586,10 @@ class DownloadOptionsDialog(QDialog):
         if selected_format not in SUPPORTED_GUI_AUDIO_FORMATS:
             QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.MSG_UNSUPPORTED_FORMAT.format(fmt=selected_format))
             return
+        if not self.ffmpeg_available and selected_format != "mp3":
+            QMessageBox.information(self, T.TITLE_DEP_MISSING, T.MSG_FFMPEG_NEED_INSTALL)
+            self._set_format_safely("MP3")
+            selected_format = "mp3"
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
             self.output_path = resolve_output_path(
@@ -486,6 +613,7 @@ class DownloadProgressDialog(QDialog):
         self.setWindowTitle(T.DOWNLOAD_PROGRESS_TITLE)
         self.resize(540, 190)
         self.output_path: Optional[Path] = None
+        self.requested_output_path = output_path
 
         layout = QVBoxLayout(self)
         self.progress_bar = QProgressBar()
@@ -548,6 +676,9 @@ class DownloadProgressDialog(QDialog):
 
     def _on_succeeded(self, output_path: str, file_size: int) -> None:
         self.output_path = Path(output_path)
+        fallback_note = ""
+        if self.output_path.suffix.lower() != self.requested_output_path.suffix.lower():
+            fallback_note = T.DOWNLOAD_PROGRESS_DONE_FALLBACK_NOTE
         QMessageBox.information(
             self,
             T.TITLE_DOWNLOAD_DONE,
@@ -555,9 +686,68 @@ class DownloadProgressDialog(QDialog):
                 name=self.output_path.name,
                 size=format_bytes(file_size),
                 path=self.output_path,
-            ),
+            )
+            + fallback_note,
         )
         self.accept()
+
+
+class DependencyManagerDialog(QDialog):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(T.DEP_MANAGER_TITLE)
+        self.resize(780, 280)
+
+        layout = QVBoxLayout(self)
+        desc = QLabel(T.DEP_MANAGER_DESC)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        self.table = QTableWidget(1, 4)
+        self.table.setHorizontalHeaderLabels(
+            [
+                T.DEP_MANAGER_COL_NAME,
+                T.DEP_MANAGER_COL_STATUS,
+                T.DEP_MANAGER_COL_IMPACT,
+                T.DEP_MANAGER_COL_INSTALL,
+            ]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        layout.addWidget(self.table, stretch=1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        refresh_button = QPushButton(T.MANAGER_BTN_REFRESH)
+        refresh_button.clicked.connect(self.refresh)
+        close_button = QPushButton(T.BTN_CLOSE)
+        close_button.clicked.connect(self.accept)
+        button_row.addWidget(refresh_button)
+        button_row.addWidget(close_button)
+        layout.addLayout(button_row)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        # Keep this dialog runtime-driven so users can install dependency
+        # and click "刷新" to verify immediately without restarting app.
+        ffmpeg_ok = is_ffmpeg_available()
+        self.table.setItem(0, 0, QTableWidgetItem(T.DEP_MANAGER_ITEM_FFMPEG))
+        self.table.setItem(
+            0, 1, QTableWidgetItem(T.DEP_MANAGER_STATUS_OK if ffmpeg_ok else T.DEP_MANAGER_STATUS_MISSING)
+        )
+        self.table.setItem(
+            0, 2, QTableWidgetItem(T.DEP_MANAGER_IMPACT_OK if ffmpeg_ok else T.DEP_MANAGER_IMPACT_MISSING)
+        )
+        self.table.setItem(
+            0, 3, QTableWidgetItem(T.DEP_MANAGER_INSTALL_OK if ffmpeg_ok else T.DEP_MANAGER_INSTALL_FFMPEG)
+        )
+        logger.info("Dependency manager refreshed. ffmpeg_available=%s", ffmpeg_ok)
 
 
 class DownloadManagerDialog(QDialog):
@@ -679,6 +869,7 @@ class MainWindow(QMainWindow):
         self.session_store = session_store
         self.history_store = history_store
         self.session = session
+        self.ffmpeg_available = is_ffmpeg_available()
         self.inspect_worker: Optional[InspectWorker] = None
         self.account_profile: Optional[AccountProfile] = None
         self._avatar_error_notified = False
@@ -715,6 +906,12 @@ class MainWindow(QMainWindow):
         account_row.addLayout(account_text)
 
         account_row.addStretch(1)
+        self.dependency_hint_label = QLabel("")
+        self.dependency_hint_label.setVisible(False)
+        account_row.addWidget(self.dependency_hint_label)
+        self.dependency_button = QPushButton(T.BTN_DEPENDENCY_MANAGER)
+        self.dependency_button.clicked.connect(self._open_dependency_manager)
+        account_row.addWidget(self.dependency_button)
         self.manager_button = QPushButton(T.BTN_DOWNLOAD_MANAGER)
         self.manager_button.clicked.connect(self._open_download_manager)
         account_row.addWidget(self.manager_button)
@@ -726,21 +923,35 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText(T.INPUT_PLACEHOLDER.format(url=URL_EXAMPLE_LONG))
+        self.url_input.setPlaceholderText(T.INPUT_PLACEHOLDER)
         row.addWidget(self.url_input, stretch=1)
-        help_button = QToolButton()
-        help_button.setText("?")
-        help_button.setToolTip(T.HELP_TOOLTIP.format(url=URL_EXAMPLE_LONG))
-        row.addWidget(help_button)
         self.detect_button = QPushButton(T.BTN_DETECT)
         self.detect_button.clicked.connect(self._on_detect_clicked)
         row.addWidget(self.detect_button)
         layout.addLayout(row)
 
+        self.url_help_label = QLabel(T.URL_HELP_LABEL.format(url=URL_EXAMPLE_LONG))
+        self.url_help_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.url_help_label.setToolTip(T.URL_HELP_TOOLTIP)
+        layout.addWidget(self.url_help_label)
+
         self.status_label = QLabel(T.STATUS_IDLE)
         layout.addWidget(self.status_label)
 
+        self._refresh_ffmpeg_status()
         self._refresh_account_profile()
+
+    def _refresh_ffmpeg_status(self) -> None:
+        # Main page only shows a lightweight "limited" hint.
+        # Detailed diagnosis stays in DependencyManagerDialog.
+        self.ffmpeg_available = is_ffmpeg_available()
+        if self.ffmpeg_available:
+            self.dependency_hint_label.setVisible(False)
+            return
+        self.dependency_hint_label.setVisible(True)
+        self.dependency_hint_label.setText(T.DEPENDENCY_HINT_LIMITED)
+        self.dependency_hint_label.setToolTip(T.DEPENDENCY_HINT_LIMITED_TIP)
+        self.dependency_hint_label.setStyleSheet("color: #b07500;")
 
     def _apply_account_profile(self, profile: Optional[AccountProfile]) -> None:
         self.account_profile = profile
@@ -786,6 +997,7 @@ class MainWindow(QMainWindow):
 
     def _on_switch_account(self) -> None:
         logger.info("User requested switch account.")
+        clear_embedded_login_state()
         dialog = LoginDialog()
         dialog.login_success.connect(self._on_login_success)
         if dialog.exec() != QDialog.Accepted:
@@ -807,6 +1019,7 @@ class MainWindow(QMainWindow):
             return
         self.session.cookie = ""
         self.session_store.save(self.session)
+        clear_embedded_login_state()
         self._apply_account_profile(None)
         self.status_label.setText(T.STATUS_LOGOUT)
         logger.info("User logged out current account.")
@@ -823,6 +1036,12 @@ class MainWindow(QMainWindow):
         logger.info("Open download manager.")
         dialog = DownloadManagerDialog(history_store=self.history_store, parent=self)
         dialog.exec()
+
+    def _open_dependency_manager(self) -> None:
+        logger.info("Open dependency manager.")
+        dialog = DependencyManagerDialog(parent=self)
+        dialog.exec()
+        self._refresh_ffmpeg_status()
 
     def _on_detect_clicked(self) -> None:
         song_url = self.url_input.text().strip()
@@ -868,6 +1087,22 @@ class MainWindow(QMainWindow):
         if confirm.exec() != QDialog.Accepted:
             return
 
+        self._refresh_ffmpeg_status()
+        if not self.ffmpeg_available:
+            # Gate download flow early when ffmpeg is missing:
+            # continue with default mp3 or cancel the current task.
+            answer = QMessageBox.question(
+                self,
+                T.TITLE_DEP_MISSING,
+                f"{T.MSG_FFMPEG_CONFIRM_MP3}\n\n{T.MSG_FFMPEG_INSTALL_GUIDE}",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer != QMessageBox.Yes:
+                self.status_label.setText(T.STATUS_DOWNLOAD_NOT_DONE)
+                logger.info("Download canceled before options because ffmpeg is missing.")
+                return
+
         options = DownloadOptionsDialog(result, last_download_dir=self.session.last_download_dir)
         if options.exec() != QDialog.Accepted or not options.output_path:
             return
@@ -907,6 +1142,12 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
         except MusicFetchError:
             logger.warning("Existing login session check failed due to network issue.")
 
+    if not WEB_ENGINE_AVAILABLE:
+        QMessageBox.warning(None, T.TITLE_DEP_MISSING, T.MSG_LOGIN_REQUIRES_WEBENGINE)
+        logger.warning("Cannot continue login flow because Qt WebEngine is unavailable.")
+        return None
+
+    clear_embedded_login_state()
     dialog = LoginDialog()
     holder: dict[str, object] = {}
 
@@ -923,6 +1164,7 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
     cookie = str(holder.get("cookie") or "")
     remember = bool(holder.get("remember", True))
     loaded = session_store.load()
+    # We always keep the runtime cookie in memory. "remember_login" only controls disk persistence.
     loaded.cookie = cookie if remember else ""
     loaded.remember_login = remember
     session_store.save(loaded)
