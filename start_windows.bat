@@ -2,12 +2,22 @@
 setlocal
 cd /d "%~dp0"
 
-where py >nul 2>nul
-if %errorlevel%==0 (
-  py -3 main.py
-) else (
-  python main.py
+set "PY_CMD="
+where py >nul 2>nul && py -3.13 -c "import sys" >nul 2>nul && set "PY_CMD=py -3.13"
+if not defined PY_CMD where py >nul 2>nul && py -3 -c "import sys" >nul 2>nul && set "PY_CMD=py -3"
+
+if not defined PY_CMD (
+  where python >nul 2>nul && set "PY_CMD=python"
 )
+
+if not defined PY_CMD (
+  echo.
+  echo 未检测到 Python 3，请先安装 Python 3。
+  pause
+  exit /b 1
+)
+
+%PY_CMD% main.py
 
 if errorlevel 1 (
   echo.

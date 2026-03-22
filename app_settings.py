@@ -14,6 +14,9 @@ DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads")
 
 DEFAULT_GUI_TARGET_FORMAT = "mp3"
 SUPPORTED_AUDIO_FORMATS = ("mp3", "m4a", "wav", "flac", "aac")
+DEFAULT_UI_FONT_SIZE = 14
+MIN_UI_FONT_SIZE = 12
+MAX_UI_FONT_SIZE = 20
 
 URL_EXAMPLE_LONG = "https://music.163.com/song?id=33894312"
 NETEASE_LOGIN_URL = "https://music.163.com/#/login"

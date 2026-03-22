@@ -17,8 +17,19 @@ ERROR_MESSAGE_MAP = {
 }
 
 
+def _network_error_message(fallback_message: str) -> str:
+    fallback = (fallback_message or "").strip().lower()
+    if not fallback:
+        return ERROR_MESSAGE_MAP["NETWORK_ERROR"]
+    if "certificate_verify_failed" in fallback or "self-signed certificate" in fallback:
+        return "网络证书校验失败（可能是代理证书或本机证书链问题），请检查代理/证书配置后重试。"
+    return ERROR_MESSAGE_MAP["NETWORK_ERROR"]
+
+
 def user_error_message(code: str, fallback_message: str = "") -> str:
     normalized = (code or "").strip().upper()
+    if normalized == "NETWORK_ERROR":
+        return _network_error_message(fallback_message)
     if normalized in ERROR_MESSAGE_MAP:
         return ERROR_MESSAGE_MAP[normalized]
     fallback = (fallback_message or "").strip()

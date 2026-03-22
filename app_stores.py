@@ -8,16 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app_logging import get_logger
-from app_settings import DEFAULT_DOWNLOAD_DIR, UNKNOWN_SONG_NAME
+from app_settings import DEFAULT_DOWNLOAD_DIR, DEFAULT_UI_FONT_SIZE, MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE, UNKNOWN_SONG_NAME
 
 logger = get_logger("music_fetch.stores")
 
 
 @dataclass
 class AppSession:
-    cookie: str
-    remember_login: bool
-    last_download_dir: str
+    cookie: str = ""
+    remember_login: bool = True
+    last_download_dir: str = DEFAULT_DOWNLOAD_DIR
+    ui_font_size: int = DEFAULT_UI_FONT_SIZE
 
 
 @dataclass
@@ -36,17 +37,18 @@ class SessionStore:
     def load(self) -> AppSession:
         if not self.path.exists():
             logger.info("Session file not found. path=%s", self.path)
-            return AppSession(cookie="", remember_login=True, last_download_dir=DEFAULT_DOWNLOAD_DIR)
+            return AppSession()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to parse session file, fallback to empty. path=%s", self.path)
-            return AppSession(cookie="", remember_login=True, last_download_dir=DEFAULT_DOWNLOAD_DIR)
+            return AppSession()
 
         return AppSession(
             cookie=str(raw.get("cookie") or ""),
             remember_login=bool(raw.get("remember_login", True)),
             last_download_dir=str(raw.get("last_download_dir") or DEFAULT_DOWNLOAD_DIR),
+            ui_font_size=self._safe_ui_font_size(raw.get("ui_font_size")),
         )
 
     def save(self, session: AppSession) -> None:
@@ -56,9 +58,18 @@ class SessionStore:
             "cookie": session.cookie if session.remember_login else "",
             "remember_login": session.remember_login,
             "last_download_dir": session.last_download_dir,
+            "ui_font_size": self._safe_ui_font_size(session.ui_font_size),
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
+
+    @staticmethod
+    def _safe_ui_font_size(value: object) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_UI_FONT_SIZE
+        return max(MIN_UI_FONT_SIZE, min(MAX_UI_FONT_SIZE, parsed))
 
 
 class DownloadHistoryStore:

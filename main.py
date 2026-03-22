@@ -4,19 +4,24 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib import error, request
+from urllib import error, parse, request
 
 from app_logging import default_log_path, get_logger, setup_logging
 from error_texts import user_error_message
 from app_settings import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_GUI_TARGET_FORMAT,
+    DEFAULT_UI_FONT_SIZE,
     DOWNLOAD_HISTORY_FILE,
+    MAX_UI_FONT_SIZE,
+    MIN_UI_FONT_SIZE,
     NETEASE_LOGIN_URL,
     SESSION_FILE,
     URL_EXAMPLE_LONG,
@@ -33,10 +38,13 @@ from music_fetch import (
     detect_song,
     download_song_with_fallback,
     fetch_account_profile,
+    extract_url_from_input,
+    is_netease_music_host,
     infer_audio_format_from_url,
     is_ffmpeg_available,
     resolve_output_path,
     sanitize_filename,
+    SHORT_LINK_HOSTS,
 )
 import ui_texts as T
 
@@ -62,6 +70,8 @@ try:
         QMessageBox,
         QPushButton,
         QProgressBar,
+        QSizePolicy,
+        QSpinBox,
         QTableWidget,
         QTableWidgetItem,
         QToolButton,
@@ -70,7 +80,7 @@ try:
     )
 except ImportError as err:
     raise SystemExit(
-        "Missing dependency: PySide6. Install it with `pip install PySide6` before running main.py."
+        "Missing dependency: PySide6. Install it with `python3 -m pip install PySide6` before running main.py."
     ) from err
 
 try:
@@ -157,6 +167,174 @@ def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
         if value:
             parts.append(f"{key}={value}")
     return "; ".join(parts)
+
+
+def clamp_ui_font_size(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_UI_FONT_SIZE
+    return max(MIN_UI_FONT_SIZE, min(MAX_UI_FONT_SIZE, parsed))
+
+
+def build_app_stylesheet(font_size: int) -> str:
+    field_height = max(34, int(font_size * 2.2))
+    button_height = max(36, int(font_size * 2.35))
+    radius = max(8, int(font_size * 0.55))
+    return f"""
+    QWidget {{
+        font-size: {font_size}px;
+    }}
+    QPushButton {{
+        min-height: {button_height}px;
+        padding: 4px 14px;
+        border-radius: {radius}px;
+        border: 1px solid #d0d7de;
+        background: #f6f8fa;
+        color: #24292f;
+    }}
+    QPushButton:hover {{
+        background: #eef3f8;
+    }}
+    QPushButton:focus {{
+        border-color: #0969da;
+        background: #eef3f8;
+    }}
+    QPushButton[role="primary"] {{
+        background: #0969da;
+        border-color: #0969da;
+        color: #ffffff;
+        font-weight: 600;
+    }}
+    QPushButton[role="primary"]:hover {{
+        background: #0550ae;
+        border-color: #0550ae;
+    }}
+    QPushButton[role="primary"]:focus {{
+        background: #0550ae;
+        border-color: #0550ae;
+    }}
+    QPushButton[navRole="back"] {{
+        min-width: 96px;
+    }}
+    QLineEdit, QComboBox, QSpinBox {{
+        min-height: {field_height}px;
+        border: 1px solid #d0d7de;
+        border-radius: {radius}px;
+        padding: 0 10px;
+        background: #ffffff;
+    }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+        border-color: #0969da;
+    }}
+    QComboBox QAbstractItemView {{
+        border: 1px solid #d0d7de;
+        background: #ffffff;
+        selection-background-color: #0969da;
+        selection-color: #ffffff;
+        outline: 0;
+    }}
+    QComboBox QAbstractItemView::item:hover {{
+        background: #dbeafe;
+        color: #111827;
+    }}
+    QComboBox QAbstractItemView::item:selected {{
+        background: #0969da;
+        color: #ffffff;
+    }}
+    QLabel[state="success"] {{
+        color: #1a7f37;
+        font-weight: 600;
+    }}
+    QLabel[state="warning"] {{
+        color: #9a6700;
+        font-weight: 600;
+    }}
+    QLabel[state="error"] {{
+        color: #cf222e;
+        font-weight: 600;
+    }}
+    QLabel[state="muted"] {{
+        color: #656d76;
+    }}
+    QProgressBar {{
+        min-height: {field_height}px;
+    }}
+    """
+
+
+def apply_app_style(app: QApplication, font_size: int) -> int:
+    normalized = clamp_ui_font_size(font_size)
+    app.setStyleSheet(build_app_stylesheet(normalized))
+    return normalized
+
+
+def set_button_role(button: QPushButton, role: Optional[str]) -> None:
+    button.setProperty("role", role or "")
+    button.style().unpolish(button)
+    button.style().polish(button)
+    if role == "primary":
+        button.setDefault(True)
+        button.setAutoDefault(True)
+
+
+def set_back_button(button: QPushButton) -> None:
+    button.setProperty("navRole", "back")
+    button.setAutoDefault(False)
+    button.setDefault(False)
+    button.style().unpolish(button)
+    button.style().polish(button)
+
+
+def set_secondary_button(button: QPushButton) -> None:
+    button.setAutoDefault(False)
+    button.setDefault(False)
+    button.style().unpolish(button)
+    button.style().polish(button)
+
+
+def set_label_state(label: QLabel, state: str) -> None:
+    label.setProperty("state", state)
+    label.style().unpolish(label)
+    label.style().polish(label)
+
+
+def validate_song_input(value: str) -> tuple[bool, str]:
+    raw = value.strip()
+    if not raw:
+        return False, T.INPUT_VALIDATION_EMPTY
+    if raw.isdigit():
+        return True, T.INPUT_VALIDATION_OK_ID
+
+    embedded_url = extract_url_from_input(raw)
+    target = embedded_url if embedded_url else raw
+    parsed = parse.urlparse(target)
+    host = parsed.netloc.lower()
+    if host and not is_netease_music_host(host) and host not in SHORT_LINK_HOSTS:
+        return False, T.INPUT_VALIDATION_BAD_HOST
+
+    if host in SHORT_LINK_HOSTS:
+        return True, T.INPUT_VALIDATION_SHORT_LINK
+
+    id_patterns = (
+        parse.parse_qs(parsed.query).get("id", []),
+        re.findall(r"id=(\d+)", parsed.fragment or ""),
+        re.findall(r"/song/(\d+)", parsed.path or ""),
+        re.findall(r"id=(\d+)", target),
+    )
+    has_song_id = any(any(part.isdigit() for part in pattern) for pattern in id_patterns if pattern)
+    if has_song_id:
+        return True, T.INPUT_VALIDATION_OK_URL
+    return False, T.INPUT_VALIDATION_ID_MISSING
+
+
+@dataclass
+class DownloadTaskSnapshot:
+    task_id: str
+    song_id: str
+    output_path: str
+    state: str
+    error_code: str = ""
 
 
 class InspectWorker(QThread):
@@ -323,8 +501,10 @@ class LoginDialog(QDialog):
         self.confirm_button = QPushButton(T.LOGIN_BTN_CONFIRM)
         self.confirm_button.clicked.connect(self._on_confirm)
         self.confirm_button.setEnabled(False)
-        cancel_button = QPushButton(T.BTN_CANCEL)
+        set_button_role(self.confirm_button, "primary")
+        cancel_button = QPushButton(T.BTN_BACK)
         cancel_button.clicked.connect(self.reject)
+        set_back_button(cancel_button)
         buttons.addWidget(cancel_button)
         buttons.addWidget(self.confirm_button)
         root_layout.addLayout(buttons)
@@ -465,11 +645,13 @@ class SongConfirmDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        close_button = QPushButton(T.BTN_CLOSE)
+        close_button = QPushButton(T.BTN_BACK)
         close_button.clicked.connect(self.reject)
+        set_back_button(close_button)
         self.download_button = QPushButton(T.BTN_DOWNLOAD)
         self.download_button.setEnabled(result.can_download)
         self.download_button.clicked.connect(self.accept)
+        set_button_role(self.download_button, "primary")
         button_row.addWidget(close_button)
         button_row.addWidget(self.download_button)
         layout.addLayout(button_row)
@@ -512,24 +694,31 @@ class DownloadOptionsDialog(QDialog):
         self.preview_label = QLabel("")
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
+        self.form_feedback_label = QLabel("")
+        self.form_feedback_label.setWordWrap(True)
+        set_label_state(self.form_feedback_label, "muted")
+        layout.addWidget(self.form_feedback_label)
         self._refresh_preview()
-        self.out_dir_input.textChanged.connect(self._refresh_preview)
-        self.rename_input.textChanged.connect(self._refresh_preview)
+        self.out_dir_input.textChanged.connect(self._on_form_text_changed)
+        self.rename_input.textChanged.connect(self._on_form_text_changed)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
-        self.format_combo.currentTextChanged.connect(self._refresh_preview)
+        self.format_combo.currentTextChanged.connect(self._on_form_text_changed)
 
         if not self.ffmpeg_available:
             self._apply_ffmpeg_unavailable_constraints()
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        cancel_button = QPushButton(T.BTN_CANCEL)
+        cancel_button = QPushButton(T.BTN_BACK)
         cancel_button.clicked.connect(self.reject)
-        ok_button = QPushButton(T.BTN_START_DOWNLOAD)
-        ok_button.clicked.connect(self._on_confirm)
+        set_back_button(cancel_button)
+        self.ok_button = QPushButton(T.BTN_START_DOWNLOAD)
+        self.ok_button.clicked.connect(self._on_confirm)
+        set_button_role(self.ok_button, "primary")
         button_row.addWidget(cancel_button)
-        button_row.addWidget(ok_button)
+        button_row.addWidget(self.ok_button)
         layout.addLayout(button_row)
+        self._sync_form_state()
 
     def _pick_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, T.DOWNLOAD_DIR_PICKER_TITLE, self.out_dir_input.text().strip())
@@ -542,6 +731,27 @@ class DownloadOptionsDialog(QDialog):
         selected_format = self.format_combo.currentText().lower().strip() or "mp3"
         preview = out_dir / f"{sanitize_filename(rename)}.{selected_format}"
         self.preview_label.setText(T.DOWNLOAD_OPTIONS_PREVIEW.format(path=preview))
+
+    def _on_form_text_changed(self, *_args: object) -> None:
+        self._refresh_preview()
+        self._sync_form_state()
+
+    def _sync_form_state(self) -> None:
+        out_dir = self.out_dir_input.text().strip()
+        rename = self.rename_input.text().strip()
+        if not out_dir:
+            self.ok_button.setEnabled(False)
+            self.form_feedback_label.setText(T.DOWNLOAD_OPTIONS_HINT_PICK_DIR)
+            set_label_state(self.form_feedback_label, "error")
+            return
+        if not rename:
+            self.ok_button.setEnabled(False)
+            self.form_feedback_label.setText(T.DOWNLOAD_OPTIONS_HINT_RENAME)
+            set_label_state(self.form_feedback_label, "error")
+            return
+        self.ok_button.setEnabled(True)
+        self.form_feedback_label.setText(T.DOWNLOAD_OPTIONS_HINT_READY)
+        set_label_state(self.form_feedback_label, "success")
 
     def _apply_ffmpeg_unavailable_constraints(self) -> None:
         model = self.format_combo.model()
@@ -614,6 +824,8 @@ class DownloadProgressDialog(QDialog):
         self.resize(540, 190)
         self.output_path: Optional[Path] = None
         self.requested_output_path = output_path
+        self.result_state = "pending"
+        self.error_code = ""
 
         layout = QVBoxLayout(self)
         self.progress_bar = QProgressBar()
@@ -647,10 +859,12 @@ class DownloadProgressDialog(QDialog):
         self.worker.canceled.connect(self._on_canceled)
         self.worker.succeeded.connect(self._on_succeeded)
         self.worker.start()
+        self.result_state = "downloading"
 
     def _on_cancel(self) -> None:
         self.cancel_button.setEnabled(False)
         self.status_label.setText(T.STATUS_CANCELING)
+        self.result_state = "canceling"
         self.worker.request_cancel()
 
     def _on_progress(self, downloaded: int, total: int, speed: float) -> None:
@@ -666,15 +880,19 @@ class DownloadProgressDialog(QDialog):
         self.speed_label.setText(T.speed_text(format_bytes(int(speed))))
 
     def _on_failed(self, code: str, message: str) -> None:
+        self.result_state = "failed"
+        self.error_code = code
         mapped = user_error_message(code, message)
         QMessageBox.critical(self, T.TITLE_DOWNLOAD_FAIL, T.code_message(code, mapped))
         self.reject()
 
     def _on_canceled(self) -> None:
+        self.result_state = "canceled"
         QMessageBox.information(self, T.TITLE_DOWNLOAD_CANCELED, T.MSG_DOWNLOAD_CANCELED)
         self.reject()
 
     def _on_succeeded(self, output_path: str, file_size: int) -> None:
+        self.result_state = "succeeded"
         self.output_path = Path(output_path)
         fallback_note = ""
         if self.output_path.suffix.lower() != self.requested_output_path.suffix.lower():
@@ -722,11 +940,17 @@ class DependencyManagerDialog(QDialog):
         layout.addWidget(self.table, stretch=1)
 
         button_row = QHBoxLayout()
+        button_row.setAlignment(Qt.AlignVCenter)
+        button_row.setSpacing(10)
         button_row.addStretch(1)
         refresh_button = QPushButton(T.MANAGER_BTN_REFRESH)
+        refresh_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        set_secondary_button(refresh_button)
         refresh_button.clicked.connect(self.refresh)
-        close_button = QPushButton(T.BTN_CLOSE)
+        close_button = QPushButton(T.BTN_BACK)
+        close_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         close_button.clicked.connect(self.accept)
+        set_back_button(close_button)
         button_row.addWidget(refresh_button)
         button_row.addWidget(close_button)
         layout.addLayout(button_row)
@@ -760,7 +984,7 @@ class DownloadManagerDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.empty_label = QLabel(T.MSG_DOWNLOADS_EMPTY)
-        self.empty_label.setStyleSheet("color: #666666;")
+        set_label_state(self.empty_label, "muted")
         self.empty_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.empty_label)
 
@@ -792,8 +1016,9 @@ class DownloadManagerDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_selected_file)
         refresh_button = QPushButton(T.MANAGER_BTN_REFRESH)
         refresh_button.clicked.connect(self.refresh)
-        close_button = QPushButton(T.BTN_CLOSE)
+        close_button = QPushButton(T.BTN_BACK)
         close_button.clicked.connect(self.accept)
+        set_back_button(close_button)
         button_row.addWidget(self.open_folder_button)
         button_row.addWidget(self.delete_button)
         button_row.addStretch(1)
@@ -863,6 +1088,60 @@ class DownloadManagerDialog(QDialog):
         self.refresh()
 
 
+class UiSettingsDialog(QDialog):
+    def __init__(self, current_font_size: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.font_size = clamp_ui_font_size(current_font_size)
+        self.setWindowTitle(T.UI_SETTINGS_TITLE)
+        self.resize(460, 220)
+
+        layout = QVBoxLayout(self)
+        desc = QLabel(T.UI_SETTINGS_DESC)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        form = QFormLayout()
+        self.font_size_input = QSpinBox()
+        self.font_size_input.setRange(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
+        self.font_size_input.setValue(self.font_size)
+        self.font_size_input.setSuffix(" px")
+        self.font_size_input.valueChanged.connect(self._on_font_size_changed)
+        form.addRow(T.UI_SETTINGS_FONT_SIZE, self.font_size_input)
+        layout.addLayout(form)
+
+        self.preview_label = QLabel("")
+        self.preview_label.setWordWrap(True)
+        layout.addWidget(self.preview_label)
+        self._refresh_preview()
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        reset_button = QPushButton(T.UI_SETTINGS_RESET)
+        set_secondary_button(reset_button)
+        reset_button.clicked.connect(self._reset_default)
+        back_button = QPushButton(T.BTN_BACK)
+        back_button.clicked.connect(self.reject)
+        set_back_button(back_button)
+        save_button = QPushButton(T.UI_SETTINGS_SAVE)
+        save_button.clicked.connect(self.accept)
+        set_button_role(save_button, "primary")
+        button_row.addWidget(reset_button)
+        button_row.addWidget(back_button)
+        button_row.addWidget(save_button)
+        layout.addLayout(button_row)
+
+    def _on_font_size_changed(self, value: int) -> None:
+        self.font_size = clamp_ui_font_size(value)
+        self._refresh_preview()
+
+    def _reset_default(self) -> None:
+        self.font_size_input.setValue(DEFAULT_UI_FONT_SIZE)
+
+    def _refresh_preview(self) -> None:
+        self.preview_label.setText(T.ui_settings_preview(self.font_size))
+        set_label_state(self.preview_label, "muted")
+
+
 class MainWindow(QMainWindow):
     def __init__(self, session_store: SessionStore, history_store: DownloadHistoryStore, session: AppSession) -> None:
         super().__init__()
@@ -873,6 +1152,8 @@ class MainWindow(QMainWindow):
         self.inspect_worker: Optional[InspectWorker] = None
         self.account_profile: Optional[AccountProfile] = None
         self._avatar_error_notified = False
+        self._detect_busy = False
+        self.latest_download_task: Optional[DownloadTaskSnapshot] = None
         self.setWindowTitle(T.APP_TITLE)
         self.resize(860, 320)
 
@@ -915,6 +1196,9 @@ class MainWindow(QMainWindow):
         self.manager_button = QPushButton(T.BTN_DOWNLOAD_MANAGER)
         self.manager_button.clicked.connect(self._open_download_manager)
         account_row.addWidget(self.manager_button)
+        self.settings_button = QPushButton(T.BTN_UI_SETTINGS)
+        self.settings_button.clicked.connect(self._open_ui_settings)
+        account_row.addWidget(self.settings_button)
         layout.addLayout(account_row)
 
         description = QLabel(T.APP_DESC)
@@ -924,9 +1208,12 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(T.INPUT_PLACEHOLDER)
+        self.url_input.textChanged.connect(self._on_url_input_changed)
+        self.url_input.returnPressed.connect(self._on_detect_clicked)
         row.addWidget(self.url_input, stretch=1)
         self.detect_button = QPushButton(T.BTN_DETECT)
         self.detect_button.clicked.connect(self._on_detect_clicked)
+        set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)
         layout.addLayout(row)
 
@@ -935,11 +1222,74 @@ class MainWindow(QMainWindow):
         self.url_help_label.setToolTip(T.URL_HELP_TOOLTIP)
         layout.addWidget(self.url_help_label)
 
+        self.input_feedback_label = QLabel("")
+        self.input_feedback_label.setWordWrap(True)
+        set_label_state(self.input_feedback_label, "muted")
+        layout.addWidget(self.input_feedback_label)
+
         self.status_label = QLabel(T.STATUS_IDLE)
+        set_label_state(self.status_label, "muted")
         layout.addWidget(self.status_label)
 
         self._refresh_ffmpeg_status()
         self._refresh_account_profile()
+        self._on_url_input_changed()
+        self._setup_accessibility()
+
+    def _setup_accessibility(self) -> None:
+        self.url_input.setAccessibleName(T.ACC_INPUT_SONG_LINK)
+        self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
+        self.dependency_button.setAccessibleName(T.ACC_BTN_DEP_MANAGER)
+        self.manager_button.setAccessibleName(T.ACC_BTN_DOWNLOAD_MANAGER)
+        self.settings_button.setAccessibleName(T.ACC_BTN_UI_SETTINGS)
+        self.setTabOrder(self.url_input, self.detect_button)
+        self.setTabOrder(self.detect_button, self.dependency_button)
+        self.setTabOrder(self.dependency_button, self.manager_button)
+        self.setTabOrder(self.manager_button, self.settings_button)
+
+    def _set_status(self, text: str, state: str) -> None:
+        self.status_label.setText(text)
+        set_label_state(self.status_label, state)
+
+    def _set_detect_busy(self, busy: bool) -> None:
+        self._detect_busy = busy
+        self._sync_detect_button_state()
+
+    def _on_url_input_changed(self, *_args: object) -> None:
+        raw = self.url_input.text().strip()
+        valid, message = validate_song_input(raw)
+        self.input_feedback_label.setText(message)
+        if not raw:
+            set_label_state(self.input_feedback_label, "muted")
+        else:
+            set_label_state(self.input_feedback_label, "success" if valid else "error")
+        self._sync_detect_button_state()
+
+    def _sync_detect_button_state(self) -> None:
+        valid, _ = validate_song_input(self.url_input.text())
+        can_detect = bool(self.session.cookie) and valid and not self._detect_busy
+        self.detect_button.setEnabled(can_detect)
+
+    def _set_latest_task_state(self, song_id: str, output_path: Path, state: str, error_code: str = "") -> None:
+        if self.latest_download_task is None or self.latest_download_task.song_id != song_id:
+            self.latest_download_task = DownloadTaskSnapshot(
+                task_id=f"{song_id}-{int(time.time() * 1000)}",
+                song_id=song_id,
+                output_path=str(output_path),
+                state=state,
+                error_code=error_code,
+            )
+        else:
+            self.latest_download_task.state = state
+            self.latest_download_task.error_code = error_code
+            self.latest_download_task.output_path = str(output_path)
+        logger.info(
+            "Download task state updated. task_id=%s song_id=%s state=%s error_code=%s",
+            self.latest_download_task.task_id,
+            self.latest_download_task.song_id,
+            self.latest_download_task.state,
+            self.latest_download_task.error_code,
+        )
 
     def _refresh_ffmpeg_status(self) -> None:
         # Main page only shows a lightweight "limited" hint.
@@ -951,14 +1301,14 @@ class MainWindow(QMainWindow):
         self.dependency_hint_label.setVisible(True)
         self.dependency_hint_label.setText(T.DEPENDENCY_HINT_LIMITED)
         self.dependency_hint_label.setToolTip(T.DEPENDENCY_HINT_LIMITED_TIP)
-        self.dependency_hint_label.setStyleSheet("color: #b07500;")
+        set_label_state(self.dependency_hint_label, "warning")
 
     def _apply_account_profile(self, profile: Optional[AccountProfile]) -> None:
         self.account_profile = profile
         if not profile:
             self.nickname_label.setText(T.ACCOUNT_LABEL_NICKNAME_LOGOUT)
             self.vip_label.setText(T.ACCOUNT_LABEL_VIP_UNKNOWN)
-            self.vip_label.setStyleSheet("color: #666666;")
+            set_label_state(self.vip_label, "muted")
             self.avatar_button.setIcon(QIcon())
             self.avatar_button.setText(T.ACCOUNT_BTN_FALLBACK)
             self.avatar_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -967,7 +1317,7 @@ class MainWindow(QMainWindow):
         self.nickname_label.setText(T.nickname_text(profile.nickname))
         vip_text = T.ACCOUNT_LABEL_VIP if profile.is_vip else T.ACCOUNT_LABEL_NORMAL
         self.vip_label.setText(vip_text)
-        self.vip_label.setStyleSheet("color: #b07500;" if profile.is_vip else "color: #666666;")
+        set_label_state(self.vip_label, "warning" if profile.is_vip else "muted")
 
         icon = load_avatar_icon(profile.avatar_url)
         if icon:
@@ -987,6 +1337,7 @@ class MainWindow(QMainWindow):
     def _refresh_account_profile(self) -> None:
         if not self.session.cookie:
             self._apply_account_profile(None)
+            self._sync_detect_button_state()
             return
         try:
             profile = fetch_account_profile(self.session.cookie, timeout=10)
@@ -994,6 +1345,7 @@ class MainWindow(QMainWindow):
         except MusicFetchError as err:
             logger.warning("Failed to refresh account profile. code=%s message=%s", err.code, err.message)
             self._apply_account_profile(None)
+        self._sync_detect_button_state()
 
     def _on_switch_account(self) -> None:
         logger.info("User requested switch account.")
@@ -1021,7 +1373,8 @@ class MainWindow(QMainWindow):
         self.session_store.save(self.session)
         clear_embedded_login_state()
         self._apply_account_profile(None)
-        self.status_label.setText(T.STATUS_LOGOUT)
+        self._set_status(T.STATUS_LOGOUT, "muted")
+        self._sync_detect_button_state()
         logger.info("User logged out current account.")
 
     def _on_login_success(self, cookie: str, remember_login: bool) -> None:
@@ -1030,7 +1383,8 @@ class MainWindow(QMainWindow):
         self.session_store.save(self.session)
         self._refresh_account_profile()
         logger.info("MainWindow login updated.")
-        self.status_label.setText(T.STATUS_LOGIN_UPDATED)
+        self._set_status(T.STATUS_LOGIN_UPDATED, "success")
+        self._sync_detect_button_state()
 
     def _open_download_manager(self) -> None:
         logger.info("Open download manager.")
@@ -1043,22 +1397,43 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self._refresh_ffmpeg_status()
 
+    def _open_ui_settings(self) -> None:
+        logger.info("Open ui settings dialog.")
+        dialog = UiSettingsDialog(current_font_size=self.session.ui_font_size, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        normalized = clamp_ui_font_size(dialog.font_size)
+        self.session.ui_font_size = normalized
+        self.session_store.save(self.session)
+        app = QApplication.instance()
+        if app is not None:
+            apply_app_style(app, normalized)
+        self._set_status(T.status_ui_font_updated(normalized), "success")
+        self._on_url_input_changed()
+
     def _on_detect_clicked(self) -> None:
+        if self._detect_busy:
+            return
         song_url = self.url_input.text().strip()
-        if not song_url:
-            QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.MSG_NEED_INPUT_URL)
+        valid, message = validate_song_input(song_url)
+        if not valid:
+            self.input_feedback_label.setText(message)
+            set_label_state(self.input_feedback_label, "error")
+            QMessageBox.warning(self, T.TITLE_PARAM_ERROR, message)
+            self._set_status(T.STATUS_DETECT_FAILED, "error")
             return
         if not self.session.cookie:
             QMessageBox.warning(self, T.TITLE_NOT_LOGIN, T.MSG_NEED_LOGIN_ANY)
+            self._set_status(T.MSG_NEED_LOGIN_ANY, "warning")
             return
 
-        self.detect_button.setEnabled(False)
-        self.status_label.setText(T.STATUS_DETECTING)
+        self._set_detect_busy(True)
+        self._set_status(T.STATUS_DETECTING, "warning")
         logger.info("Detection started from GUI.")
         self.inspect_worker = InspectWorker(song_url=song_url, cookie=self.session.cookie, timeout=20)
         self.inspect_worker.failed.connect(self._on_detect_failed)
         self.inspect_worker.succeeded.connect(self._on_detect_succeeded)
-        self.inspect_worker.finished.connect(lambda: self.detect_button.setEnabled(True))
+        self.inspect_worker.finished.connect(lambda: self._set_detect_busy(False))
         self.inspect_worker.start()
 
     def _on_detect_failed(self, code: str, message: str) -> None:
@@ -1068,7 +1443,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, T.TITLE_LOGIN_EXPIRED, T.detect_auth_expired(code, mapped))
         else:
             QMessageBox.warning(self, T.TITLE_DETECT_FAIL, T.code_message(code, mapped))
-        self.status_label.setText(T.STATUS_DETECT_FAILED)
+        self._set_status(T.STATUS_DETECT_FAILED, "error")
 
     def _record_download(self, song_id: str, song_name: str, output_path: Path, size_bytes: int) -> None:
         record = DownloadRecord(
@@ -1082,9 +1457,10 @@ class MainWindow(QMainWindow):
 
     def _on_detect_succeeded(self, result: SongDetectionResult) -> None:
         logger.info("Detection succeeded. song_id=%s", result.song_id)
-        self.status_label.setText(T.STATUS_DETECT_DONE)
+        self._set_status(T.STATUS_DETECT_DONE, "success")
         confirm = SongConfirmDialog(result)
         if confirm.exec() != QDialog.Accepted:
+            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
             return
 
         self._refresh_ffmpeg_status()
@@ -1099,17 +1475,18 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes,
             )
             if answer != QMessageBox.Yes:
-                self.status_label.setText(T.STATUS_DOWNLOAD_NOT_DONE)
+                self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
                 logger.info("Download canceled before options because ffmpeg is missing.")
                 return
 
         options = DownloadOptionsDialog(result, last_download_dir=self.session.last_download_dir)
         if options.exec() != QDialog.Accepted or not options.output_path:
+            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
             return
 
         self.session.last_download_dir = str(options.output_path.parent)
         self.session_store.save(self.session)
-        self.status_label.setText(T.STATUS_DOWNLOADING)
+        self._set_status(T.STATUS_DOWNLOADING, "warning")
 
         progress = DownloadProgressDialog(
             song_id=result.song_id,
@@ -1125,10 +1502,10 @@ class MainWindow(QMainWindow):
                 output_path=progress.output_path,
                 size_bytes=size_bytes,
             )
-            self.status_label.setText(T.status_download_done(progress.output_path.name))
+            self._set_status(T.status_download_done(progress.output_path.name), "success")
             logger.info("GUI flow finished successfully. output=%s", progress.output_path)
         else:
-            self.status_label.setText(T.STATUS_DOWNLOAD_NOT_DONE)
+            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
             logger.info("GUI flow ended without completed download.")
 
 
@@ -1172,6 +1549,7 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
         cookie=cookie,
         remember_login=remember,
         last_download_dir=loaded.last_download_dir,
+        ui_font_size=loaded.ui_font_size,
     )
 
 
@@ -1185,6 +1563,7 @@ def main() -> int:
     if session is None:
         logger.info("GUI app exit due to missing session.")
         return 0
+    session.ui_font_size = apply_app_style(app, session.ui_font_size)
     window = MainWindow(session_store=session_store, history_store=history_store, session=session)
     window.show()
     exit_code = app.exec()

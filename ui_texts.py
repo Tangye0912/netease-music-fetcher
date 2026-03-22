@@ -24,6 +24,7 @@ LOGIN_FALLBACK_HINT = "当前环境未安装 Qt WebEngine，无法打开内嵌�
 LOGIN_BTN_CONFIRM = "确认并继续"
 BTN_CANCEL = "取消"
 BTN_CLOSE = "关闭"
+BTN_BACK = "返回"
 BTN_DOWNLOAD = "下载"
 BTN_START_DOWNLOAD = "开始下载"
 
@@ -37,10 +38,17 @@ ACCOUNT_MENU_LOGOUT = "退出当前账号"
 
 BTN_DOWNLOAD_MANAGER = "下载管理"
 BTN_DEPENDENCY_MANAGER = "依赖管理"
+BTN_UI_SETTINGS = "界面设置"
 BTN_DETECT = "检测"
 INPUT_PLACEHOLDER = "粘贴网易云歌曲链接（支持长链/短链/分享文案）"
 URL_HELP_LABEL = "示例长链：{url}"
 URL_HELP_TOOLTIP = "支持粘贴整段分享文案，程序会自动提取其中的歌曲链接。"
+INPUT_VALIDATION_EMPTY = "请输入歌曲链接、分享文案，或直接输入歌曲 ID。"
+INPUT_VALIDATION_OK_ID = "输入格式有效：将按歌曲 ID 直接检测。"
+INPUT_VALIDATION_OK_URL = "输入格式有效：可开始检测。"
+INPUT_VALIDATION_SHORT_LINK = "输入格式有效：短链会在检测时自动解析。"
+INPUT_VALIDATION_BAD_HOST = "仅支持 music.163.com 或 163cn.tv 链接。"
+INPUT_VALIDATION_ID_MISSING = "未识别到歌曲 ID，请检查链接是否完整。"
 
 TITLE_WARNING = "提示"
 TITLE_PARAM_ERROR = "参数错误"
@@ -88,6 +96,9 @@ DOWNLOAD_OPTIONS_DIR = "保存目录"
 DOWNLOAD_OPTIONS_NAME = "文件名（不含后缀）"
 DOWNLOAD_OPTIONS_FORMAT = "下载格式"
 DOWNLOAD_OPTIONS_PREVIEW = "预估输出：{path}"
+DOWNLOAD_OPTIONS_HINT_PICK_DIR = "请先选择有效保存目录。"
+DOWNLOAD_OPTIONS_HINT_RENAME = "请填写文件名。"
+DOWNLOAD_OPTIONS_HINT_READY = "参数已就绪，可开始下载。"
 DOWNLOAD_DIR_PICKER_TITLE = "选择下载目录"
 DOWNLOAD_DIR_PICKER_BTN = "选择..."
 
@@ -137,6 +148,18 @@ DEP_MANAGER_IMPACT_MISSING = "仅支持 MP3 下载，其他格式转码不可用
 DEP_MANAGER_INSTALL_OK = "-"
 DEP_MANAGER_INSTALL_FFMPEG = "macOS: brew install ffmpeg\nWindows: winget install Gyan.FFmpeg"
 
+UI_SETTINGS_TITLE = "界面设置"
+UI_SETTINGS_DESC = "调整字体大小，保存后立即生效，并在下次启动时保持。"
+UI_SETTINGS_FONT_SIZE = "字体大小"
+UI_SETTINGS_RESET = "恢复默认"
+UI_SETTINGS_SAVE = "保存"
+
+ACC_INPUT_SONG_LINK = "歌曲链接输入框"
+ACC_BTN_DETECT = "检测按钮"
+ACC_BTN_DEP_MANAGER = "依赖管理按钮"
+ACC_BTN_DOWNLOAD_MANAGER = "下载管理按钮"
+ACC_BTN_UI_SETTINGS = "界面设置按钮"
+
 
 def code_message(code: str, message: str) -> str:
     return f"{code}: {message}"
@@ -154,9 +177,17 @@ def status_download_done(filename: str) -> str:
     return f"状态：下载完成 -> {filename}"
 
 
+def status_ui_font_updated(font_size: int) -> str:
+    return f"状态：界面字体已更新为 {font_size}px"
+
+
 def speed_text(speed: str) -> str:
     return f"速度：{speed}/s"
 
 
 def nickname_text(name: str) -> str:
     return f"昵称：{name}"
+
+
+def ui_settings_preview(font_size: int) -> str:
+    return f"预览：当前字体大小 {font_size}px。"
