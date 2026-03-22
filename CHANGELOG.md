@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.4.0 (2026-03-23)
+
+### Added
+
+- 新增 `download_tasks.py` 任务状态模型，统一 `pending/downloading/success/failed/canceled` 状态定义。
+- 新增 `ROADMAP.md`，记录 `v0.4.0` 进行中范围与 `v0.5.0` 批量下载目标。
+- 新增 `tests/test_download_tasks.py`，覆盖任务状态模型与快照更新行为。
+- 新增 `download_retry.py` 重试辅助逻辑与 `tests/test_download_retry.py` 对应测试。
+- 下载管理新增“状态筛选”能力（全部/成功/失败/已取消/待处理/下载中）。
+- 下载管理新增“重试失败任务”入口，支持单任务快速重试。
+- 界面设置新增下载参数组：检测超时、下载超时、下载重试次数、并发上限（预留）。
+- 新增会话参数持久化字段与范围夹紧：`detect_timeout_sec/download_timeout_sec/download_retry_count/download_concurrency`。
+- 新增 `tests/test_app_stores.py` 对下载参数持久化与边界夹紧的覆盖。
+
+### Changed
+
+- `MainWindow` 下载主流程接入显式任务生命周期（`pending -> downloading -> success/failed/canceled`）。
+- 下载进度弹窗 `result_state` 语义与任务状态模型统一（`success/failed/canceled`）。
+- 下载历史存储结构扩展 `status/error_code`，并保持旧数据向后兼容。
+- 下载、重试与进度弹窗关键日志统一附带 `task_id`，提升问题排查可追踪性。
+- 检测与下载流程改为使用用户可配置超时；下载流程支持可配置重试次数（仅对网络/下载失败重试）。
+
+### QA
+
+- 回归测试：`python3 -m unittest discover -s tests`（44 通过）
+- Python 3.13 回归：`python3.13 -m unittest discover -s tests`（44 通过）
+
 ## v0.3.0 (2026-03-08)
 
 ### Added

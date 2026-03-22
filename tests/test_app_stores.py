@@ -3,7 +3,24 @@ import unittest
 from pathlib import Path
 
 from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from app_settings import DEFAULT_UI_FONT_SIZE, MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE
+from app_settings import (
+    DEFAULT_DETECT_TIMEOUT_SEC,
+    DEFAULT_DOWNLOAD_CONCURRENCY,
+    DEFAULT_DOWNLOAD_RETRY_COUNT,
+    DEFAULT_DOWNLOAD_TIMEOUT_SEC,
+    DEFAULT_UI_FONT_SIZE,
+    MAX_DETECT_TIMEOUT_SEC,
+    MAX_DOWNLOAD_CONCURRENCY,
+    MAX_DOWNLOAD_RETRY_COUNT,
+    MAX_DOWNLOAD_TIMEOUT_SEC,
+    MAX_UI_FONT_SIZE,
+    MIN_DETECT_TIMEOUT_SEC,
+    MIN_DOWNLOAD_CONCURRENCY,
+    MIN_DOWNLOAD_RETRY_COUNT,
+    MIN_DOWNLOAD_TIMEOUT_SEC,
+    MIN_UI_FONT_SIZE,
+)
+from download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -16,6 +33,10 @@ class SessionStoreTests(unittest.TestCase):
             self.assertTrue(session.remember_login)
             self.assertTrue(session.last_download_dir)
             self.assertEqual(session.ui_font_size, DEFAULT_UI_FONT_SIZE)
+            self.assertEqual(session.detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC)
+            self.assertEqual(session.download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
+            self.assertEqual(session.download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT)
+            self.assertEqual(session.download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY)
 
     def test_save_and_reload(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -26,12 +47,20 @@ class SessionStoreTests(unittest.TestCase):
                 remember_login=True,
                 last_download_dir="/tmp/out",
                 ui_font_size=18,
+                detect_timeout_sec=25,
+                download_timeout_sec=45,
+                download_retry_count=2,
+                download_concurrency=1,
             )
             store.save(origin)
             loaded = store.load()
             self.assertEqual(loaded.cookie, "MUSIC_U=abc")
             self.assertEqual(loaded.last_download_dir, "/tmp/out")
             self.assertEqual(loaded.ui_font_size, 18)
+            self.assertEqual(loaded.detect_timeout_sec, 25)
+            self.assertEqual(loaded.download_timeout_sec, 45)
+            self.assertEqual(loaded.download_retry_count, 2)
+            self.assertEqual(loaded.download_concurrency, 1)
 
     def test_font_size_is_clamped_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +73,30 @@ class SessionStoreTests(unittest.TestCase):
             path.write_text('{"ui_font_size": 1}', encoding="utf-8")
             loaded = store.load()
             self.assertEqual(loaded.ui_font_size, MIN_UI_FONT_SIZE)
+
+    def test_download_settings_are_clamped_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text(
+                '{"detect_timeout_sec": 999, "download_timeout_sec": 1, "download_retry_count": 99, "download_concurrency": 0}',
+                encoding="utf-8",
+            )
+            store = SessionStore(path)
+            loaded = store.load()
+            self.assertEqual(loaded.detect_timeout_sec, MAX_DETECT_TIMEOUT_SEC)
+            self.assertEqual(loaded.download_timeout_sec, MIN_DOWNLOAD_TIMEOUT_SEC)
+            self.assertEqual(loaded.download_retry_count, MAX_DOWNLOAD_RETRY_COUNT)
+            self.assertEqual(loaded.download_concurrency, MIN_DOWNLOAD_CONCURRENCY)
+
+            path.write_text(
+                '{"detect_timeout_sec": 1, "download_timeout_sec": 999, "download_retry_count": -1, "download_concurrency": 99}',
+                encoding="utf-8",
+            )
+            loaded = store.load()
+            self.assertEqual(loaded.detect_timeout_sec, MIN_DETECT_TIMEOUT_SEC)
+            self.assertEqual(loaded.download_timeout_sec, MAX_DOWNLOAD_TIMEOUT_SEC)
+            self.assertEqual(loaded.download_retry_count, MIN_DOWNLOAD_RETRY_COUNT)
+            self.assertEqual(loaded.download_concurrency, MAX_DOWNLOAD_CONCURRENCY)
 
 
 class DownloadHistoryStoreTests(unittest.TestCase):
@@ -65,6 +118,48 @@ class DownloadHistoryStoreTests(unittest.TestCase):
 
             store.remove_by_path("/tmp/track.mp3")
             self.assertEqual(store.load(), [])
+
+    def test_load_backward_compatible_without_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            path.write_text(
+                '[{"song_id":"1","song_name":"track","output_path":"/tmp/track.mp3","size_bytes":123,"downloaded_at":"2026-01-01 00:00:00"}]',
+                encoding="utf-8",
+            )
+            store = DownloadHistoryStore(path)
+            rows = store.load()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].status, TASK_STATE_SUCCESS)
+
+    def test_save_and_reload_status_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            store = DownloadHistoryStore(path)
+            store.add(
+                DownloadRecord(
+                    song_id="1",
+                    song_name="track",
+                    output_path="/tmp/track.mp3",
+                    size_bytes=0,
+                    downloaded_at="2026-01-01 00:00:00",
+                    status=TASK_STATE_FAILED,
+                    error_code="NETWORK_ERROR",
+                )
+            )
+            rows = store.load()
+            self.assertEqual(rows[0].status, TASK_STATE_FAILED)
+            self.assertEqual(rows[0].error_code, "NETWORK_ERROR")
+
+    def test_invalid_status_fallback_to_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            path.write_text(
+                '[{"song_id":"1","song_name":"track","output_path":"/tmp/track.mp3","size_bytes":0,"downloaded_at":"2026-01-01 00:00:00","status":"bad"}]',
+                encoding="utf-8",
+            )
+            store = DownloadHistoryStore(path)
+            rows = store.load()
+            self.assertEqual(rows[0].status, TASK_STATE_SUCCESS)
 
 
 if __name__ == "__main__":

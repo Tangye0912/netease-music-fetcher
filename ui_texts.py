@@ -126,10 +126,21 @@ MANAGER_COL_SONG = "歌曲"
 MANAGER_COL_FILENAME = "文件名"
 MANAGER_COL_SIZE = "大小"
 MANAGER_COL_TIME = "下载时间"
+MANAGER_COL_STATUS = "任务状态"
 MANAGER_COL_PATH = "路径"
 MANAGER_BTN_OPEN_FOLDER = "打开文件夹"
 MANAGER_BTN_DELETE_FILE = "删除文件"
+MANAGER_BTN_RETRY_FAILED = "重试失败任务"
 MANAGER_BTN_REFRESH = "刷新"
+MANAGER_FILTER_LABEL = "状态筛选"
+MANAGER_FILTER_ALL = "全部"
+MANAGER_FILTER_PENDING = "待处理"
+MANAGER_FILTER_DOWNLOADING = "下载中"
+MANAGER_FILTER_SUCCESS = "成功"
+MANAGER_FILTER_FAILED = "失败"
+MANAGER_FILTER_CANCELED = "已取消"
+MSG_DOWNLOADS_FILTER_EMPTY = "当前筛选条件下暂无记录"
+MSG_RETRY_ONLY_FAILED = "仅失败状态任务支持重试。"
 MANAGER_MISSING_FOLDER = "目录不存在：{folder}"
 MANAGER_DELETE_CONFIRM = "确定删除文件并移除记录吗？\n{path}"
 DEPENDENCY_HINT_LIMITED = "部分功能受限"
@@ -151,6 +162,12 @@ DEP_MANAGER_INSTALL_FFMPEG = "macOS: brew install ffmpeg\nWindows: winget instal
 UI_SETTINGS_TITLE = "界面设置"
 UI_SETTINGS_DESC = "调整字体大小，保存后立即生效，并在下次启动时保持。"
 UI_SETTINGS_FONT_SIZE = "字体大小"
+UI_SETTINGS_DOWNLOAD_GROUP = "下载参数（v0.4.0）"
+UI_SETTINGS_DETECT_TIMEOUT = "检测超时（秒）"
+UI_SETTINGS_DOWNLOAD_TIMEOUT = "下载超时（秒）"
+UI_SETTINGS_DOWNLOAD_RETRY = "下载重试次数"
+UI_SETTINGS_DOWNLOAD_CONCURRENCY = "并发上限（预留）"
+UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT = "当前版本仍按单任务顺序下载，此参数将用于后续批量并发能力。"
 UI_SETTINGS_RESET = "恢复默认"
 UI_SETTINGS_SAVE = "保存"
 
@@ -177,8 +194,17 @@ def status_download_done(filename: str) -> str:
     return f"状态：下载完成 -> {filename}"
 
 
-def status_ui_font_updated(font_size: int) -> str:
-    return f"状态：界面字体已更新为 {font_size}px"
+def status_ui_settings_updated(
+    font_size: int,
+    detect_timeout: int,
+    download_timeout: int,
+    retry_count: int,
+    concurrency: int,
+) -> str:
+    return (
+        f"状态：设置已更新（字体 {font_size}px，检测超时 {detect_timeout}s，"
+        f"下载超时 {download_timeout}s，重试 {retry_count} 次，并发上限 {concurrency}）"
+    )
 
 
 def speed_text(speed: str) -> str:
@@ -191,3 +217,15 @@ def nickname_text(name: str) -> str:
 
 def ui_settings_preview(font_size: int) -> str:
     return f"预览：当前字体大小 {font_size}px。"
+
+
+def manager_status_text(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    mapping = {
+        "pending": MANAGER_FILTER_PENDING,
+        "downloading": MANAGER_FILTER_DOWNLOADING,
+        "success": MANAGER_FILTER_SUCCESS,
+        "failed": MANAGER_FILTER_FAILED,
+        "canceled": MANAGER_FILTER_CANCELED,
+    }
+    return mapping.get(normalized, status or MSG_UNKNOWN)

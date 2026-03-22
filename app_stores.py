@@ -8,7 +8,26 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app_logging import get_logger
-from app_settings import DEFAULT_DOWNLOAD_DIR, DEFAULT_UI_FONT_SIZE, MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE, UNKNOWN_SONG_NAME
+from app_settings import (
+    DEFAULT_DETECT_TIMEOUT_SEC,
+    DEFAULT_DOWNLOAD_CONCURRENCY,
+    DEFAULT_DOWNLOAD_DIR,
+    DEFAULT_DOWNLOAD_RETRY_COUNT,
+    DEFAULT_DOWNLOAD_TIMEOUT_SEC,
+    DEFAULT_UI_FONT_SIZE,
+    MAX_DETECT_TIMEOUT_SEC,
+    MAX_DOWNLOAD_CONCURRENCY,
+    MAX_DOWNLOAD_RETRY_COUNT,
+    MAX_DOWNLOAD_TIMEOUT_SEC,
+    MAX_UI_FONT_SIZE,
+    MIN_DETECT_TIMEOUT_SEC,
+    MIN_DOWNLOAD_CONCURRENCY,
+    MIN_DOWNLOAD_RETRY_COUNT,
+    MIN_DOWNLOAD_TIMEOUT_SEC,
+    MIN_UI_FONT_SIZE,
+    UNKNOWN_SONG_NAME,
+)
+from download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
 
 logger = get_logger("music_fetch.stores")
 
@@ -19,6 +38,11 @@ class AppSession:
     remember_login: bool = True
     last_download_dir: str = DEFAULT_DOWNLOAD_DIR
     ui_font_size: int = DEFAULT_UI_FONT_SIZE
+    # v0.4.0: configurable detect/download parameters persisted in session store.
+    detect_timeout_sec: int = DEFAULT_DETECT_TIMEOUT_SEC
+    download_timeout_sec: int = DEFAULT_DOWNLOAD_TIMEOUT_SEC
+    download_retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT
+    download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
 
 
 @dataclass
@@ -28,6 +52,8 @@ class DownloadRecord:
     output_path: str
     size_bytes: int
     downloaded_at: str
+    status: str = TASK_STATE_SUCCESS
+    error_code: str = ""
 
 
 class SessionStore:
@@ -49,6 +75,10 @@ class SessionStore:
             remember_login=bool(raw.get("remember_login", True)),
             last_download_dir=str(raw.get("last_download_dir") or DEFAULT_DOWNLOAD_DIR),
             ui_font_size=self._safe_ui_font_size(raw.get("ui_font_size")),
+            detect_timeout_sec=self._safe_detect_timeout(raw.get("detect_timeout_sec")),
+            download_timeout_sec=self._safe_download_timeout(raw.get("download_timeout_sec")),
+            download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
+            download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
         )
 
     def save(self, session: AppSession) -> None:
@@ -59,6 +89,10 @@ class SessionStore:
             "remember_login": session.remember_login,
             "last_download_dir": session.last_download_dir,
             "ui_font_size": self._safe_ui_font_size(session.ui_font_size),
+            "detect_timeout_sec": self._safe_detect_timeout(session.detect_timeout_sec),
+            "download_timeout_sec": self._safe_download_timeout(session.download_timeout_sec),
+            "download_retry_count": self._safe_download_retry_count(session.download_retry_count),
+            "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
@@ -70,6 +104,38 @@ class SessionStore:
         except (TypeError, ValueError):
             return DEFAULT_UI_FONT_SIZE
         return max(MIN_UI_FONT_SIZE, min(MAX_UI_FONT_SIZE, parsed))
+
+    @staticmethod
+    def _safe_detect_timeout(value: object) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_DETECT_TIMEOUT_SEC
+        return max(MIN_DETECT_TIMEOUT_SEC, min(MAX_DETECT_TIMEOUT_SEC, parsed))
+
+    @staticmethod
+    def _safe_download_timeout(value: object) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_DOWNLOAD_TIMEOUT_SEC
+        return max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, parsed))
+
+    @staticmethod
+    def _safe_download_retry_count(value: object) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_DOWNLOAD_RETRY_COUNT
+        return max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, parsed))
+
+    @staticmethod
+    def _safe_download_concurrency(value: object) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_DOWNLOAD_CONCURRENCY
+        return max(MIN_DOWNLOAD_CONCURRENCY, min(MAX_DOWNLOAD_CONCURRENCY, parsed))
 
 
 class DownloadHistoryStore:
@@ -96,6 +162,8 @@ class DownloadHistoryStore:
                     output_path=str(row.get("output_path") or ""),
                     size_bytes=int(row.get("size_bytes") or 0),
                     downloaded_at=str(row.get("downloaded_at") or ""),
+                    status=self._safe_status(row.get("status")),
+                    error_code=str(row.get("error_code") or ""),
                 )
             )
         return records
@@ -109,6 +177,8 @@ class DownloadHistoryStore:
                 "output_path": r.output_path,
                 "size_bytes": r.size_bytes,
                 "downloaded_at": r.downloaded_at,
+                "status": self._safe_status(r.status),
+                "error_code": r.error_code,
             }
             for r in records
         ]
@@ -116,11 +186,17 @@ class DownloadHistoryStore:
 
     def add(self, record: DownloadRecord) -> None:
         records = self.load()
-        # Keep the latest successful download at the top and dedupe by output path.
+        # v0.4.0: keep the latest task result at the top and dedupe by output path.
         filtered = [row for row in records if row.output_path != record.output_path]
+        record.status = self._safe_status(record.status)
         filtered.insert(0, record)
         self.save(filtered)
-        logger.info("Download history appended. song_id=%s path=%s", record.song_id, record.output_path)
+        logger.info(
+            "Download history appended. song_id=%s path=%s status=%s",
+            record.song_id,
+            record.output_path,
+            record.status,
+        )
 
     def remove_by_path(self, output_path: str) -> None:
         records = self.load()
@@ -128,3 +204,10 @@ class DownloadHistoryStore:
         if len(new_records) != len(records):
             self.save(new_records)
             logger.info("Download history removed. path=%s", output_path)
+
+    @staticmethod
+    def _safe_status(value: object) -> str:
+        normalized = str(value or "").strip().lower()
+        if is_valid_task_state(normalized):
+            return normalized
+        return TASK_STATE_SUCCESS

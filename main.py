@@ -7,7 +7,6 @@ import logging
 import re
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -16,15 +15,38 @@ from urllib import error, parse, request
 from app_logging import default_log_path, get_logger, setup_logging
 from error_texts import user_error_message
 from app_settings import (
+    DEFAULT_DETECT_TIMEOUT_SEC,
+    DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_DIR,
+    DEFAULT_DOWNLOAD_RETRY_COUNT,
+    DEFAULT_DOWNLOAD_TIMEOUT_SEC,
     DEFAULT_GUI_TARGET_FORMAT,
     DEFAULT_UI_FONT_SIZE,
     DOWNLOAD_HISTORY_FILE,
+    MAX_DETECT_TIMEOUT_SEC,
+    MAX_DOWNLOAD_CONCURRENCY,
+    MAX_DOWNLOAD_RETRY_COUNT,
+    MAX_DOWNLOAD_TIMEOUT_SEC,
     MAX_UI_FONT_SIZE,
+    MIN_DETECT_TIMEOUT_SEC,
+    MIN_DOWNLOAD_CONCURRENCY,
+    MIN_DOWNLOAD_RETRY_COUNT,
+    MIN_DOWNLOAD_TIMEOUT_SEC,
     MIN_UI_FONT_SIZE,
     NETEASE_LOGIN_URL,
     SESSION_FILE,
     URL_EXAMPLE_LONG,
+)
+from download_retry import can_retry_status, retry_target_format
+from download_tasks import (
+    build_task_id,
+    DownloadTaskSnapshot,
+    TASK_STATE_CANCELED,
+    TASK_STATE_DOWNLOADING,
+    TASK_STATE_FAILED,
+    TASK_STATE_PENDING,
+    TASK_STATE_SUCCESS,
+    next_task_snapshot,
 )
 from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch import (
@@ -328,15 +350,6 @@ def validate_song_input(value: str) -> tuple[bool, str]:
     return False, T.INPUT_VALIDATION_ID_MISSING
 
 
-@dataclass
-class DownloadTaskSnapshot:
-    task_id: str
-    song_id: str
-    output_path: str
-    state: str
-    error_code: str = ""
-
-
 class InspectWorker(QThread):
     succeeded = Signal(object)
     failed = Signal(str, str)
@@ -369,18 +382,23 @@ class DownloadWorker(QThread):
 
     def __init__(
         self,
+        task_id: str,
         song_id: str,
         output_path: Path,
         cookie: str,
         target_format: str = DEFAULT_GUI_TARGET_FORMAT,
         timeout: int = 30,
+        retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT,
     ) -> None:
         super().__init__()
+        self.task_id = task_id
         self.song_id = song_id
         self.output_path = output_path
         self.cookie = cookie
         self.target_format = target_format.lower().strip()
-        self.timeout = timeout
+        # v0.4.0: keep timeout bounded so retry/download behavior is predictable.
+        self.timeout = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(timeout)))
+        self.retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(retry_count)))
         self._cancel_requested = False
 
     def request_cancel(self) -> None:
@@ -388,7 +406,13 @@ class DownloadWorker(QThread):
 
     def run(self) -> None:
         started_at = time.time()
-        logger.info("DownloadWorker started. output=%s", self.output_path)
+        logger.info(
+            "DownloadWorker started. task_id=%s output=%s timeout=%ss retry_count=%s",
+            self.task_id,
+            self.output_path,
+            self.timeout,
+            self.retry_count,
+        )
 
         def on_progress(downloaded: int, total: Optional[int]) -> None:
             elapsed = max(time.time() - started_at, 0.001)
@@ -405,18 +429,39 @@ class DownloadWorker(QThread):
             if temp_source_path.exists():
                 temp_source_path.unlink(missing_ok=True)
 
-            selected = download_song_with_fallback(
-                song_id=self.song_id,
-                cookie=self.cookie,
-                output_path=temp_source_path,
-                timeout=self.timeout,
-                prefer_format=self.target_format,
-                progress_callback=on_progress,
-                cancel_checker=should_cancel,
-            )
+            selected = None
+            for attempt in range(1, self.retry_count + 2):
+                try:
+                    selected = download_song_with_fallback(
+                        song_id=self.song_id,
+                        cookie=self.cookie,
+                        output_path=temp_source_path,
+                        timeout=self.timeout,
+                        prefer_format=self.target_format,
+                        progress_callback=on_progress,
+                        cancel_checker=should_cancel,
+                    )
+                    break
+                except MusicFetchError as err:
+                    if err.code == "DOWNLOAD_CANCELED":
+                        raise
+                    is_last_attempt = attempt >= self.retry_count + 1
+                    retriable = err.code in {"DOWNLOAD_FAILED", "NETWORK_ERROR"}
+                    if not retriable or is_last_attempt:
+                        raise
+                    logger.warning(
+                        "Download attempt failed and will retry. task_id=%s attempt=%s/%s code=%s",
+                        self.task_id,
+                        attempt,
+                        self.retry_count + 1,
+                        err.code,
+                    )
+            if selected is None:
+                raise MusicFetchError("DOWNLOAD_FAILED", "Retry loop ended without a playable candidate.")
             source_format = infer_audio_format_from_url(selected.media_url) or "unknown"
             logger.info(
-                "Download source completed. source_format=%s target_format=%s",
+                "Download source completed. task_id=%s source_format=%s target_format=%s",
+                self.task_id,
                 source_format,
                 self.target_format,
             )
@@ -433,7 +478,8 @@ class DownloadWorker(QThread):
                     file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
                     self.succeeded.emit(str(fallback_output.resolve()), file_size)
                     logger.warning(
-                        "ffmpeg missing. saved source format directly. requested=%s source=%s output=%s",
+                        "ffmpeg missing. task_id=%s saved source format directly. requested=%s source=%s output=%s",
+                        self.task_id,
                         self.target_format,
                         source_format,
                         fallback_output,
@@ -453,16 +499,16 @@ class DownloadWorker(QThread):
                 return
             file_size = self.output_path.stat().st_size if self.output_path.exists() else 0
             self.succeeded.emit(str(self.output_path.resolve()), file_size)
-            logger.info("DownloadWorker succeeded. output=%s size=%s", self.output_path, file_size)
+            logger.info("DownloadWorker succeeded. task_id=%s output=%s size=%s", self.task_id, self.output_path, file_size)
         except MusicFetchError as err:
             if err.code == "DOWNLOAD_CANCELED":
-                logger.info("DownloadWorker canceled by user. output=%s", self.output_path)
+                logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
                 self.canceled.emit()
                 return
-            logger.warning("DownloadWorker failed. code=%s message=%s", err.code, err.message)
+            logger.warning("DownloadWorker failed. task_id=%s code=%s message=%s", self.task_id, err.code, err.message)
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover
-            logger.exception("DownloadWorker unexpected error.")
+            logger.exception("DownloadWorker unexpected error. task_id=%s", self.task_id)
             self.failed.emit("UNKNOWN_ERROR", str(err))
         finally:
             stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
@@ -818,13 +864,26 @@ class DownloadOptionsDialog(QDialog):
 
 
 class DownloadProgressDialog(QDialog):
-    def __init__(self, song_id: str, output_path: Path, cookie: str, target_format: str) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        song_id: str,
+        output_path: Path,
+        cookie: str,
+        target_format: str,
+        timeout: int,
+        retry_count: int,
+    ) -> None:
         super().__init__()
+        self.task_id = task_id
         self.setWindowTitle(T.DOWNLOAD_PROGRESS_TITLE)
         self.resize(540, 190)
         self.output_path: Optional[Path] = None
         self.requested_output_path = output_path
-        self.result_state = "pending"
+        self.timeout = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(timeout)))
+        self.retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(retry_count)))
+        # v0.4.0: expose explicit task state to main workflow for unified status tracking.
+        self.result_state = TASK_STATE_PENDING
         self.error_code = ""
 
         layout = QVBoxLayout(self)
@@ -848,24 +907,34 @@ class DownloadProgressDialog(QDialog):
         layout.addLayout(button_row)
 
         self.worker = DownloadWorker(
+            task_id=task_id,
             song_id=song_id,
             output_path=output_path,
             cookie=cookie,
             target_format=target_format,
-            timeout=30,
+            timeout=self.timeout,
+            retry_count=self.retry_count,
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.failed.connect(self._on_failed)
         self.worker.canceled.connect(self._on_canceled)
         self.worker.succeeded.connect(self._on_succeeded)
         self.worker.start()
-        self.result_state = "downloading"
+        self.result_state = TASK_STATE_DOWNLOADING
+        logger.info(
+            "Download progress dialog opened. task_id=%s song_id=%s timeout=%ss retry_count=%s",
+            self.task_id,
+            song_id,
+            self.timeout,
+            self.retry_count,
+        )
 
     def _on_cancel(self) -> None:
         self.cancel_button.setEnabled(False)
         self.status_label.setText(T.STATUS_CANCELING)
-        self.result_state = "canceling"
+        self.result_state = TASK_STATE_CANCELED
         self.worker.request_cancel()
+        logger.info("Download cancel requested. task_id=%s", self.task_id)
 
     def _on_progress(self, downloaded: int, total: int, speed: float) -> None:
         if total <= 0:
@@ -880,20 +949,23 @@ class DownloadProgressDialog(QDialog):
         self.speed_label.setText(T.speed_text(format_bytes(int(speed))))
 
     def _on_failed(self, code: str, message: str) -> None:
-        self.result_state = "failed"
+        self.result_state = TASK_STATE_FAILED
         self.error_code = code
+        logger.warning("Download progress failed. task_id=%s code=%s", self.task_id, code)
         mapped = user_error_message(code, message)
         QMessageBox.critical(self, T.TITLE_DOWNLOAD_FAIL, T.code_message(code, mapped))
         self.reject()
 
     def _on_canceled(self) -> None:
-        self.result_state = "canceled"
+        self.result_state = TASK_STATE_CANCELED
+        logger.info("Download progress canceled. task_id=%s", self.task_id)
         QMessageBox.information(self, T.TITLE_DOWNLOAD_CANCELED, T.MSG_DOWNLOAD_CANCELED)
         self.reject()
 
     def _on_succeeded(self, output_path: str, file_size: int) -> None:
-        self.result_state = "succeeded"
+        self.result_state = TASK_STATE_SUCCESS
         self.output_path = Path(output_path)
+        logger.info("Download progress succeeded. task_id=%s output=%s size=%s", self.task_id, self.output_path, file_size)
         fallback_note = ""
         if self.output_path.suffix.lower() != self.requested_output_path.suffix.lower():
             fallback_note = T.DOWNLOAD_PROGRESS_DONE_FALLBACK_NOTE
@@ -975,10 +1047,21 @@ class DependencyManagerDialog(QDialog):
 
 
 class DownloadManagerDialog(QDialog):
-    def __init__(self, history_store: DownloadHistoryStore, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        history_store: DownloadHistoryStore,
+        cookie: str,
+        download_timeout_sec: int,
+        download_retry_count: int,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.history_store = history_store
+        self.cookie = cookie
+        self.download_timeout_sec = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(download_timeout_sec)))
+        self.download_retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(download_retry_count)))
         self.records: list[DownloadRecord] = []
+        self.filtered_records: list[DownloadRecord] = []
         self.setWindowTitle(T.MANAGER_TITLE)
         self.resize(900, 420)
 
@@ -988,13 +1071,30 @@ class DownloadManagerDialog(QDialog):
         self.empty_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.empty_label)
 
-        self.table = QTableWidget(0, 5)
+        # v0.4.0: allow users to inspect history by task state.
+        filter_row = QHBoxLayout()
+        self.filter_label = QLabel(T.MANAGER_FILTER_LABEL)
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItem(T.MANAGER_FILTER_ALL, "all")
+        self.filter_combo.addItem(T.MANAGER_FILTER_SUCCESS, TASK_STATE_SUCCESS)
+        self.filter_combo.addItem(T.MANAGER_FILTER_FAILED, TASK_STATE_FAILED)
+        self.filter_combo.addItem(T.MANAGER_FILTER_CANCELED, TASK_STATE_CANCELED)
+        self.filter_combo.addItem(T.MANAGER_FILTER_PENDING, TASK_STATE_PENDING)
+        self.filter_combo.addItem(T.MANAGER_FILTER_DOWNLOADING, TASK_STATE_DOWNLOADING)
+        self.filter_combo.currentIndexChanged.connect(self.refresh)
+        filter_row.addWidget(self.filter_label)
+        filter_row.addWidget(self.filter_combo)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
             [
                 T.MANAGER_COL_SONG,
                 T.MANAGER_COL_FILENAME,
                 T.MANAGER_COL_SIZE,
                 T.MANAGER_COL_TIME,
+                T.MANAGER_COL_STATUS,
                 T.MANAGER_COL_PATH,
             ]
         )
@@ -1006,7 +1106,8 @@ class DownloadManagerDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.Stretch)
         layout.addWidget(self.table)
 
         button_row = QHBoxLayout()
@@ -1014,6 +1115,8 @@ class DownloadManagerDialog(QDialog):
         self.open_folder_button.clicked.connect(self._open_selected_folder)
         self.delete_button = QPushButton(T.MANAGER_BTN_DELETE_FILE)
         self.delete_button.clicked.connect(self._delete_selected_file)
+        self.retry_failed_button = QPushButton(T.MANAGER_BTN_RETRY_FAILED)
+        self.retry_failed_button.clicked.connect(self._retry_selected_failed)
         refresh_button = QPushButton(T.MANAGER_BTN_REFRESH)
         refresh_button.clicked.connect(self.refresh)
         close_button = QPushButton(T.BTN_BACK)
@@ -1021,32 +1124,59 @@ class DownloadManagerDialog(QDialog):
         set_back_button(close_button)
         button_row.addWidget(self.open_folder_button)
         button_row.addWidget(self.delete_button)
+        button_row.addWidget(self.retry_failed_button)
         button_row.addStretch(1)
         button_row.addWidget(refresh_button)
         button_row.addWidget(close_button)
         layout.addLayout(button_row)
 
+        self.table.itemSelectionChanged.connect(self._sync_action_buttons)
         self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, *_args: object) -> None:
         self.records = self.history_store.load()
-        self.empty_label.setVisible(len(self.records) == 0)
-        self.table.setVisible(len(self.records) > 0)
-        self.table.setRowCount(len(self.records))
-        for row, record in enumerate(self.records):
+        status_filter = str(self.filter_combo.currentData())
+        if status_filter == "all":
+            self.filtered_records = list(self.records)
+        else:
+            self.filtered_records = [record for record in self.records if record.status == status_filter]
+        if not self.records:
+            self.empty_label.setText(T.MSG_DOWNLOADS_EMPTY)
+        elif not self.filtered_records:
+            self.empty_label.setText(T.MSG_DOWNLOADS_FILTER_EMPTY)
+        else:
+            self.empty_label.setText("")
+        self.empty_label.setVisible(len(self.filtered_records) == 0)
+        self.table.setVisible(len(self.filtered_records) > 0)
+        self.table.setRowCount(len(self.filtered_records))
+        for row, record in enumerate(self.filtered_records):
             file_name = Path(record.output_path).name
             self.table.setItem(row, 0, QTableWidgetItem(record.song_name))
             self.table.setItem(row, 1, QTableWidgetItem(file_name))
             self.table.setItem(row, 2, QTableWidgetItem(format_bytes(record.size_bytes)))
             self.table.setItem(row, 3, QTableWidgetItem(record.downloaded_at))
-            self.table.setItem(row, 4, QTableWidgetItem(record.output_path))
-        logger.info("Download manager refreshed. count=%s", len(self.records))
+            self.table.setItem(row, 4, QTableWidgetItem(T.manager_status_text(record.status)))
+            self.table.setItem(row, 5, QTableWidgetItem(record.output_path))
+        logger.info(
+            "Download manager refreshed. total=%s filtered=%s filter=%s",
+            len(self.records),
+            len(self.filtered_records),
+            status_filter,
+        )
+        self._sync_action_buttons()
 
     def _selected_record(self) -> Optional[DownloadRecord]:
         current = self.table.currentRow()
-        if current < 0 or current >= len(self.records):
+        if current < 0 or current >= len(self.filtered_records):
             return None
-        return self.records[current]
+        return self.filtered_records[current]
+
+    def _sync_action_buttons(self) -> None:
+        record = self._selected_record()
+        has_selection = record is not None
+        self.open_folder_button.setEnabled(has_selection)
+        self.delete_button.setEnabled(has_selection)
+        self.retry_failed_button.setEnabled(bool(record and can_retry_status(record.status)))
 
     def _open_selected_folder(self) -> None:
         record = self._selected_record()
@@ -1087,13 +1217,104 @@ class DownloadManagerDialog(QDialog):
         self.history_store.remove_by_path(str(path))
         self.refresh()
 
+    def _retry_selected_failed(self) -> None:
+        record = self._selected_record()
+        if not record:
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_NOT_SELECTED_RECORD)
+            return
+        if not can_retry_status(record.status):
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_RETRY_ONLY_FAILED)
+            return
+        if not self.cookie:
+            QMessageBox.warning(self, T.TITLE_NOT_LOGIN, T.MSG_NEED_LOGIN_ANY)
+            return
+
+        output_path = Path(record.output_path).expanduser()
+        task_id = build_task_id(record.song_id)
+        target_format = retry_target_format(output_path)
+        logger.info(
+            "Retry failed task requested. task_id=%s song_id=%s output=%s",
+            task_id,
+            record.song_id,
+            output_path,
+        )
+        progress = DownloadProgressDialog(
+            task_id=task_id,
+            song_id=record.song_id,
+            output_path=output_path,
+            cookie=self.cookie,
+            target_format=target_format,
+            timeout=self.download_timeout_sec,
+            retry_count=self.download_retry_count,
+        )
+        if progress.exec() == QDialog.Accepted and progress.output_path:
+            size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
+            self.history_store.add(
+                DownloadRecord(
+                    song_id=record.song_id,
+                    song_name=record.song_name,
+                    output_path=str(progress.output_path),
+                    size_bytes=size_bytes,
+                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status=TASK_STATE_SUCCESS,
+                )
+            )
+            logger.info("Retry task finished with success. task_id=%s", task_id)
+        elif progress.result_state == TASK_STATE_FAILED:
+            self.history_store.add(
+                DownloadRecord(
+                    song_id=record.song_id,
+                    song_name=record.song_name,
+                    output_path=str(output_path),
+                    size_bytes=0,
+                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status=TASK_STATE_FAILED,
+                    error_code=progress.error_code,
+                )
+            )
+            logger.warning("Retry task finished with failure. task_id=%s code=%s", task_id, progress.error_code)
+        else:
+            self.history_store.add(
+                DownloadRecord(
+                    song_id=record.song_id,
+                    song_name=record.song_name,
+                    output_path=str(output_path),
+                    size_bytes=0,
+                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status=TASK_STATE_CANCELED,
+                )
+            )
+            logger.info("Retry task finished with canceled. task_id=%s", task_id)
+        self.refresh()
+
 
 class UiSettingsDialog(QDialog):
-    def __init__(self, current_font_size: int, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        current_font_size: int,
+        detect_timeout_sec: int,
+        download_timeout_sec: int,
+        download_retry_count: int,
+        download_concurrency: int,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.font_size = clamp_ui_font_size(current_font_size)
+        self.detect_timeout_sec = max(MIN_DETECT_TIMEOUT_SEC, min(MAX_DETECT_TIMEOUT_SEC, int(detect_timeout_sec)))
+        self.download_timeout_sec = max(
+            MIN_DOWNLOAD_TIMEOUT_SEC,
+            min(MAX_DOWNLOAD_TIMEOUT_SEC, int(download_timeout_sec)),
+        )
+        self.download_retry_count = max(
+            MIN_DOWNLOAD_RETRY_COUNT,
+            min(MAX_DOWNLOAD_RETRY_COUNT, int(download_retry_count)),
+        )
+        self.download_concurrency = max(
+            MIN_DOWNLOAD_CONCURRENCY,
+            min(MAX_DOWNLOAD_CONCURRENCY, int(download_concurrency)),
+        )
         self.setWindowTitle(T.UI_SETTINGS_TITLE)
-        self.resize(460, 220)
+        self.resize(520, 320)
 
         layout = QVBoxLayout(self)
         desc = QLabel(T.UI_SETTINGS_DESC)
@@ -1108,6 +1329,40 @@ class UiSettingsDialog(QDialog):
         self.font_size_input.valueChanged.connect(self._on_font_size_changed)
         form.addRow(T.UI_SETTINGS_FONT_SIZE, self.font_size_input)
         layout.addLayout(form)
+
+        download_group = QGroupBox(T.UI_SETTINGS_DOWNLOAD_GROUP)
+        download_form = QFormLayout(download_group)
+        self.detect_timeout_input = QSpinBox()
+        self.detect_timeout_input.setRange(MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC)
+        self.detect_timeout_input.setValue(self.detect_timeout_sec)
+        self.detect_timeout_input.setSuffix(" s")
+        self.detect_timeout_input.valueChanged.connect(self._on_download_settings_changed)
+        download_form.addRow(T.UI_SETTINGS_DETECT_TIMEOUT, self.detect_timeout_input)
+
+        self.download_timeout_input = QSpinBox()
+        self.download_timeout_input.setRange(MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
+        self.download_timeout_input.setValue(self.download_timeout_sec)
+        self.download_timeout_input.setSuffix(" s")
+        self.download_timeout_input.valueChanged.connect(self._on_download_settings_changed)
+        download_form.addRow(T.UI_SETTINGS_DOWNLOAD_TIMEOUT, self.download_timeout_input)
+
+        self.download_retry_input = QSpinBox()
+        self.download_retry_input.setRange(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
+        self.download_retry_input.setValue(self.download_retry_count)
+        self.download_retry_input.valueChanged.connect(self._on_download_settings_changed)
+        download_form.addRow(T.UI_SETTINGS_DOWNLOAD_RETRY, self.download_retry_input)
+
+        self.download_concurrency_input = QSpinBox()
+        self.download_concurrency_input.setRange(MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
+        self.download_concurrency_input.setValue(self.download_concurrency)
+        self.download_concurrency_input.valueChanged.connect(self._on_download_settings_changed)
+        download_form.addRow(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY, self.download_concurrency_input)
+
+        download_hint = QLabel(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT)
+        download_hint.setWordWrap(True)
+        set_label_state(download_hint, "muted")
+        download_form.addRow(download_hint)
+        layout.addWidget(download_group)
 
         self.preview_label = QLabel("")
         self.preview_label.setWordWrap(True)
@@ -1134,11 +1389,44 @@ class UiSettingsDialog(QDialog):
         self.font_size = clamp_ui_font_size(value)
         self._refresh_preview()
 
+    def _on_download_settings_changed(self, *_args: object) -> None:
+        self.detect_timeout_sec = max(
+            MIN_DETECT_TIMEOUT_SEC,
+            min(MAX_DETECT_TIMEOUT_SEC, int(self.detect_timeout_input.value())),
+        )
+        self.download_timeout_sec = max(
+            MIN_DOWNLOAD_TIMEOUT_SEC,
+            min(MAX_DOWNLOAD_TIMEOUT_SEC, int(self.download_timeout_input.value())),
+        )
+        self.download_retry_count = max(
+            MIN_DOWNLOAD_RETRY_COUNT,
+            min(MAX_DOWNLOAD_RETRY_COUNT, int(self.download_retry_input.value())),
+        )
+        self.download_concurrency = max(
+            MIN_DOWNLOAD_CONCURRENCY,
+            min(MAX_DOWNLOAD_CONCURRENCY, int(self.download_concurrency_input.value())),
+        )
+        self._refresh_preview()
+
     def _reset_default(self) -> None:
         self.font_size_input.setValue(DEFAULT_UI_FONT_SIZE)
+        self.detect_timeout_input.setValue(DEFAULT_DETECT_TIMEOUT_SEC)
+        self.download_timeout_input.setValue(DEFAULT_DOWNLOAD_TIMEOUT_SEC)
+        self.download_retry_input.setValue(DEFAULT_DOWNLOAD_RETRY_COUNT)
+        self.download_concurrency_input.setValue(DEFAULT_DOWNLOAD_CONCURRENCY)
 
     def _refresh_preview(self) -> None:
-        self.preview_label.setText(T.ui_settings_preview(self.font_size))
+        self.preview_label.setText(
+            T.ui_settings_preview(self.font_size)
+            + "\n"
+            + T.status_ui_settings_updated(
+                self.font_size,
+                self.detect_timeout_sec,
+                self.download_timeout_sec,
+                self.download_retry_count,
+                self.download_concurrency,
+            ).replace("状态：", "")
+        )
         set_label_state(self.preview_label, "muted")
 
 
@@ -1271,18 +1559,13 @@ class MainWindow(QMainWindow):
         self.detect_button.setEnabled(can_detect)
 
     def _set_latest_task_state(self, song_id: str, output_path: Path, state: str, error_code: str = "") -> None:
-        if self.latest_download_task is None or self.latest_download_task.song_id != song_id:
-            self.latest_download_task = DownloadTaskSnapshot(
-                task_id=f"{song_id}-{int(time.time() * 1000)}",
-                song_id=song_id,
-                output_path=str(output_path),
-                state=state,
-                error_code=error_code,
-            )
-        else:
-            self.latest_download_task.state = state
-            self.latest_download_task.error_code = error_code
-            self.latest_download_task.output_path = str(output_path)
+        self.latest_download_task = next_task_snapshot(
+            self.latest_download_task,
+            song_id=song_id,
+            output_path=output_path,
+            state=state,
+            error_code=error_code,
+        )
         logger.info(
             "Download task state updated. task_id=%s song_id=%s state=%s error_code=%s",
             self.latest_download_task.task_id,
@@ -1388,7 +1671,13 @@ class MainWindow(QMainWindow):
 
     def _open_download_manager(self) -> None:
         logger.info("Open download manager.")
-        dialog = DownloadManagerDialog(history_store=self.history_store, parent=self)
+        dialog = DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie=self.session.cookie,
+            download_timeout_sec=self.session.download_timeout_sec,
+            download_retry_count=self.session.download_retry_count,
+            parent=self,
+        )
         dialog.exec()
 
     def _open_dependency_manager(self) -> None:
@@ -1399,16 +1688,36 @@ class MainWindow(QMainWindow):
 
     def _open_ui_settings(self) -> None:
         logger.info("Open ui settings dialog.")
-        dialog = UiSettingsDialog(current_font_size=self.session.ui_font_size, parent=self)
+        dialog = UiSettingsDialog(
+            current_font_size=self.session.ui_font_size,
+            detect_timeout_sec=self.session.detect_timeout_sec,
+            download_timeout_sec=self.session.download_timeout_sec,
+            download_retry_count=self.session.download_retry_count,
+            download_concurrency=self.session.download_concurrency,
+            parent=self,
+        )
         if dialog.exec() != QDialog.Accepted:
             return
         normalized = clamp_ui_font_size(dialog.font_size)
         self.session.ui_font_size = normalized
+        self.session.detect_timeout_sec = dialog.detect_timeout_sec
+        self.session.download_timeout_sec = dialog.download_timeout_sec
+        self.session.download_retry_count = dialog.download_retry_count
+        self.session.download_concurrency = dialog.download_concurrency
         self.session_store.save(self.session)
         app = QApplication.instance()
         if app is not None:
             apply_app_style(app, normalized)
-        self._set_status(T.status_ui_font_updated(normalized), "success")
+        self._set_status(
+            T.status_ui_settings_updated(
+                normalized,
+                self.session.detect_timeout_sec,
+                self.session.download_timeout_sec,
+                self.session.download_retry_count,
+                self.session.download_concurrency,
+            ),
+            "success",
+        )
         self._on_url_input_changed()
 
     def _on_detect_clicked(self) -> None:
@@ -1430,7 +1739,11 @@ class MainWindow(QMainWindow):
         self._set_detect_busy(True)
         self._set_status(T.STATUS_DETECTING, "warning")
         logger.info("Detection started from GUI.")
-        self.inspect_worker = InspectWorker(song_url=song_url, cookie=self.session.cookie, timeout=20)
+        self.inspect_worker = InspectWorker(
+            song_url=song_url,
+            cookie=self.session.cookie,
+            timeout=self.session.detect_timeout_sec,
+        )
         self.inspect_worker.failed.connect(self._on_detect_failed)
         self.inspect_worker.succeeded.connect(self._on_detect_succeeded)
         self.inspect_worker.finished.connect(lambda: self._set_detect_busy(False))
@@ -1445,13 +1758,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, T.TITLE_DETECT_FAIL, T.code_message(code, mapped))
         self._set_status(T.STATUS_DETECT_FAILED, "error")
 
-    def _record_download(self, song_id: str, song_name: str, output_path: Path, size_bytes: int) -> None:
+    def _record_download_result(
+        self,
+        song_id: str,
+        song_name: str,
+        output_path: Path,
+        size_bytes: int,
+        status: str,
+        error_code: str = "",
+    ) -> None:
+        # v0.4.0: persist final task result so manager can filter by status.
         record = DownloadRecord(
             song_id=song_id,
             song_name=song_name or f"song-{song_id}",
             output_path=str(output_path),
             size_bytes=size_bytes,
             downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            status=status,
+            error_code=error_code,
         )
         self.history_store.add(record)
 
@@ -1484,29 +1808,69 @@ class MainWindow(QMainWindow):
             self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
             return
 
+        # v0.4.0: every GUI download now enters the explicit task lifecycle.
+        self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_PENDING)
         self.session.last_download_dir = str(options.output_path.parent)
         self.session_store.save(self.session)
+        self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_DOWNLOADING)
+        task_id = (
+            self.latest_download_task.task_id
+            if self.latest_download_task and self.latest_download_task.song_id == result.song_id
+            else build_task_id(result.song_id)
+        )
+        logger.info("Download task started from detect flow. task_id=%s song_id=%s", task_id, result.song_id)
         self._set_status(T.STATUS_DOWNLOADING, "warning")
 
         progress = DownloadProgressDialog(
+            task_id=task_id,
             song_id=result.song_id,
             output_path=options.output_path,
             cookie=self.session.cookie,
             target_format=options.selected_format,
+            timeout=self.session.download_timeout_sec,
+            retry_count=self.session.download_retry_count,
         )
         if progress.exec() == QDialog.Accepted and progress.output_path:
             size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
-            self._record_download(
+            self._record_download_result(
                 song_id=result.song_id,
                 song_name=result.song_name or "",
                 output_path=progress.output_path,
                 size_bytes=size_bytes,
+                status=TASK_STATE_SUCCESS,
             )
+            self._set_latest_task_state(result.song_id, progress.output_path, TASK_STATE_SUCCESS)
             self._set_status(T.status_download_done(progress.output_path.name), "success")
-            logger.info("GUI flow finished successfully. output=%s", progress.output_path)
+            logger.info("GUI flow finished successfully. task_id=%s output=%s", task_id, progress.output_path)
         else:
+            if progress.result_state == TASK_STATE_FAILED:
+                self._set_latest_task_state(
+                    result.song_id,
+                    options.output_path,
+                    TASK_STATE_FAILED,
+                    error_code=progress.error_code,
+                )
+                self._record_download_result(
+                    song_id=result.song_id,
+                    song_name=result.song_name or "",
+                    output_path=options.output_path,
+                    size_bytes=0,
+                    status=TASK_STATE_FAILED,
+                    error_code=progress.error_code,
+                )
+                logger.warning("GUI flow finished with failed task. task_id=%s code=%s", task_id, progress.error_code)
+            else:
+                self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_CANCELED)
+                self._record_download_result(
+                    song_id=result.song_id,
+                    song_name=result.song_name or "",
+                    output_path=options.output_path,
+                    size_bytes=0,
+                    status=TASK_STATE_CANCELED,
+                )
+                logger.info("GUI flow finished with canceled task. task_id=%s", task_id)
             self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
-            logger.info("GUI flow ended without completed download.")
+            logger.info("GUI flow ended without completed download. task_id=%s", task_id)
 
 
 def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSession]:
@@ -1550,6 +1914,10 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
         remember_login=remember,
         last_download_dir=loaded.last_download_dir,
         ui_font_size=loaded.ui_font_size,
+        detect_timeout_sec=loaded.detect_timeout_sec,
+        download_timeout_sec=loaded.download_timeout_sec,
+        download_retry_count=loaded.download_retry_count,
+        download_concurrency=loaded.download_concurrency,
     )
 
 
