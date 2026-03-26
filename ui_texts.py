@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 APP_TITLE = "网易云音乐下载助手"
-APP_DESC = "输入网易云音乐歌曲链接后点击检测（支持长链、短链与分享文案）。"
+APP_DESC = "支持检测网易云音乐单曲链接或歌单链接"
 STATUS_IDLE = "状态：待输入"
 STATUS_DETECTING = "状态：检测中..."
 STATUS_DETECT_DONE = "状态：检测完成"
@@ -14,6 +14,7 @@ STATUS_DOWNLOAD_NOT_DONE = "状态：下载未完成"
 STATUS_LOGOUT = "状态：已退出登录"
 STATUS_LOGIN_UPDATED = "状态：登录已更新，可继续检测。"
 STATUS_CANCELING = "正在取消..."
+STATUS_CHECKING_UPDATE = "状态：正在检查新版本..."
 
 LOGIN_DIALOG_TITLE = "网易云音乐登录"
 LOGIN_INFO = "请在下方页面完成网易云音乐扫码登录，登录成功后点击“确认并继续”。"
@@ -38,17 +39,22 @@ ACCOUNT_MENU_LOGOUT = "退出当前账号"
 
 BTN_DOWNLOAD_MANAGER = "下载管理"
 BTN_DEPENDENCY_MANAGER = "依赖管理"
-BTN_UI_SETTINGS = "界面设置"
+BTN_UI_SETTINGS = "软件设置"
 BTN_DETECT = "检测"
-INPUT_PLACEHOLDER = "粘贴网易云歌曲链接（支持长链/短链/分享文案）"
-URL_HELP_LABEL = "示例长链：{url}"
-URL_HELP_TOOLTIP = "支持粘贴整段分享文案，程序会自动提取其中的歌曲链接。"
+FOOTER_GITHUB_LINK = "GitHub 项目"
+FOOTER_VERSION_LINK = "版本：{version}"
+INPUT_PLACEHOLDER = "粘贴歌曲或歌单链接（支持单条/多条，自动识别）"
+INPUT_MULTI_HINT = "支持多个歌曲或歌单链接识别，直接粘贴即可自动解析。"
 INPUT_VALIDATION_EMPTY = "请输入歌曲链接、分享文案，或直接输入歌曲 ID。"
 INPUT_VALIDATION_OK_ID = "输入格式有效：将按歌曲 ID 直接检测。"
 INPUT_VALIDATION_OK_URL = "输入格式有效：可开始检测。"
-INPUT_VALIDATION_SHORT_LINK = "输入格式有效：短链会在检测时自动解析。"
+INPUT_VALIDATION_SHORT_LINK = "输入内容已识别，可点击检测。"
 INPUT_VALIDATION_BAD_HOST = "仅支持 music.163.com 或 163cn.tv 链接。"
 INPUT_VALIDATION_ID_MISSING = "未识别到歌曲 ID，请检查链接是否完整。"
+INPUT_ANALYZING = "正在识别输入内容..."
+INPUT_DETECT_SINGLE = "识别结果：【单个歌曲/歌单】"
+INPUT_DETECT_MULTIPLE = "识别结果：【多个歌曲/歌单】（{count} 条）"
+INPUT_DETECT_INVALID = "未识别到可用链接，请检查后重试。"
 
 TITLE_WARNING = "提示"
 TITLE_PARAM_ERROR = "参数错误"
@@ -90,6 +96,9 @@ MSG_NOT_SELECTED_RECORD = "请先选择一条下载记录。"
 MSG_DOWNLOADS_EMPTY = "暂无下载记录"
 MSG_UNSUPPORTED_FORMAT = "不支持的格式：{fmt}"
 MSG_UNKNOWN = "未知"
+MSG_UPDATE_CHECK_FAIL = "检查更新失败：{message}"
+MSG_UPDATE_AVAILABLE = "发现新版本：{latest}\n当前版本：{current}\n是否打开 GitHub 项目页查看？"
+MSG_UPDATE_LATEST = "当前已是最新版本（{current}）。"
 
 DOWNLOAD_OPTIONS_TITLE = "下载设置"
 DOWNLOAD_OPTIONS_DIR = "保存目录"
@@ -159,24 +168,75 @@ DEP_MANAGER_IMPACT_MISSING = "仅支持 MP3 下载，其他格式转码不可用
 DEP_MANAGER_INSTALL_OK = "-"
 DEP_MANAGER_INSTALL_FFMPEG = "macOS: brew install ffmpeg\nWindows: winget install Gyan.FFmpeg"
 
-UI_SETTINGS_TITLE = "界面设置"
-UI_SETTINGS_DESC = "调整字体大小，保存后立即生效，并在下次启动时保持。"
+UI_SETTINGS_TITLE = "软件设置"
+UI_SETTINGS_DESC = "统一管理界面字体与下载参数，保存后立即生效并在下次启动时保持。"
 UI_SETTINGS_FONT_SIZE = "字体大小"
-UI_SETTINGS_DOWNLOAD_GROUP = "下载参数（v0.4.0）"
+UI_SETTINGS_DOWNLOAD_GROUP = "下载设置"
 UI_SETTINGS_DETECT_TIMEOUT = "检测超时（秒）"
 UI_SETTINGS_DOWNLOAD_TIMEOUT = "下载超时（秒）"
 UI_SETTINGS_DOWNLOAD_RETRY = "下载重试次数"
-UI_SETTINGS_DOWNLOAD_CONCURRENCY = "并发上限（预留）"
-UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT = "当前版本仍按单任务顺序下载，此参数将用于后续批量并发能力。"
+UI_SETTINGS_DOWNLOAD_CONCURRENCY = "并发上限"
+UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT = "批量下载同时执行的任务数。网络较慢时建议 1-2 路，更稳定。"
 UI_SETTINGS_RESET = "恢复默认"
 UI_SETTINGS_SAVE = "保存"
+
+BATCH_DIALOG_TITLE = "批量识别与下载"
+BATCH_DIALOG_DESC = "支持粘贴多行链接或分享文案，先识别再批量下载可下载歌曲。"
+BATCH_INPUT_LABEL = "批量输入（支持直接粘贴多个链接/ID或整段分享文案）"
+BATCH_INPUT_PLACEHOLDER = "示例：\nhttps://music.163.com/song?id=33894312\nhttps://163cn.tv/xxxxx\n分享文案 ..."
+BATCH_OUTPUT_DIR = "保存目录"
+BATCH_OUTPUT_PICKER_TITLE = "选择批量下载目录"
+BATCH_OUTPUT_PICKER_BTN = "选择..."
+BATCH_TARGET_FORMAT = "下载格式"
+BATCH_BTN_DETECT = "开始识别"
+BATCH_BTN_SETTINGS = "下载设置"
+BATCH_BTN_DOWNLOAD = "下载选中项"
+BATCH_BTN_CANCEL = "取消下载"
+BATCH_BTN_SELECT_ALL = "全选可下载"
+BATCH_BTN_CLEAR_ALL = "取消全选"
+BATCH_BTN_INVERT = "反选可下载"
+BATCH_BTN_INVERT_TIP = "全选后点击“反选可下载”可快速取消全选。"
+BATCH_SELECTION_SUMMARY = "已选 {selected} / 可下载 {ready} 首"
+BATCH_COL_SELECT = "选择"
+BATCH_COL_SOURCE = "来源"
+BATCH_COL_SONG_ID = "歌曲 ID"
+BATCH_COL_SONG_NAME = "歌曲名"
+BATCH_COL_SIZE = "资源大小"
+BATCH_COL_STATUS = "预检状态"
+BATCH_SOURCE_SONG = "单曲"
+BATCH_SOURCE_PLAYLIST = "歌单"
+BATCH_SOURCE_UNKNOWN = "未知"
+BATCH_STATUS_IDLE = "状态：等待批量输入"
+BATCH_STATUS_DETECTING = "状态：批量识别中..."
+BATCH_STATUS_READY = "可下载"
+BATCH_STATUS_UNAVAILABLE = "不可下载"
+BATCH_STATUS_FAILED = "识别失败"
+BATCH_STATUS_DUPLICATE = "重复已跳过"
+BATCH_STATUS_DOWNLOADING_ITEM = "下载中"
+BATCH_STATUS_DOWNLOAD_SUCCESS = "下载成功"
+BATCH_STATUS_DOWNLOAD_FAILED = "下载失败"
+BATCH_STATUS_DOWNLOAD_CANCELED = "下载已取消"
+BATCH_STATUS_SUMMARY = "识别完成：共 {total} 条，可下载 {ready} 条，重复 {duplicate} 条，失败/不可下载 {bad} 条。"
+BATCH_STATUS_DOWNLOADING = "状态：批量下载中..."
+BATCH_STATUS_CANCELING = "状态：正在取消批量下载..."
+BATCH_DOWNLOAD_SUMMARY = "批量下载完成：成功 {success}，失败 {failed}，取消 {canceled}。"
+BATCH_DOWNLOAD_STOPPED = "批量下载已停止：已完成 {processed}/{total}，成功 {success}，失败 {failed}，取消 {canceled}，未开始 {pending}。"
+MSG_BATCH_NEED_INPUT = "请先输入至少一条链接/ID。"
+MSG_BATCH_NEED_READY = "当前没有可下载且已勾选的歌曲。"
+MSG_BATCH_DETECT_RUNNING = "批量识别进行中，请稍候。"
+MSG_BATCH_DOWNLOAD_RUNNING = "批量下载进行中，请稍候。"
+MSG_BATCH_DETECT_FAIL = "批量识别任务失败：{message}"
+MSG_BATCH_DOWNLOAD_NO_OUTPUT = "请先选择有效下载目录。"
+MSG_BATCH_DUPLICATE_SONG = "与前序条目重复（song_id={song_id}）"
+MSG_BATCH_PARTIAL_INPUT = "保留原始输入（非链接文本），识别阶段将继续尝试解析。"
+MSG_BATCH_INPUT_UNCHANGED = "输入内容未变化，已完成识别。若需重新识别，请修改输入内容。"
+MSG_BATCH_INPUT_CHANGED = "输入已变化，请先重新识别，再下载选中项。"
 
 ACC_INPUT_SONG_LINK = "歌曲链接输入框"
 ACC_BTN_DETECT = "检测按钮"
 ACC_BTN_DEP_MANAGER = "依赖管理按钮"
 ACC_BTN_DOWNLOAD_MANAGER = "下载管理按钮"
-ACC_BTN_UI_SETTINGS = "界面设置按钮"
-
+ACC_BTN_UI_SETTINGS = "软件设置按钮"
 
 def code_message(code: str, message: str) -> str:
     return f"{code}: {message}"
@@ -229,3 +289,27 @@ def manager_status_text(status: str) -> str:
         "canceled": MANAGER_FILTER_CANCELED,
     }
     return mapping.get(normalized, status or MSG_UNKNOWN)
+
+
+def batch_detect_status_text(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    mapping = {
+        "ready": BATCH_STATUS_READY,
+        "unavailable": BATCH_STATUS_UNAVAILABLE,
+        "failed": BATCH_STATUS_FAILED,
+        "duplicate": BATCH_STATUS_DUPLICATE,
+        "downloading": BATCH_STATUS_DOWNLOADING_ITEM,
+        "download_success": BATCH_STATUS_DOWNLOAD_SUCCESS,
+        "download_failed": BATCH_STATUS_DOWNLOAD_FAILED,
+        "download_canceled": BATCH_STATUS_DOWNLOAD_CANCELED,
+    }
+    return mapping.get(normalized, status or MSG_UNKNOWN)
+
+
+def batch_source_text(source_type: str) -> str:
+    normalized = (source_type or "").strip().lower()
+    mapping = {
+        "song": BATCH_SOURCE_SONG,
+        "playlist": BATCH_SOURCE_PLAYLIST,
+    }
+    return mapping.get(normalized, BATCH_SOURCE_UNKNOWN)

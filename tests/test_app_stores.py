@@ -47,8 +47,8 @@ class SessionStoreTests(unittest.TestCase):
                 remember_login=True,
                 last_download_dir="/tmp/out",
                 ui_font_size=18,
-                detect_timeout_sec=25,
-                download_timeout_sec=45,
+                detect_timeout_sec=3,
+                download_timeout_sec=10,
                 download_retry_count=2,
                 download_concurrency=1,
             )
@@ -57,8 +57,8 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.cookie, "MUSIC_U=abc")
             self.assertEqual(loaded.last_download_dir, "/tmp/out")
             self.assertEqual(loaded.ui_font_size, 18)
-            self.assertEqual(loaded.detect_timeout_sec, 25)
-            self.assertEqual(loaded.download_timeout_sec, 45)
+            self.assertEqual(loaded.detect_timeout_sec, 3)
+            self.assertEqual(loaded.download_timeout_sec, 10)
             self.assertEqual(loaded.download_retry_count, 2)
             self.assertEqual(loaded.download_concurrency, 1)
 

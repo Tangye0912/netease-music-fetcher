@@ -34,6 +34,22 @@ class ParseSongIdTests(unittest.TestCase):
             music_fetch.parse_song_id("https://example.com/song?id=1")
         self.assertEqual(ctx.exception.code, "INVALID_URL")
 
+    def test_parse_song_id_rejects_playlist_url(self):
+        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+            music_fetch.parse_song_id("https://music.163.com/playlist?id=123456")
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+
+    def test_parse_input_resource_playlist(self):
+        resource_type, resource_id = music_fetch.parse_input_resource("https://music.163.com/#/playlist?id=9988")
+        self.assertEqual(resource_type, "playlist")
+        self.assertEqual(resource_id, "9988")
+
+    @mock.patch("music_fetch.resolve_short_url")
+    def test_parse_playlist_id_from_short_url(self, resolve_mock):
+        resolve_mock.return_value = "https://music.163.com/playlist?id=778899"
+        playlist_id = music_fetch.parse_playlist_id("https://163cn.tv/xxxxxx")
+        self.assertEqual(playlist_id, "778899")
+
 
 class CookieTests(unittest.TestCase):
     def test_cookie_file_requires_music_u(self):
@@ -58,6 +74,27 @@ class PlayerApiTests(unittest.TestCase):
         post_mock.return_value = (200, {"code": 200, "data": [{"url": None}]})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
             music_fetch.fetch_playable_url("123", "MUSIC_U=abc; __csrf=def", timeout=5)
+        self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
+
+    @mock.patch("music_fetch.perform_json_get")
+    def test_fetch_playlist_song_ids_success(self, get_mock):
+        get_mock.return_value = (
+            200,
+            {
+                "code": 200,
+                "playlist": {
+                    "trackIds": [{"id": 1}, {"id": 2}, {"id": 1}],
+                },
+            },
+        )
+        result = music_fetch.fetch_playlist_song_ids("123", "MUSIC_U=abc", timeout=5)
+        self.assertEqual(result, ["1", "2"])
+
+    @mock.patch("music_fetch.perform_json_get")
+    def test_fetch_playlist_song_ids_empty(self, get_mock):
+        get_mock.return_value = (200, {"code": 200, "playlist": {"trackIds": []}})
+        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+            music_fetch.fetch_playlist_song_ids("123", "MUSIC_U=abc", timeout=5)
         self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
 
 

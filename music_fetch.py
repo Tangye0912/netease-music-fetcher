@@ -26,6 +26,7 @@ USER_AGENT = (
 )
 PLAYER_URL_API = "https://music.163.com/api/song/enhance/player/url/v1"
 SONG_DETAIL_API = "https://music.163.com/api/song/detail"
+PLAYLIST_DETAIL_API = "https://music.163.com/api/v6/playlist/detail"
 ACCOUNT_STATUS_API = "https://music.163.com/api/nuser/account/get"
 OUTER_MEDIA_URL_API = "https://music.163.com/song/media/outer/url?id={song_id}.mp3"
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]+')
@@ -92,14 +93,29 @@ CancelChecker = Callable[[], bool]
 
 
 def parse_song_id(value: str) -> str:
-    value = value.strip()
-    if value.isdigit():
-        logger.info("Parsed numeric song id directly: %s", value)
-        return value
+    resource_type, resource_id = parse_input_resource(value)
+    if resource_type == "playlist":
+        raise MusicFetchError("INVALID_URL", "Detected playlist link. Please use batch mode.")
+    return resource_id
 
-    url = extract_url_from_input(value)
-    logger.info("Parsing input to song id. extracted_url=%s", bool(url))
-    parsed = parse.urlparse(url if url else value)
+
+def parse_playlist_id(value: str) -> str:
+    resource_type, resource_id = parse_input_resource(value)
+    if resource_type != "playlist":
+        raise MusicFetchError("INVALID_URL", "Input is not a playlist link.")
+    return resource_id
+
+
+def parse_input_resource(value: str) -> tuple[str, str]:
+    """Parse input into resource type and id: ('song'|'playlist', id)."""
+    raw = value.strip()
+    if raw.isdigit():
+        logger.info("Parsed numeric song id directly: %s", raw)
+        return "song", raw
+
+    url = extract_url_from_input(raw)
+    logger.info("Parsing input resource. extracted_url=%s", bool(url))
+    parsed = parse.urlparse(url if url else raw)
     host = parsed.netloc.lower()
     if host and not is_netease_music_host(host) and host not in SHORT_LINK_HOSTS:
         raise MusicFetchError(
@@ -107,7 +123,7 @@ def parse_song_id(value: str) -> str:
             "Only music.163.com or 163cn.tv links are supported.",
         )
 
-    target_url = url if url else value
+    target_url = url if url else raw
     if host in SHORT_LINK_HOSTS:
         logger.info("Resolving short link host=%s", host)
         target_url = resolve_short_url(target_url, timeout=15)
@@ -116,36 +132,52 @@ def parse_song_id(value: str) -> str:
         if host and not is_netease_music_host(host):
             raise MusicFetchError(
                 "INVALID_URL",
-                "Could not resolve short link to a music.163.com song URL.",
+                "Could not resolve short link to a music.163.com resource URL.",
             )
 
-    query = parse.parse_qs(parsed.query)
-    song_id = _pick_first_digit(query.get("id"))
-    if song_id:
-        return song_id
+    resource_type = _detect_resource_type(parsed, target_url)
+    resource_id = _extract_resource_id(parsed, target_url)
+    if not resource_id:
+        raise MusicFetchError("INVALID_URL", "Could not parse resource id from the provided URL.")
+    return resource_type, resource_id
 
-    # Supports URLs like https://music.163.com/#/song?id=123456
+
+def _detect_resource_type(parsed: parse.ParseResult, raw_target: str) -> str:
+    path = (parsed.path or "").lower()
+    fragment = (parsed.fragment or "").lower()
+    lowered = raw_target.lower()
+    if "/playlist" in path or "/playlist" in fragment or "#/playlist" in lowered:
+        return "playlist"
+    return "song"
+
+
+def _extract_resource_id(parsed: parse.ParseResult, raw_target: str) -> str:
+    query = parse.parse_qs(parsed.query)
+    parsed_id = _pick_first_digit(query.get("id"))
+    if parsed_id:
+        return parsed_id
+
     if parsed.fragment:
         frag_query = parsed.fragment.split("?", 1)[1] if "?" in parsed.fragment else ""
         if frag_query:
             frag_map = parse.parse_qs(frag_query)
-            song_id = _pick_first_digit(frag_map.get("id"))
-            if song_id:
-                return song_id
+            parsed_id = _pick_first_digit(frag_map.get("id"))
+            if parsed_id:
+                return parsed_id
         match = re.search(r"id=(\d+)", parsed.fragment)
         if match:
             return match.group(1)
 
-    match = re.search(r"/song/(\d+)", parsed.path)
-    if match:
-        return match.group(1)
+    for pattern in (r"/song/(\d+)", r"/playlist/(\d+)"):
+        match = re.search(pattern, parsed.path or "")
+        if match:
+            return match.group(1)
 
-    match = re.search(r"id=(\d+)", target_url)
+    match = re.search(r"id=(\d+)", raw_target)
     if match:
-        logger.info("Parsed song id from fallback pattern. song_id=%s", match.group(1))
+        logger.info("Parsed resource id from fallback pattern. id=%s", match.group(1))
         return match.group(1)
-
-    raise MusicFetchError("INVALID_URL", "Could not parse song id from the provided URL.")
+    return ""
 
 
 def extract_url_from_input(value: str) -> Optional[str]:
@@ -485,6 +517,56 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
     if not isinstance(duration_ms, int):
         duration_ms = None
     return name, duration_ms
+
+
+def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) -> list[str]:
+    """Fetch song ids from a playlist resource."""
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Referer": "https://music.163.com/",
+        "Cookie": cookie,
+    }
+    query = parse.urlencode({"id": playlist_id, "n": "1000", "s": "0"})
+    url = f"{PLAYLIST_DETAIL_API}?{query}"
+    status, body = perform_json_get(url, headers, timeout=timeout)
+    if status in (401, 403):
+        raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+    code = body.get("code")
+    if code in (301, 302, 401, 403):
+        raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+    if status != 200 or code != 200:
+        message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
+        raise MusicFetchError("NETWORK_ERROR", message)
+
+    playlist = body.get("playlist") or {}
+    raw_track_ids = playlist.get("trackIds") or []
+    ids: list[str] = []
+    for row in raw_track_ids if isinstance(raw_track_ids, list) else []:
+        if isinstance(row, dict):
+            value = row.get("id")
+            if isinstance(value, int):
+                ids.append(str(value))
+
+    if not ids:
+        raw_tracks = playlist.get("tracks") or []
+        for row in raw_tracks if isinstance(raw_tracks, list) else []:
+            if isinstance(row, dict):
+                value = row.get("id")
+                if isinstance(value, int):
+                    ids.append(str(value))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for song_id in ids:
+        if not song_id or song_id in seen:
+            continue
+        seen.add(song_id)
+        deduped.append(song_id)
+
+    if not deduped:
+        raise MusicFetchError("SONG_UNAVAILABLE", "Playlist is empty or unavailable.")
+    logger.info("Fetched playlist songs. playlist_id=%s count=%s", playlist_id, len(deduped))
+    return deduped
 
 
 def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
