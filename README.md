@@ -3,23 +3,18 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v0.5.0）
+## 1. 版本概览（v0.5.1）
 
-### 1.1 v0.5.0 相对 v0.4.0 的核心更新
+### 1.1 v0.5.1 相对 v0.5.0 的更新
 
-- 新增“单曲 + 歌单 + 多链接”统一输入检测：主输入区可直接粘贴混合分享文案并自动分流到批量流程。
-- 新增歌单分享链接识别与展开：支持歌单内歌曲批量识别、去重、勾选下载。
-- 新增批量下载并发能力：并发上限可配置（当前范围 `1~3` 路）。
-- 新增批量页内“下载设置”入口：不退出批量页即可调整超时/重试/并发参数。
-- 新增批量识别结果缓存恢复：同一输入再次进入批量页可复用上次识别结果，无需重新解析。
-- 新增来源识别展示：可显示 `歌单-xxx`、`歌曲-xxx`，并保留完整原始输入 tooltip。
-- 优化下载管理筛选区：筛选下拉框加宽，筛选无结果时布局不再抖动。
-- 优化软件设置：下载设置去掉背景分组、字段对齐；超时选项改为常用档位（检测 `1/3/5s`，下载 `3/5/10s`）。
-- 优化主界面底部信息：显示版本号与 GitHub 链接；点击版本号可手动检查更新。
+- **重构**：`main.py` 拆分为 `_workers.py`(工作线程) + `_dialogs.py`(对话框)，文件从 3290 行降至 665 行。
+- **重构**：`music_fetch.py` 拆分为 `_api.py`(API) + `_audio.py`(下载/转码) + `_cli.py`(CLI)，原文件改为外观层。
+- **修复**：6 处 bare `except` 改为捕获具体异常；Lambda 闭包改用 `functools.partial`；修复 2 处运行时 NameError。
+- **工程化**：新增 `pyproject.toml`、补齐 `.gitignore`、常量去重、Combo 工具提取。
+- **测试**：新增 15 个测试，总数 63→78。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
-迭代路线见 [ROADMAP.md](./ROADMAP.md)。  
-`v0.5.0` 发布说明见 [RELEASE_NOTES_v0.5.0.md](./RELEASE_NOTES_v0.5.0.md)。
+迭代路线见 [ROADMAP.md](./ROADMAP.md)。
 
 ### 1.2 当前核心能力
 
@@ -105,7 +100,7 @@ py -3 main.py
   --timeout 30
 ```
 
-说明：CLI 当前仍按历史约定默认 `mp4` 输出（GUI 默认 `mp3`）。
+说明：CLI 当前仍按历史约定默认 `mp4` 输出（GUI 默认 `mp3`）。`resolve_output_path` 默认格式已统一为 `mp3`。
 
 ## 6. 错误码
 
@@ -120,17 +115,37 @@ py -3 main.py
 - `UNSUPPORTED_FORMAT`：不支持的输出格式（CLI 仍仅支持 `mp4`）
 - `UNKNOWN_ERROR`：未预期异常
 
-## 7. 维护约定
+## 7. 项目架构
 
-为便于后续新增模块统一调用，底层能力已拆分：
+```
+music_fetch/
+├── main.py                  ← 入口：MainWindow + 启动流程
+├── _dialogs.py              ← 9个对话框类
+├── _workers.py              ← 3个QThread工作线程
+├── _api.py                  ← 网易云API：HTTP、cookie、资源解析
+├── _audio.py                ← 音频下载 + ffmpeg转码
+├── _cli.py                  ← CLI命令行入口
+├── music_fetch.py           ← 外观层（重新导出三个子模块）
+├── _combo_utils.py          ← 共享QComboBox工具
+├── app_settings.py          ← 全局配置
+├── ui_texts.py              ← 用户可见文案
+├── error_texts.py           ← 错误码→友好文案映射
+├── app_stores.py            ← 会话与下载历史持久化
+├── app_logging.py           ← 日志初始化
+├── batch_inputs.py          ← 批量输入解析
+├── download_tasks.py        ← 任务状态模型
+├── download_retry.py        ← 重试逻辑
+└── tests/                   ← 78个单元测试
+```
 
-- `app_settings.py`：全局配置（路径、默认格式、示例链接）
-- `ui_texts.py`：用户可见文案统一管理
-- `error_texts.py`：错误码到友好文案映射
-- `app_stores.py`：会话与下载历史持久化
-- `app_logging.py`：日志初始化与统一 logger
+依赖方向（自底向上）：
+```
+app_settings → app_logging → app_stores / batch_inputs / download_tasks / error_texts / ui_texts
+  → [ _api → _audio → _cli ] → music_fetch (facade)
+  → _workers → _dialogs → main
+```
 
-新增功能优先复用这些模块，避免业务代码继续写硬编码。
+新增功能优先复用已有模块，避免业务代码继续写硬编码。
 
 ## 8. 提交规范（建议）
 
