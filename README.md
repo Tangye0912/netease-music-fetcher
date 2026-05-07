@@ -3,18 +3,19 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v0.5.1）
+## 1. 版本概览（v0.6.0）
 
-### 1.1 v0.5.1 相对 v0.5.0 的更新
+### 1.1 v0.6.0 相对 v0.5.1 的更新
 
-- **重构**：`main.py` 拆分为 `_workers.py`(工作线程) + `_dialogs.py`(对话框)，文件从 3290 行降至 665 行。
+- **重构**：批量设置与批量下载对话框继续拆分到 `_batch_dialogs.py`，批次结果逻辑集中到 `_batch_results.py`。
 - **重构**：`music_fetch.py` 拆分为 `_api.py`(API) + `_audio.py`(下载/转码) + `_cli.py`(CLI)，原文件改为外观层。
 - **修复**：6 处 bare `except` 改为捕获具体异常；Lambda 闭包改用 `functools.partial`；修复 2 处运行时 NameError。
 - **工程化**：新增 `pyproject.toml`、补齐 `.gitignore`、常量去重、Combo 工具提取。
-- **测试**：新增 15 个测试，总数 63→78。
+- **测试**：补齐入口、打包配置、下载取消与批次结果回归测试，总数 87。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
-迭代路线见 [ROADMAP.md](./ROADMAP.md)。
+迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
+提交说明模板见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ### 1.2 当前核心能力
 
@@ -28,11 +29,11 @@
 - 依赖降级：未安装 `ffmpeg` 时自动回退 `mp3` 并限制转码选项
 - 日志：关键流程全链路记录，便于排障
 
-### 1.3 下一版本计划（v0.6.0）
+### 1.3 下一版本计划
 
 - 批量下载“仅重试失败项”一键入口
 - 批次失败原因分组统计与结果汇总
-- 批次结果导出（成功/失败明细）
+- 批次结果导出（CSV 成功/失败明细）
 
 ## 2. 环境准备
 
@@ -120,7 +121,9 @@ py -3 main.py
 ```
 music_fetch/
 ├── main.py                  ← 入口：MainWindow + 启动流程
-├── _dialogs.py              ← 9个对话框类
+├── _dialogs.py              ← 登录、单曲下载、下载管理、软件设置等对话框
+├── _batch_dialogs.py        ← 批量识别、批量下载与批量运行时设置
+├── _batch_results.py        ← 批量结果筛选、汇总与 CSV 导出
 ├── _workers.py              ← 3个QThread工作线程
 ├── _api.py                  ← 网易云API：HTTP、cookie、资源解析
 ├── _audio.py                ← 音频下载 + ffmpeg转码
@@ -135,19 +138,27 @@ music_fetch/
 ├── batch_inputs.py          ← 批量输入解析
 ├── download_tasks.py        ← 任务状态模型
 ├── download_retry.py        ← 重试逻辑
-└── tests/                   ← 78个单元测试
+└── tests/                   ← 87个单元测试
 ```
 
 依赖方向（自底向上）：
 ```
 app_settings → app_logging → app_stores / batch_inputs / download_tasks / error_texts / ui_texts
   → [ _api → _audio → _cli ] → music_fetch (facade)
-  → _workers → _dialogs → main
+  → _workers / _batch_results → _dialogs / _batch_dialogs → main
 ```
 
 新增功能优先复用已有模块，避免业务代码继续写硬编码。
 
-## 8. 提交规范（建议）
+## 8. 文档与维护约定
+
+- `README.md`：用户入口、功能概览、启动方式、项目结构与测试命令。
+- `CHANGELOG.md`：唯一版本历史来源；历史 release notes 已合并到这里。
+- `ROADMAP.md`：后续规划与仍需推进的技术债。
+- `CONTRIBUTING.md`：提交信息模板与提交前检查命令。
+- `tests/`：回归测试目录，不属于可清理文档；新增行为变更时优先补这里。
+
+## 9. 提交规范（建议）
 
 后续提交建议使用“标题 + 文件级变更说明”：
 
@@ -162,13 +173,13 @@ feat: 简要说明这次迭代目标
 这样新同学能快速理解“每个文件改了什么、为什么改”。
 完整模板见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
-## 9. 测试
+## 10. 测试
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
-## 10. 日志与排障
+## 11. 日志与排障
 
 - 默认日志：`~/.config/music-fetch/logs/music-fetch.log`
 - GUI 和 CLI 共用日志体系
@@ -176,7 +187,7 @@ python3 -m unittest discover -s tests -p "test_*.py"
 - 直链被 CDN 403 拒绝时，会自动尝试 `outer/url` 兜底
 - 日志不会打印完整 `MUSIC_U` 值（已脱敏）
 
-## 11. 合规说明
+## 12. 合规说明
 
 仅用于你已获得合法授权的音频素材。  
 本工具不提供 DRM/版权绕过能力。

@@ -12,3 +12,7 @@ from __future__ import annotations
 from _api import *      # constants, data classes, HTTP helpers, API functions
 from _audio import *    # download, format conversion
 from _cli import *      # CLI entry point (run_download, build_parser, main)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

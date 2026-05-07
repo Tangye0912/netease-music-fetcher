@@ -339,6 +339,19 @@ class DownloadWorker(QThread):
     def request_cancel(self) -> None:
         self._cancel_requested = True
 
+    def _cleanup_paths(self, *paths: Path) -> None:
+        for path in paths:
+            if path.exists():
+                path.unlink(missing_ok=True)
+
+    def _finish_if_canceled(self, *paths: Path) -> bool:
+        if not self._cancel_requested:
+            return False
+        self._cleanup_paths(*paths)
+        logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
+        self.canceled.emit()
+        return True
+
     def run(self) -> None:
         started_at = time.time()
         logger.info(
@@ -400,8 +413,12 @@ class DownloadWorker(QThread):
                 source_format,
                 self.target_format,
             )
+            if self._finish_if_canceled(temp_source_path, self.output_path):
+                return
             if source_format == self.target_format:
                 temp_source_path.replace(self.output_path)
+                if self._finish_if_canceled(self.output_path):
+                    return
             else:
                 if not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
                     fallback_output = self.output_path.with_suffix(f".{source_format}")
@@ -409,7 +426,11 @@ class DownloadWorker(QThread):
                         fallback_output = fallback_output.with_name(
                             f"{fallback_output.stem}_{int(time.time())}{fallback_output.suffix}"
                         )
+                    if self._finish_if_canceled(temp_source_path, fallback_output):
+                        return
                     temp_source_path.replace(fallback_output)
+                    if self._finish_if_canceled(fallback_output):
+                        return
                     file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
                     self.succeeded.emit(str(fallback_output.resolve()), file_size)
                     logger.warning(
@@ -421,6 +442,8 @@ class DownloadWorker(QThread):
                     )
                     return
                 # Conversion relies on ffmpeg and may take longer than plain download.
+                if self._finish_if_canceled(temp_source_path, self.output_path):
+                    return
                 convert_audio_file(
                     temp_source_path,
                     self.output_path,
@@ -428,10 +451,8 @@ class DownloadWorker(QThread):
                     timeout=max(240, self.timeout * 8),
                 )
                 temp_source_path.unlink(missing_ok=True)
-
-            if self._cancel_requested:
-                self.canceled.emit()
-                return
+                if self._finish_if_canceled(self.output_path):
+                    return
             file_size = self.output_path.stat().st_size if self.output_path.exists() else 0
             self.succeeded.emit(str(self.output_path.resolve()), file_size)
             logger.info("DownloadWorker succeeded. task_id=%s output=%s size=%s", self.task_id, self.output_path, file_size)

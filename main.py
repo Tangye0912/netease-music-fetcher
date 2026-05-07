@@ -425,7 +425,7 @@ class MainWindow(QMainWindow):
         self._refresh_ffmpeg_status()
 
     def _open_batch_download(self, input_text: str = "", auto_detect_on_open: bool = False) -> None:
-        from _dialogs import BatchDownloadDialog
+        from _batch_dialogs import BatchDownloadDialog
         logger.info("Open batch download dialog.")
         normalized_input = input_text.strip()
         import copy
@@ -483,7 +483,8 @@ class MainWindow(QMainWindow):
         self._on_url_input_changed()
 
     def _on_detect_clicked(self) -> None:
-        from _dialogs import validate_song_input, InspectWorker, SongConfirmDialog, DownloadOptionsDialog, DownloadProgressDialog, set_button_role
+        from _dialogs import validate_song_input, SongConfirmDialog, DownloadOptionsDialog, DownloadProgressDialog, set_button_role
+        from _workers import InspectWorker
         from batch_inputs import collect_batch_candidates
         from music_fetch import parse_input_resource, MusicFetchError, detect_song
         from error_texts import user_error_message

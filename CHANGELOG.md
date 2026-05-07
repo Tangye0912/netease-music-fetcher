@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.6.0 (2026-05-07)
+
+### Added
+
+- 批量页新增“重试失败项”，仅重试 `download_failed` 行，不重新处理识别失败、不可下载、重复、取消或已成功行。
+- 批量页新增 CSV 导出，字段包含来源、原始输入、歌曲信息、状态、消息、资源大小和选中状态。
+- 新增 `_batch_results.py`，集中批次失败筛选、状态汇总和 CSV 生成逻辑。
+- 新增 `_batch_dialogs.py`，承载批量设置与批量下载对话框。
+- 新增 `tests/test_batch_results.py`，覆盖批量失败筛选、汇总和 CSV 转义。
+
+### Fixed
+
+- 修复主界面单曲检测入口错误导入 `InspectWorker` 导致点击检测失败的问题。
+- 修复 `./music-fetch` 与 `python3 music_fetch.py` CLI 入口空跑问题。
+- 修复下载完成后进入转码阶段时取消操作状态不一致的问题：取消后会清理临时文件与最终输出。
+- 修正 `pyproject.toml` 打包配置，当前平铺模块结构改用显式 `py-modules` 与 `music-fetch` console script。
+
+### Changed
+
+- 精简历史文档：`RELEASE_NOTES_v0.4.0.md`、`RELEASE_NOTES_v0.5.0.md` 的有效信息已合并到本文件与 `ROADMAP.md`，后续以 `CHANGELOG.md` 作为唯一版本历史来源。
+- 批量下载完成或停止时会附带下载失败原因聚合摘要。
+- `BatchRuntimeSettingsDialog` 与 `BatchDownloadDialog` 从 `_dialogs.py` 迁移到 `_batch_dialogs.py`，降低主对话框模块体积。
+
+### QA
+
+- 回归测试：`python3 -m unittest discover -s tests`（87 通过）。
+- 入口验证：`./music-fetch --help`、`python3 music_fetch.py --help` 均正常输出 CLI 帮助。
+
 ## v0.5.1 (2026-05-07)
 
 ### Changed
@@ -26,6 +54,8 @@
 - `fetch_playlist_song_ids` 在歌曲数达到 API 上限(1000)时添加日志警告。
 
 ## v0.5.0 (2026-03-26)
+
+版本定位：批量下载稳定版，重点是让用户可以粘贴混合链接（单曲/歌单/分享文案）并完成可中断、可继续的批量下载流程。
 
 ### Added
 
@@ -57,12 +87,19 @@
 - 批量下载页新增“下载设置”入口，支持不离开批量页调整超时/重试/并发参数并继续下载剩余任务。
 - 批量识别结果增加缓存恢复：同一批输入再次进入批量页时可直接复用上次识别结果，无需重新解析。
 
+### Notes
+
+- 操作路径：主界面输入链接后点击“检测”；多候选或歌单输入会进入批量页；批量页可调整下载设置、勾选歌曲、下载选中项或取消下载。
+- 关键行为：批量下载按设置的并发上限执行；取消后可调整并发/超时参数并继续处理剩余项。
+
 ### QA
 
 - 回归测试：`python3 -m unittest discover -s tests`（63 通过）
 - Python 3.13 回归：`python3.13 -m unittest discover -s tests`（63 通过）
 
 ## v0.4.0 (2026-03-23)
+
+版本定位：单任务下载流程的任务中心化改造，为 v0.5.0 批量下载奠定任务状态、重试和历史记录基础。
 
 ### Added
 
