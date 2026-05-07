@@ -118,28 +118,39 @@ py -3 main.py
 
 ## 7. 项目架构
 
-```
-music_fetch/
-├── main.py                  ← 入口：MainWindow + 启动流程
-├── _dialogs.py              ← 登录、单曲下载、下载管理、软件设置等对话框
-├── _batch_dialogs.py        ← 批量识别、批量下载与批量运行时设置
-├── _batch_results.py        ← 批量结果筛选、汇总与 CSV 导出
-├── _workers.py              ← 3个QThread工作线程
-├── _api.py                  ← 网易云API：HTTP、cookie、资源解析
-├── _audio.py                ← 音频下载 + ffmpeg转码
-├── _cli.py                  ← CLI命令行入口
-├── music_fetch.py           ← 外观层（重新导出三个子模块）
-├── _combo_utils.py          ← 共享QComboBox工具
-├── app_settings.py          ← 全局配置
-├── ui_texts.py              ← 用户可见文案
-├── error_texts.py           ← 错误码→友好文案映射
-├── app_stores.py            ← 会话与下载历史持久化
-├── app_logging.py           ← 日志初始化
-├── batch_inputs.py          ← 批量输入解析
-├── download_tasks.py        ← 任务状态模型
-├── download_retry.py        ← 重试逻辑
-└── tests/                   ← 87个单元测试
-```
+GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”，不是文件职责说明；文件职责以本节为准。
+
+| 路径 | 职责 |
+| --- | --- |
+| `main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
+| `_dialogs.py` | 通用 GUI 对话框与样式辅助，包含登录、单曲确认、下载进度、依赖管理、下载管理、软件设置等。 |
+| `_batch_dialogs.py` | 批量识别与批量下载界面，包含批量设置、失败项重试、CSV 导出和并发下载调度。 |
+| `_batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
+| `_workers.py` | 后台线程：单曲识别、批量识别、下载执行，以及进度、大小、时长格式化辅助。 |
+| `_api.py` | 网易云接口层：链接解析、短链解析、cookie 处理、登录校验、歌曲/歌单/账号 API。 |
+| `_audio.py` | 音频下载与处理：候选资源下载、403 fallback、断点清理、格式推断、ffmpeg 转码。 |
+| `_cli.py` | CLI 命令行入口和脚本化下载流程。 |
+| `music_fetch.py` | 向后兼容外观层，重新导出 `_api.py`、`_audio.py`、`_cli.py` 的公共能力。 |
+| `_combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助，供设置类对话框复用。 |
+| `app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则、项目链接。 |
+| `app_stores.py` | 本地持久化：登录会话、下载历史、状态字段兼容和边界值夹紧。 |
+| `app_logging.py` | 日志路径、日志初始化和敏感值脱敏。 |
+| `batch_inputs.py` | 批量输入解析：多行链接、分享文案、歌单/歌曲来源提示和去重。 |
+| `download_tasks.py` | 下载任务状态模型与最新任务快照。 |
+| `download_retry.py` | 下载管理中失败任务重试的状态判断和目标格式推断。 |
+| `error_texts.py` | 错误码到用户友好提示的映射。 |
+| `ui_texts.py` | GUI 用户可见文案集中管理。 |
+| `music-fetch` | macOS/Linux CLI 包装脚本，调用 `_cli.py`。 |
+| `start_mac.command` | macOS 双击启动 GUI 脚本。 |
+| `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
+| `pyproject.toml` | Python 项目元数据、依赖声明、console script 和平铺模块打包清单。 |
+| `__init__.py` | 兼容平铺模块项目的包标记文件。 |
+| `tests/` | 87 个单元/回归测试，覆盖 API、解析、存储、批量结果、入口脚本和下载 worker。 |
+| `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
+| `CHANGELOG.md` | 唯一版本历史来源。 |
+| `ROADMAP.md` | 版本规划与后续技术债方向。 |
+| `CONTRIBUTING.md` | 提交信息模板和提交前检查命令。 |
+| `.gitignore` | 忽略缓存、日志、本地配置和系统生成物。 |
 
 依赖方向（自底向上）：
 ```
