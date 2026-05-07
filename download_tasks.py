@@ -50,7 +50,7 @@ def normalize_task_state(state: str) -> str:
     return normalized
 
 
-def build_task_id(song_id: str, now_ms: Optional[int] = None) -> str:
+def build_task_id(song_id: str, now_ms: int | None = None) -> str:
     timestamp = now_ms if now_ms is not None else int(time.time() * 1000)
     return f"{song_id}-{timestamp}"
 

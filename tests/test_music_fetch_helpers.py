@@ -32,9 +32,9 @@ class PathHelperTests(unittest.TestCase):
 
 
 class DownloadFallbackTests(unittest.TestCase):
-    @mock.patch("music_fetch._download_audio_stream")
-    @mock.patch("music_fetch.fetch_outer_media_url")
-    @mock.patch("music_fetch.fetch_playable_candidates")
+    @mock.patch("_audio._download_audio_stream")
+    @mock.patch("_audio.fetch_outer_media_url")
+    @mock.patch("_audio.fetch_playable_candidates")
     def test_fallback_to_outer_url_after_candidate_403(self, candidates_mock, outer_mock, download_mock):
         candidates_mock.return_value = [
             music_fetch.PlayableCandidate(
@@ -79,9 +79,9 @@ class DownloadFallbackTests(unittest.TestCase):
             value = music_fetch.fetch_outer_media_url("1", timeout=3)
             self.assertIsNone(value)
 
-    @mock.patch("music_fetch._download_audio_stream")
-    @mock.patch("music_fetch.fetch_outer_media_url")
-    @mock.patch("music_fetch.fetch_playable_candidates")
+    @mock.patch("_audio._download_audio_stream")
+    @mock.patch("_audio.fetch_outer_media_url")
+    @mock.patch("_audio.fetch_playable_candidates")
     def test_all_403_and_outer_unavailable_maps_to_song_unavailable(self, candidates_mock, outer_mock, download_mock):
         candidates_mock.return_value = [
             music_fetch.PlayableCandidate(
@@ -105,8 +105,8 @@ class DownloadFallbackTests(unittest.TestCase):
                 )
             self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
 
-    @mock.patch("music_fetch._download_audio_stream")
-    @mock.patch("music_fetch.fetch_playable_candidates")
+    @mock.patch("_audio._download_audio_stream")
+    @mock.patch("_audio.fetch_playable_candidates")
     def test_prioritize_candidate_by_preferred_format(self, candidates_mock, download_mock):
         candidates_mock.return_value = [
             music_fetch.PlayableCandidate(
@@ -142,11 +142,11 @@ class FormatHelperTests(unittest.TestCase):
         self.assertEqual(music_fetch.infer_audio_format_from_url("https://a.com/foo/bar.mp4"), "m4a")
         self.assertIsNone(music_fetch.infer_audio_format_from_url("https://a.com/foo/bar.bin"))
 
-    @mock.patch("music_fetch.shutil.which", return_value="/usr/local/bin/ffmpeg")
+    @mock.patch("_audio.shutil.which", return_value="/usr/local/bin/ffmpeg")
     def test_is_ffmpeg_available(self, _which_mock):
         self.assertTrue(music_fetch.is_ffmpeg_available())
 
-    @mock.patch("music_fetch.shutil.which", return_value=None)
+    @mock.patch("_audio.shutil.which", return_value=None)
     def test_convert_audio_file_requires_ffmpeg(self, _which_mock):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "a.m4a"

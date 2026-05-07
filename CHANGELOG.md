@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.1 (2026-05-07)
+
+### Changed
+
+- 重构：`main.py` 拆分为 `_workers.py`(工作线程) + `_dialogs.py`(对话框)，文件从 3290 行降至 665 行。
+- 重构：`music_fetch.py` 拆分为 `_api.py`(API) + `_audio.py`(下载/转码) + `_cli.py`(CLI)，原文件改为外观层。
+- 常量去重：`URL_IN_TEXT_PATTERN`、`TRAILING_URL_PUNCTUATION`、`SHORT_LINK_HOSTS` 集中到 `app_settings.py`。
+- Combo 工具提取到 `_combo_utils.py`，消除两处对话框间的重复代码。
+- `resolve_output_path` 默认格式 `"mp4"` → `"mp3"`（与 GUI 默认一致）。
+
+### Fixed
+
+- 6 处 `except Exception: pass` 改为捕获具体异常类型。
+- Lambda 闭包捕获循环变量改为 `functools.partial`。
+- `MainWindow` 构造函数中 `QSize` 未导入导致 NameError。
+- `main()` 中 `DOWNLOAD_HISTORY_FILE` 未导入导致 NameError。
+- `_analyze_input_after_delay` 中 `BATCH_ROUTE_MIN_COUNT` 引用了错误的模块。
+
+### Added
+
+- 新增 `pyproject.toml`（项目元数据 + 依赖声明）。
+- 补全 `.gitignore`（Python/IDE/缓存条目）。
+- 新增 `tests/test_app_settings.py`、`tests/test_combo_utils.py`，新增 15 个测试，总数 63 → 78。
+- `fetch_playlist_song_ids` 在歌曲数达到 API 上限(1000)时添加日志警告。
+
 ## v0.5.0 (2026-03-26)
 
 ### Added

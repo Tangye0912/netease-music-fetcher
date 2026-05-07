@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import re
 
-URL_IN_TEXT_PATTERN = re.compile(r"https?://[^\s]+", re.IGNORECASE)
-TRAILING_URL_PUNCTUATION = ")]}>,.;!?\"'，。；：、）】》"
+from app_settings import TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
+
 PLAYLIST_SHARE_PATTERN = re.compile(r"歌单《([^》]+)》")
 SONG_SHARE_PATTERN = re.compile(r"分享(.+?)的单曲《([^》]+)》")
 PLAYLIST_SHARE_WITH_URL_PATTERN = re.compile(r"分享.*?歌单《([^》]+)》\s*(https?://[^\s]+)")

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "music-fetch"
+version = "0.5.1"
+description = "\u7f51\u6613\u4e91\u97f3\u4e50\u5355\u66f2\u4e0b\u8f7d\u5de5\u5177"
+requires-python = ">=3.9"
+dependencies = [
+    "PySide6>=6.5",
+]
+
+[project.optional-dependencies]
+webengine = ["PySide6-Addons>=6.5"]
+
+[project.urls]
+Homepage = "https://github.com/Tangye0912/netease-music-fetcher"
+
+[tool.setuptools.packages.find]
+include = ["music_fetch*"]
