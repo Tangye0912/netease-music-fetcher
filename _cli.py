@@ -27,10 +27,8 @@ from app_logging import default_log_path, setup_logging
 from _audio import download_audio_with_progress, resolve_output_path
 
 
-def run_download(song_url: str, out_dir: Path, cookie_file: Path, out_format: str = "mp4", timeout: int = 30) -> DownloadResult:
-    if out_format.lower() != "mp4":
-        raise MusicFetchError("UNSUPPORTED_FORMAT", "Only mp4 output is supported in v1.")
-    logger.info("Run download started. out_dir=%s format=%s", out_dir, out_format)
+def run_download(song_url: str, out_dir: Path, cookie_file: Path, timeout: int = 30) -> DownloadResult:
+    logger.info("Run download started. out_dir=%s", out_dir)
     song_id = parse_song_id(song_url)
     cookie = load_cookie(cookie_file)
     media_url, media_duration = fetch_playable_url(song_id, cookie, timeout=timeout)
@@ -47,7 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="music-fetch", description="Fetch a playable NetEase Cloud Music track by song URL.")
     parser.add_argument("--url", required=True, help="NetEase song URL or numeric song id.")
     parser.add_argument("--out", default=DEFAULT_OUT_DIR, help=f"Output directory (default: {DEFAULT_OUT_DIR}).")
-    parser.add_argument("--format", default="mp4", help="Output format (v1 only supports mp4).")
     parser.add_argument("--cookie-file", default=DEFAULT_COOKIE_FILE, help=f"Cookie file path (default: {DEFAULT_COOKIE_FILE}).")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds (default: 30).")
     parser.add_argument("--log-file", default=str(default_log_path()), help=f"Log file path (default: {default_log_path()}).")
@@ -60,7 +57,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     log_path = setup_logging(Path(args.log_file))
     logger.info("CLI started. log_path=%s", log_path)
     try:
-        result = run_download(song_url=args.url, out_dir=Path(args.out).expanduser(), cookie_file=Path(args.cookie_file).expanduser(), out_format=args.format, timeout=args.timeout)
+        result = run_download(song_url=args.url, out_dir=Path(args.out).expanduser(), cookie_file=Path(args.cookie_file).expanduser(), timeout=args.timeout)
         duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
         print(f"SUCCESS path={result.output_path} size_bytes={result.size_bytes} duration_ms={duration_text}")
         logger.info("CLI succeeded. output=%s", result.output_path)

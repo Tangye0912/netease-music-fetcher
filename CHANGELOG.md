@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0 (2026-07-01)
+
+### Fixed
+
+- 修复批量下载中 worker 线程异常结束时未写入下载历史记录的问题。
+- 修复批量检测完成后无条件重置所有可下载歌曲为未选中状态的问题，现在默认保持 `BatchInspectWorker` 设置的选中状态。
+- 修复 CLI 中 `--format` 参数被接受但无效的问题（移除该参数，CLI 输出固定为 mp4）。
+
+### Changed
+
+- `DownloadWorker` 的取消标志从普通 `bool` 改为 `threading.Event`，确保跨线程可见性。
+- `BatchDownloadDialog` 中用显式 `_initialized` 标志位替换 `hasattr` 防御性检查。
+- `fetch_song_metadata` 在网络错误时添加 `logger.warning` 日志，不再静默吞掉错误。
+- 清理 `main.py` 中约 15 处重复的局部导入（`set_label_state` 等），移除 `_workers.py` 和 `_dialogs.py` 中未使用的导入。
+- 优化 `tests/test_entrypoints.py`：删除脆弱的字符串匹配断言，为 shell wrapper 测试添加 Windows 平台跳过。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（全部通过，Windows 平台上 1 个 shell wrapper 测试正确跳过）。
+
 ## v0.6.0 (2026-05-07)
 
 ### Added

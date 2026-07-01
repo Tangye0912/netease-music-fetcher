@@ -149,7 +149,6 @@ class RunDownloadTests(unittest.TestCase):
                 song_url="https://music.163.com/song?id=42",
                 out_dir=out_dir,
                 cookie_file=cookie_file,
-                out_format="mp4",
                 timeout=10,
             )
 

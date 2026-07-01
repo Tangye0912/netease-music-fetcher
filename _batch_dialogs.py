@@ -348,6 +348,7 @@ class BatchDownloadDialog(QDialog):
         if self.auto_detect_on_open and not self._restored_from_cache and self.input_edit.toPlainText().strip():
             QTimer.singleShot(0, self._on_detect_clicked)
         QTimer.singleShot(0, self._adjust_table_columns)
+        self._initialized = True
 
     def _current_input_signature(self) -> str:
         return self.input_edit.toPlainText().strip()
@@ -394,7 +395,7 @@ class BatchDownloadDialog(QDialog):
         self._update_download_button_state()
 
     def _update_detect_button_state(self) -> None:
-        if not hasattr(self, "detect_button"):
+        if not self._initialized:
             return
         signature = self._current_input_signature()
         has_input = bool(signature)
@@ -409,7 +410,7 @@ class BatchDownloadDialog(QDialog):
             self.detect_button.setToolTip("")
 
     def _update_download_button_state(self) -> None:
-        if not hasattr(self, "download_button"):
+        if not self._initialized:
             return
         running_detect = bool(self.inspect_worker and self.inspect_worker.isRunning())
         selected_ready = self._selected_ready_rows()
@@ -543,9 +544,6 @@ class BatchDownloadDialog(QDialog):
     def _on_detect_completed(self, rows: list[_workers.BatchDetectRow]) -> None:
         self._last_detect_signature = self._current_input_signature()
         self.rows = rows
-        for row in self.rows:
-            if row.status == "ready":
-                row.selected = False
         self._render_rows()
         self.batch_progress.setRange(0, max(len(rows), 1))
         self.batch_progress.setValue(len(rows))
@@ -884,11 +882,23 @@ class BatchDownloadDialog(QDialog):
         if id(worker) not in self._download_workers:
             return
         row = self._worker_rows.get(id(worker))
+        output_path = self._worker_output_paths.get(id(worker))
         if row and row.status == "downloading":
             row.status = "download_failed"
             row.selected = False
             row.message = "UNKNOWN_ERROR: 下载线程异常结束"
             self._download_failed += 1
+            self.history_store.add(
+                DownloadRecord(
+                    song_id=row.song_id,
+                    song_name=row.song_name or f"song-{row.song_id}",
+                    output_path=str(output_path) if output_path else "",
+                    size_bytes=0,
+                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status=TASK_STATE_FAILED,
+                    error_code="UNKNOWN_ERROR",
+                )
+            )
         self._finalize_download_worker(worker)
 
     def _finalize_download_worker(self, worker: _workers.DownloadWorker) -> None:

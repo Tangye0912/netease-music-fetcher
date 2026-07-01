@@ -9,6 +9,7 @@ extracted into _dialogs.py and _workers.py respectively for maintainability.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from app_logging import default_log_path, get_logger, setup_logging
-from app_settings import APP_VERSION, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API, SESSION_FILE
+from app_settings import APP_VERSION, DEFAULT_DOWNLOAD_DIR, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API, SESSION_FILE
 from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADING, TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS, DownloadTaskSnapshot, build_task_id, next_task_snapshot
 from music_fetch import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, is_ffmpeg_available, parse_input_resource
@@ -108,8 +109,6 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-
-        from _dialogs import build_app_stylesheet, clamp_ui_font_size, set_button_role, set_back_button, set_secondary_button, set_label_state, load_avatar_icon, clear_embedded_login_state, validate_song_input
 
         account_row = QHBoxLayout()
         self.avatar_button = QToolButton()
@@ -207,7 +206,6 @@ class MainWindow(QMainWindow):
         self._setup_accessibility()
 
     def _setup_accessibility(self) -> None:
-        from _dialogs import set_label_state
         self.url_input.setAccessibleName(T.ACC_INPUT_SONG_LINK)
         self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
         self.dependency_button.setAccessibleName(T.ACC_BTN_DEP_MANAGER)
@@ -219,7 +217,6 @@ class MainWindow(QMainWindow):
         self.setTabOrder(self.manager_button, self.settings_button)
 
     def _set_status(self, text: str, state: str) -> None:
-        from _dialogs import set_label_state
         normalized = (text or "").strip()
         self.status_label.setVisible(bool(normalized))
         self.status_label.setText(normalized)
@@ -227,7 +224,6 @@ class MainWindow(QMainWindow):
             set_label_state(self.status_label, state)
 
     def _on_version_link_activated(self, _link: str) -> None:
-        from _dialogs import set_label_state
         self._set_status(T.STATUS_CHECKING_UPDATE, "muted")
         try:
             latest_version, release_url = fetch_latest_project_version(timeout=6)
@@ -251,7 +247,6 @@ class MainWindow(QMainWindow):
         self._sync_detect_button_state()
 
     def _on_url_input_changed(self, *_args: object) -> None:
-        from _dialogs import set_label_state
         raw = self.url_input.toPlainText().strip()
         self._input_analysis_ready = False
         self._analysis_candidate_count = 0
@@ -269,9 +264,7 @@ class MainWindow(QMainWindow):
         self._sync_detect_button_state()
 
     def _analyze_input_after_delay(self) -> None:
-        from _dialogs import set_label_state, validate_song_input
         from batch_inputs import collect_batch_candidates
-        from _dialogs import BATCH_ROUTE_MIN_COUNT
         raw = self.url_input.toPlainText().strip()
         if not raw:
             self._input_analysis_ready = False
@@ -323,7 +316,6 @@ class MainWindow(QMainWindow):
         logger.info("Download task state updated. task_id=%s song_id=%s state=%s error_code=%s", self.latest_download_task.task_id, self.latest_download_task.song_id, self.latest_download_task.state, self.latest_download_task.error_code)
 
     def _refresh_ffmpeg_status(self) -> None:
-        from _dialogs import set_label_state
         self.ffmpeg_available = is_ffmpeg_available()
         if self.ffmpeg_available:
             self.dependency_hint_label.setVisible(False)
@@ -334,7 +326,6 @@ class MainWindow(QMainWindow):
         set_label_state(self.dependency_hint_label, "warning")
 
     def _apply_account_profile(self, profile: Optional[AccountProfile]) -> None:
-        from _dialogs import set_label_state, load_avatar_icon
         self.account_profile = profile
         if not profile:
             self.nickname_label.setText(T.ACCOUNT_LABEL_NICKNAME_LOGOUT)
@@ -377,7 +368,6 @@ class MainWindow(QMainWindow):
         self._sync_detect_button_state()
 
     def _on_switch_account(self) -> None:
-        from _dialogs import LoginDialog, clear_embedded_login_state
         logger.info("User requested switch account.")
         clear_embedded_login_state()
         dialog = LoginDialog()
@@ -387,7 +377,6 @@ class MainWindow(QMainWindow):
             logger.info("Switch account canceled; keep current session.")
 
     def _on_logout_account(self) -> None:
-        from _dialogs import clear_embedded_login_state
         if not self.session.cookie:
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_NOT_LOGGED_IN)
             return
@@ -412,13 +401,11 @@ class MainWindow(QMainWindow):
         self._sync_detect_button_state()
 
     def _open_download_manager(self) -> None:
-        from _dialogs import DownloadManagerDialog
         logger.info("Open download manager.")
         dialog = DownloadManagerDialog(history_store=self.history_store, cookie=self.session.cookie, download_timeout_sec=self.session.download_timeout_sec, download_retry_count=self.session.download_retry_count, parent=self)
         dialog.exec()
 
     def _open_dependency_manager(self) -> None:
-        from _dialogs import DependencyManagerDialog
         logger.info("Open dependency manager.")
         dialog = DependencyManagerDialog(parent=self)
         dialog.exec()
@@ -428,7 +415,6 @@ class MainWindow(QMainWindow):
         from _batch_dialogs import BatchDownloadDialog
         logger.info("Open batch download dialog.")
         normalized_input = input_text.strip()
-        import copy
         use_cached = bool(normalized_input and normalized_input == self._batch_cached_signature and self._batch_cached_rows)
         dialog = BatchDownloadDialog(
             cookie=self.session.cookie, history_store=self.history_store,
@@ -454,7 +440,6 @@ class MainWindow(QMainWindow):
             self._batch_cached_rows = copy.deepcopy(dialog.rows)
 
     def _open_ui_settings(self) -> None:
-        from _dialogs import UiSettingsDialog, clamp_ui_font_size, apply_app_style
         logger.info("Open ui settings dialog.")
         dialog = UiSettingsDialog(
             current_font_size=self.session.ui_font_size,
@@ -483,14 +468,7 @@ class MainWindow(QMainWindow):
         self._on_url_input_changed()
 
     def _on_detect_clicked(self) -> None:
-        from _dialogs import validate_song_input, SongConfirmDialog, DownloadOptionsDialog, DownloadProgressDialog, set_button_role
-        from _workers import InspectWorker
         from batch_inputs import collect_batch_candidates
-        from music_fetch import parse_input_resource, MusicFetchError, detect_song
-        from error_texts import user_error_message
-        from download_tasks import build_task_id
-        from app_settings import DEFAULT_GUI_TARGET_FORMAT, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT
-        from app_stores import DownloadRecord
 
         if self._detect_busy:
             return
@@ -519,7 +497,6 @@ class MainWindow(QMainWindow):
         valid, message = validate_song_input(song_url)
         if not valid:
             self.input_feedback_label.setText(message)
-            from _dialogs import set_label_state
             set_label_state(self.input_feedback_label, "error")
             QMessageBox.warning(self, T.TITLE_PARAM_ERROR, message)
             self._set_status(T.STATUS_DETECT_FAILED, "error")
@@ -547,15 +524,10 @@ class MainWindow(QMainWindow):
         self._set_status(T.STATUS_DETECT_FAILED, "error")
 
     def _record_download_result(self, song_id: str, song_name: str, output_path: Path, size_bytes: int, status: str, error_code: str = "") -> None:
-        from app_stores import DownloadRecord
         record = DownloadRecord(song_id=song_id, song_name=song_name or f"song-{song_id}", output_path=str(output_path), size_bytes=size_bytes, downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), status=status, error_code=error_code)
         self.history_store.add(record)
 
     def _on_detect_succeeded(self, result: SongDetectionResult) -> None:
-        from _dialogs import SongConfirmDialog, DownloadOptionsDialog, DownloadProgressDialog, set_label_state, set_button_role, is_ffmpeg_available
-        from download_tasks import TASK_STATE_PENDING, TASK_STATE_DOWNLOADING, TASK_STATE_SUCCESS, TASK_STATE_FAILED, TASK_STATE_CANCELED, build_task_id
-        from app_stores import DownloadRecord
-        from error_texts import user_error_message
         logger.info("Detection succeeded. song_id=%s", result.song_id)
         self._set_status(T.STATUS_DETECT_DONE, "success")
         confirm = SongConfirmDialog(result)
@@ -569,7 +541,6 @@ class MainWindow(QMainWindow):
                 self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
                 logger.info("Download canceled before options because ffmpeg is missing.")
                 return
-        from app_settings import DEFAULT_DOWNLOAD_DIR
         options = DownloadOptionsDialog(result, last_download_dir=self.session.last_download_dir)
         if options.exec() != QDialog.Accepted or not options.output_path:
             self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
@@ -607,9 +578,6 @@ class MainWindow(QMainWindow):
 
 
 def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSession]:
-    from _dialogs import LoginDialog, WEB_ENGINE_AVAILABLE, clear_embedded_login_state
-    from music_fetch import check_login_status, MusicFetchError
-    import ui_texts as T
     session = session_store.load()
     if session.cookie:
         try:
@@ -648,7 +616,6 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
 
 
 def main() -> int:
-    from _dialogs import apply_app_style
     log_path = setup_logging(default_log_path(), level=logging.INFO)
     app = QApplication(sys.argv)
     logger.info("GUI app started. log_path=%s", log_path)

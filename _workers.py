@@ -10,11 +10,8 @@ which are shared by both workers and dialogs.
 
 from __future__ import annotations
 
-import copy
-import json
-import logging
 import re
-import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -334,10 +331,10 @@ class DownloadWorker(QThread):
         # v0.4.0: keep timeout bounded so retry/download behavior is predictable.
         self.timeout = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(timeout)))
         self.retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(retry_count)))
-        self._cancel_requested = False
+        self._cancel_event = threading.Event()
 
     def request_cancel(self) -> None:
-        self._cancel_requested = True
+        self._cancel_event.set()
 
     def _cleanup_paths(self, *paths: Path) -> None:
         for path in paths:
@@ -345,7 +342,7 @@ class DownloadWorker(QThread):
                 path.unlink(missing_ok=True)
 
     def _finish_if_canceled(self, *paths: Path) -> bool:
-        if not self._cancel_requested:
+        if not self._cancel_event.is_set():
             return False
         self._cleanup_paths(*paths)
         logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
@@ -368,7 +365,7 @@ class DownloadWorker(QThread):
             self.progress.emit(downloaded, total if total is not None else -1, speed)
 
         def should_cancel() -> bool:
-            return self._cancel_requested
+            return self._cancel_event.is_set()
 
         try:
             # Download to a temporary source file first, then convert/move to final path.
