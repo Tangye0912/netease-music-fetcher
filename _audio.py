@@ -8,6 +8,14 @@ _api for data classes and API functions — no GUI dependency.
 
 from __future__ import annotations
 
+__all__ = [
+    "sanitize_filename", "dedupe_path", "resolve_output_path",
+    "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
+    "download_audio", "download_audio_with_progress", "download_song_with_fallback",
+    "prioritize_candidates_by_format", "fetch_outer_media_url",
+    "SUPPORTED_GUI_AUDIO_FORMATS",
+]
+
 import re
 import shutil
 import subprocess

@@ -7,6 +7,22 @@ Depended on by _audio.py (download) and _cli.py (CLI entry point).  No reverse d
 
 from __future__ import annotations
 
+__all__ = [
+    "MusicFetchError", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
+    "ProgressCallback", "CancelChecker",
+    "parse_song_id", "parse_playlist_id", "parse_input_resource",
+    "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
+    "load_cookie", "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
+    "check_login_status", "fetch_account_profile",
+    "fetch_playable_candidates", "fetch_playable_url", "fetch_song_metadata", "fetch_playlist_song_ids",
+    "detect_song", "normalize_media_url",
+    "SUPPORTED_GUI_AUDIO_FORMATS",
+    "USER_AGENT", "OUTER_MEDIA_URL_API", "DEFAULT_OUT_DIR", "DEFAULT_COOKIE_FILE",
+    "PLAYABLE_REQUEST_PROFILES",
+    "SHORT_LINK_HOSTS",
+    "logger",
+]
+
 import json
 import logging
 import re

@@ -26,6 +26,7 @@ from app_settings import (
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
+    clamp,
 )
 from app_stores import DownloadHistoryStore, DownloadRecord
 from download_tasks import (
@@ -135,30 +136,21 @@ class BatchRuntimeSettingsDialog(QDialog):
         layout.addLayout(button_row)
 
     def _on_save(self) -> None:
-        self.detect_timeout_sec = max(
-            MIN_DETECT_TIMEOUT_SEC,
-            min(MAX_DETECT_TIMEOUT_SEC, _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC)),
+        self.detect_timeout_sec = clamp(
+            _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
+            DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC,
         )
-        self.download_timeout_sec = max(
-            MIN_DOWNLOAD_TIMEOUT_SEC,
-            min(
-                MAX_DOWNLOAD_TIMEOUT_SEC,
-                _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            ),
+        self.download_timeout_sec = clamp(
+            _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
+            DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC,
         )
-        self.download_retry_count = max(
-            MIN_DOWNLOAD_RETRY_COUNT,
-            min(
-                MAX_DOWNLOAD_RETRY_COUNT,
-                _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            ),
+        self.download_retry_count = clamp(
+            _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
+            DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT,
         )
-        self.download_concurrency = max(
-            MIN_DOWNLOAD_CONCURRENCY,
-            min(
-                MAX_DOWNLOAD_CONCURRENCY,
-                _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
-            ),
+        self.download_concurrency = clamp(
+            _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
+            DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY,
         )
         self.accept()
 
@@ -183,10 +175,10 @@ class BatchDownloadDialog(QDialog):
         super().__init__(parent)
         self.cookie = cookie
         self.history_store = history_store
-        self.detect_timeout_sec = max(MIN_DETECT_TIMEOUT_SEC, min(MAX_DETECT_TIMEOUT_SEC, int(detect_timeout_sec)))
-        self.download_timeout_sec = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(download_timeout_sec)))
-        self.download_retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(download_retry_count)))
-        self.download_concurrency = max(MIN_DOWNLOAD_CONCURRENCY, min(MAX_DOWNLOAD_CONCURRENCY, int(download_concurrency)))
+        self.detect_timeout_sec = clamp(detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC)
+        self.download_timeout_sec = clamp(download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
+        self.download_retry_count = clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
+        self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
         self.ffmpeg_available = is_ffmpeg_available()
         self.rows: list[_workers.BatchDetectRow] = []
         self.inspect_worker: Optional[_workers.BatchInspectWorker] = None
@@ -552,6 +544,8 @@ class BatchDownloadDialog(QDialog):
         self._update_detect_button_state()
         self._update_download_button_state()
         QTimer.singleShot(0, self._adjust_table_columns)
+        if not rows:
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_DETECT_EMPTY)
 
     def _render_rows(self) -> None:
         self._table_syncing = True

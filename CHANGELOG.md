@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.1 (2026-07-01)
+
+### Fixed
+
+- `pyproject.toml` 版本号从 0.6.0 同步到 0.9.1（之前 3 个版本遗漏同步）。
+- 为 `_api.py`、`_audio.py`、`_cli.py` 添加 `__all__` 定义，`music_fetch.py` 星号导入不再泄漏内部实现。
+- 修复 `_api.py` `__all__` 遗漏 `SHORT_LINK_HOSTS` 导致 `from music_fetch import *` 丢失该符号。
+
+### Changed
+
+- 批量检测 0 条结果时弹窗提示用户"未识别到任何歌曲"。
+- 删除 `BatchDetectRow` 中未使用的 `can_download` 属性。
+- 提取通用 `clamp(value, default, min_val, max_val)` 函数，统一 `app_stores.py`、`_dialogs.py`、`_batch_dialogs.py`、`_workers.py` 中约 17 处重复钳位模式。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（115 通过，1 跳过）。
+
 ## v0.9.0 (2026-07-01)
 
 ### Fixed

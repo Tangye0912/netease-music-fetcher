@@ -7,6 +7,8 @@ and main() (CLI entry).  Depends on _api (fetching) and _audio (saving).
 
 from __future__ import annotations
 
+__all__ = ["run_download", "build_parser", "main"]
+
 import argparse
 import sys
 from pathlib import Path

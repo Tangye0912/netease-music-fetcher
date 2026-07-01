@@ -26,6 +26,7 @@ from app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     MIN_UI_FONT_SIZE,
     UNKNOWN_SONG_NAME,
+    clamp,
 )
 from download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
 
@@ -99,43 +100,23 @@ class SessionStore:
 
     @staticmethod
     def _safe_ui_font_size(value: object) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_UI_FONT_SIZE
-        return max(MIN_UI_FONT_SIZE, min(MAX_UI_FONT_SIZE, parsed))
+        return clamp(value, DEFAULT_UI_FONT_SIZE, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
 
     @staticmethod
     def _safe_detect_timeout(value: object) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_DETECT_TIMEOUT_SEC
-        return max(MIN_DETECT_TIMEOUT_SEC, min(MAX_DETECT_TIMEOUT_SEC, parsed))
+        return clamp(value, DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC)
 
     @staticmethod
     def _safe_download_timeout(value: object) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_DOWNLOAD_TIMEOUT_SEC
-        return max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, parsed))
+        return clamp(value, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
 
     @staticmethod
     def _safe_download_retry_count(value: object) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_DOWNLOAD_RETRY_COUNT
-        return max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, parsed))
+        return clamp(value, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
 
     @staticmethod
     def _safe_download_concurrency(value: object) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_DOWNLOAD_CONCURRENCY
-        return max(MIN_DOWNLOAD_CONCURRENCY, min(MAX_DOWNLOAD_CONCURRENCY, parsed))
+        return clamp(value, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
 
 
 class DownloadHistoryStore:

@@ -50,6 +50,7 @@ from app_settings import (
     PROJECT_RELEASE_API,
     PROJECT_TAGS_API,
     SESSION_FILE,
+    clamp,
 )
 from download_retry import can_retry_status, retry_target_format
 from download_tasks import (
@@ -190,11 +191,7 @@ def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
 
 
 def clamp_ui_font_size(value: object) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_UI_FONT_SIZE
-    return max(MIN_UI_FONT_SIZE, min(MAX_UI_FONT_SIZE, parsed))
+    return clamp(value, DEFAULT_UI_FONT_SIZE, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
 
 
 def build_app_stylesheet(font_size: int) -> str:
@@ -1151,19 +1148,10 @@ class UiSettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.font_size = clamp_ui_font_size(current_font_size)
-        self.detect_timeout_sec = max(MIN_DETECT_TIMEOUT_SEC, min(MAX_DETECT_TIMEOUT_SEC, int(detect_timeout_sec)))
-        self.download_timeout_sec = max(
-            MIN_DOWNLOAD_TIMEOUT_SEC,
-            min(MAX_DOWNLOAD_TIMEOUT_SEC, int(download_timeout_sec)),
-        )
-        self.download_retry_count = max(
-            MIN_DOWNLOAD_RETRY_COUNT,
-            min(MAX_DOWNLOAD_RETRY_COUNT, int(download_retry_count)),
-        )
-        self.download_concurrency = max(
-            MIN_DOWNLOAD_CONCURRENCY,
-            min(MAX_DOWNLOAD_CONCURRENCY, int(download_concurrency)),
-        )
+        self.detect_timeout_sec = clamp(detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC)
+        self.download_timeout_sec = clamp(download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
+        self.download_retry_count = clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
+        self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
         self.setWindowTitle(T.UI_SETTINGS_TITLE)
         self.resize(520, 320)
 
@@ -1239,33 +1227,21 @@ class UiSettingsDialog(QDialog):
         self._refresh_preview()
 
     def _on_download_settings_changed(self, *_args: object) -> None:
-        self.detect_timeout_sec = max(
-            MIN_DETECT_TIMEOUT_SEC,
-            min(
-                MAX_DETECT_TIMEOUT_SEC,
-                _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            ),
+        self.detect_timeout_sec = clamp(
+            _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
+            DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC,
         )
-        self.download_timeout_sec = max(
-            MIN_DOWNLOAD_TIMEOUT_SEC,
-            min(
-                MAX_DOWNLOAD_TIMEOUT_SEC,
-                _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            ),
+        self.download_timeout_sec = clamp(
+            _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
+            DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC,
         )
-        self.download_retry_count = max(
-            MIN_DOWNLOAD_RETRY_COUNT,
-            min(
-                MAX_DOWNLOAD_RETRY_COUNT,
-                _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            ),
+        self.download_retry_count = clamp(
+            _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
+            DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT,
         )
-        self.download_concurrency = max(
-            MIN_DOWNLOAD_CONCURRENCY,
-            min(
-                MAX_DOWNLOAD_CONCURRENCY,
-                _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
-            ),
+        self.download_concurrency = clamp(
+            _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
+            DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY,
         )
         self._refresh_preview()
 

@@ -47,6 +47,7 @@ from app_settings import (
     PROJECT_RELEASE_API,
     PROJECT_TAGS_API,
     SESSION_FILE,
+    clamp,
 )
 from batch_inputs import collect_batch_candidates, source_hint_map
 from download_retry import can_retry_status, retry_target_format
@@ -158,10 +159,6 @@ class BatchDetectRow:
     message: str = ""
     media_size_bytes: int = 0
     selected: bool = False
-
-    @property
-    def can_download(self) -> bool:
-        return self.status == "ready"
 
 
 class BatchInspectWorker(QThread):
@@ -355,8 +352,8 @@ class DownloadWorker(QThread):
         self.cookie = cookie
         self.target_format = target_format.lower().strip()
         # v0.4.0: keep timeout bounded so retry/download behavior is predictable.
-        self.timeout = max(MIN_DOWNLOAD_TIMEOUT_SEC, min(MAX_DOWNLOAD_TIMEOUT_SEC, int(timeout)))
-        self.retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(retry_count)))
+        self.timeout = clamp(timeout, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
+        self.retry_count = clamp(retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
         self._cancel_event = threading.Event()
 
     def request_cancel(self) -> None:

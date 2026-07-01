@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"
@@ -44,3 +44,12 @@ UNKNOWN_SONG_NAME = "未知歌曲"
 URL_IN_TEXT_PATTERN = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 TRAILING_URL_PUNCTUATION = ")]}>,.;!?\"'，。；：、）】》"
 SHORT_LINK_HOSTS: set[str] = {"163cn.tv", "www.163cn.tv"}
+
+
+def clamp(value: object, default: int, min_val: int, max_val: int) -> int:
+    """Safely parse value as int and clamp to [min_val, max_val]."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(min_val, min(max_val, parsed))
