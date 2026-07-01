@@ -34,7 +34,7 @@ from download_tasks import (
     TASK_STATE_SUCCESS,
     build_task_id,
 )
-from error_texts import user_error_message
+from error_texts import UNKNOWN_ERROR, user_error_message
 from music_fetch import (
     MusicFetchError,
     SUPPORTED_GUI_AUDIO_FORMATS,
@@ -887,7 +887,7 @@ class BatchDownloadDialog(QDialog):
         if row and row.status == "downloading":
             row.status = "download_failed"
             row.selected = False
-            row.message = "UNKNOWN_ERROR: 下载线程异常结束"
+            row.message = T.MSG_BATCH_WORKER_UNEXPECTED
             self._download_failed += 1
             self.history_store.add(
                 DownloadRecord(
@@ -897,7 +897,7 @@ class BatchDownloadDialog(QDialog):
                     size_bytes=0,
                     downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     status=TASK_STATE_FAILED,
-                    error_code="UNKNOWN_ERROR",
+                    error_code=UNKNOWN_ERROR,
                 )
             )
         self._finalize_download_worker(worker)

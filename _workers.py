@@ -61,7 +61,7 @@ from download_tasks import (
     next_task_snapshot,
 )
 from app_stores import AppSession, DownloadHistoryStore, DownloadRecord
-from error_texts import user_error_message
+from error_texts import UNKNOWN_ERROR, user_error_message
 from music_fetch import (
     AccountProfile,
     MusicFetchError,
@@ -184,7 +184,7 @@ class BatchInspectWorker(QThread):
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover
             logger.exception("BatchInspectWorker unexpected error.")
-            self.failed.emit("UNKNOWN_ERROR", str(err))
+            self.failed.emit(UNKNOWN_ERROR, str(err))
 
     def _detect_rows(self) -> list[BatchDetectRow]:
         # v0.5.0: parse mixed pasted text into normalized batch candidates.
@@ -329,7 +329,7 @@ class InspectWorker(QThread):
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover
             logger.exception("InspectWorker unexpected error.")
-            self.failed.emit("UNKNOWN_ERROR", str(err))
+            self.failed.emit(UNKNOWN_ERROR, str(err))
 
 
 class DownloadWorker(QThread):
@@ -488,7 +488,7 @@ class DownloadWorker(QThread):
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover
             logger.exception("DownloadWorker unexpected error. task_id=%s", self.task_id)
-            self.failed.emit("UNKNOWN_ERROR", str(err))
+            self.failed.emit(UNKNOWN_ERROR, str(err))
         finally:
             stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
             if stale_source.exists():

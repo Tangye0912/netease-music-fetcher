@@ -1,5 +1,6 @@
 """Tests for BatchDownloadDialog pure-logic methods and download scheduling."""
 import tempfile
+from error_texts import UNKNOWN_ERROR
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -303,7 +304,7 @@ class BatchDialogDownloadSchedulingTests(unittest.TestCase):
         records = self.history_store.load()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].status, TASK_STATE_FAILED)
-        self.assertEqual(records[0].error_code, "UNKNOWN_ERROR")
+        self.assertEqual(records[0].error_code, UNKNOWN_ERROR)
 
     def test_on_download_worker_finished_already_handled_is_noop(self):
         # Worker already removed from _download_workers (by succeeded/failed callback)

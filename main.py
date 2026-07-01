@@ -46,8 +46,25 @@ from error_texts import user_error_message
 import ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
-from _workers import *       # BatchDetectRow, BatchInspectWorker, InspectWorker, DownloadWorker, format_bytes, format_duration, probe_media_size_bytes
-from _dialogs import *       # all dialog classes + helpers + WEB_ENGINE_AVAILABLE
+from _workers import BatchDetectRow, InspectWorker
+from _dialogs import (
+    BATCH_ROUTE_MIN_COUNT,
+    WEB_ENGINE_AVAILABLE,
+    LoginDialog,
+    SongConfirmDialog,
+    DownloadOptionsDialog,
+    DownloadProgressDialog,
+    DependencyManagerDialog,
+    DownloadManagerDialog,
+    UiSettingsDialog,
+    apply_app_style,
+    clamp_ui_font_size,
+    clear_embedded_login_state,
+    load_avatar_icon,
+    set_button_role,
+    set_label_state,
+    validate_song_input,
+)
 
 logger = get_logger("music_fetch.gui")
 
@@ -227,9 +244,13 @@ class MainWindow(QMainWindow):
         self._set_status(T.STATUS_CHECKING_UPDATE, "muted")
         try:
             latest_version, release_url = fetch_latest_project_version(timeout=6)
-        except Exception as err:
+        except RuntimeError as err:
             self._set_status("", "muted")
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
+            return
+        except (error.URLError, error.HTTPError, OSError) as err:
+            self._set_status("", "muted")
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=f"网络错误: {err}"))
             return
         current_key = version_key(APP_VERSION)
         latest_key = version_key(latest_version)
@@ -462,7 +483,7 @@ class MainWindow(QMainWindow):
         if app is not None:
             apply_app_style(app, normalized)
         self._set_status(
-            f"状态：设置已更新（字体 {normalized}px，检测超时 {self.session.detect_timeout_sec}s，下载超时 {self.session.download_timeout_sec}s，重试 {self.session.download_retry_count} 次，并发上限 {self.session.download_concurrency}）",
+            T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency),
             "success",
         )
         self._on_url_input_changed()

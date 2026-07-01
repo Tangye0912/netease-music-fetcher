@@ -240,6 +240,7 @@ MSG_BATCH_INPUT_CHANGED = "输入已变化，请先重新识别，再下载选�
 MSG_BATCH_EXPORT_EMPTY = "当前没有批次结果可导出。"
 MSG_BATCH_EXPORT_DONE = "批次结果已导出：{path}"
 MSG_BATCH_EXPORT_FAILED = "批次结果导出失败：{message}"
+MSG_BATCH_WORKER_UNEXPECTED = "UNKNOWN_ERROR: 下载线程异常结束"
 
 ACC_INPUT_SONG_LINK = "歌曲链接输入框"
 ACC_BTN_DETECT = "检测按钮"

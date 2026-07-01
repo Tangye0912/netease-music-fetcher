@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.0 (2026-07-01)
+
+### Fixed
+
+- 消除 `main.py` 中的星号导入（`from _dialogs import *`），改为显式导入 17 个名字。
+- 定义 `error_texts.UNKNOWN_ERROR` 常量，统一 `_workers.py` 和 `_batch_dialogs.py` 中 5 处散落引用。
+- 提取硬编码中文错误消息到 `ui_texts.MSG_BATCH_WORKER_UNEXPECTED`。
+- `main.py:465` 设置状态文本复用 `T.status_ui_settings_updated()`。
+- `main.py:230` 版本检查异常处理区分 `RuntimeError` 和网络错误。
+
+### Changed
+
+- 测试总数 115（+0，无新增测试）。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（115 通过，1 跳过）。
+
 ## v0.8.0 (2026-07-01)
 
 ### Added

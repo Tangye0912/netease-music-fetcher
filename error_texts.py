@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+UNKNOWN_ERROR = "UNKNOWN_ERROR"
+
 ERROR_MESSAGE_MAP = {
     "INVALID_URL": "链接格式无效，请粘贴网易云音乐歌曲链接或歌曲 ID。",
     "AUTH_EXPIRED": "登录状态已过期，请重新登录网易云音乐账号。",
@@ -13,7 +15,7 @@ ERROR_MESSAGE_MAP = {
     "UNSUPPORTED_FORMAT": "当前选择的格式不受支持。",
     "CONVERT_TOOL_MISSING": "未检测到 ffmpeg，无法执行格式转换。",
     "CONVERT_FAILED": "音频转换失败，请尝试其他格式或稍后重试。",
-    "UNKNOWN_ERROR": "发生未知错误，请稍后重试。",
+    UNKNOWN_ERROR: "发生未知错误，请稍后重试。",
 }
 
 
