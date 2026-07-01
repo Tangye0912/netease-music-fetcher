@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -168,11 +169,12 @@ class BatchInspectWorker(QThread):
     completed = Signal(object)
     failed = Signal(str, str)
 
-    def __init__(self, raw_input_text: str, cookie: str, timeout: int) -> None:
+    def __init__(self, raw_input_text: str, cookie: str, timeout: int, detect_concurrency: int = 5) -> None:
         super().__init__()
         self.raw_input_text = raw_input_text
         self.cookie = cookie
         self.timeout = timeout
+        self.detect_concurrency = max(1, min(10, int(detect_concurrency)))
 
     def run(self) -> None:
         try:
@@ -220,7 +222,12 @@ class BatchInspectWorker(QThread):
 
         seen_song_ids: set[str] = set()
         total = len(expanded)
-        for index, (source_type, source_value, song_id, source_label) in enumerate(expanded, start=1):
+        if not expanded:
+            return rows
+
+        # Build a deduplicated list while preserving order
+        unique_expanded: list[tuple[str, str, str, str]] = []
+        for source_type, source_value, song_id, source_label in expanded:
             if song_id in seen_song_ids:
                 rows.append(
                     BatchDetectRow(
@@ -232,9 +239,16 @@ class BatchInspectWorker(QThread):
                         message=T.MSG_BATCH_DUPLICATE_SONG.format(song_id=song_id),
                     )
                 )
-                self.progress.emit(index, total, source_value)
                 continue
             seen_song_ids.add(song_id)
+            unique_expanded.append((source_type, source_value, song_id, source_label))
+
+        # Parallel detect: submit all unique songs to a thread pool
+        completed_count = 0
+        total_unique = len(unique_expanded)
+        results_by_index: dict[int, BatchDetectRow] = {}
+
+        def _detect_one(index: int, source_type: str, source_value: str, song_id: str, source_label: str) -> tuple[int, BatchDetectRow]:
             try:
                 result = detect_song(song_id, self.cookie, timeout=self.timeout)
                 size_bytes = 0
@@ -246,32 +260,44 @@ class BatchInspectWorker(QThread):
                         final_source_label = f"{T.BATCH_SOURCE_SONG}-{result.song_name}"
                     else:
                         final_source_label = f"{T.BATCH_SOURCE_SONG}-{result.song_id}"
-                rows.append(
-                    BatchDetectRow(
-                        raw_input=source_value,
-                        source_type=source_type,
-                        source_label=final_source_label,
-                        song_id=result.song_id,
-                        song_name=result.song_name or "",
-                        status="ready" if result.can_download else "unavailable",
-                        message=result.unavailable_reason or "",
-                        media_size_bytes=size_bytes,
-                        selected=bool(result.can_download),
-                    )
-                )
+                return (index, BatchDetectRow(
+                    raw_input=source_value,
+                    source_type=source_type,
+                    source_label=final_source_label,
+                    song_id=result.song_id,
+                    song_name=result.song_name or "",
+                    status="ready" if result.can_download else "unavailable",
+                    message=result.unavailable_reason or "",
+                    media_size_bytes=size_bytes,
+                    selected=bool(result.can_download),
+                ))
             except MusicFetchError as err:
-                rows.append(
-                    BatchDetectRow(
-                        raw_input=source_value,
-                        source_type=source_type,
-                        source_label=source_label,
-                        song_id=song_id,
-                        status="failed",
-                        message=f"{err.code}: {user_error_message(err.code, err.message)}",
-                        selected=False,
-                    )
-                )
-            self.progress.emit(index, total, source_value)
+                return (index, BatchDetectRow(
+                    raw_input=source_value,
+                    source_type=source_type,
+                    source_label=source_label,
+                    song_id=song_id,
+                    status="failed",
+                    message=f"{err.code}: {user_error_message(err.code, err.message)}",
+                    selected=False,
+                ))
+
+        with ThreadPoolExecutor(max_workers=self.detect_concurrency) as executor:
+            future_to_index = {}
+            for idx, (source_type, source_value, song_id, source_label) in enumerate(unique_expanded):
+                future = executor.submit(_detect_one, idx, source_type, source_value, song_id, source_label)
+                future_to_index[future] = idx
+
+            for future in as_completed(future_to_index):
+                idx, row = future.result()
+                results_by_index[idx] = row
+                completed_count += 1
+                self.progress.emit(completed_count, total_unique, unique_expanded[idx][2])
+
+        # Reconstruct results in original order, then append duplicates after
+        for idx in range(total_unique):
+            if idx in results_by_index:
+                rows.append(results_by_index[idx])
         logger.info(
             "Batch detect completed. total=%s ready=%s duplicate=%s failed_or_unavailable=%s",
             len(rows),

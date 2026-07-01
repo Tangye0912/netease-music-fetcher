@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.8.0 (2026-07-01)
+
+### Added
+
+- 歌单分页获取：`fetch_playlist_song_ids` 支持分页循环拉取，超过 1000 首的大歌单不再被静默截断。
+- 批量检测并发化：`BatchInspectWorker` 使用 `ThreadPoolExecutor` 并行执行 `detect_song` 调用，大幅提升大歌单的检测速度。
+- 新增 `tests/test_batch_dialogs.py`（17 个用例），覆盖选择逻辑、下载调度、历史记录和取消操作。
+- 新增 `tests/test_audio.py`（12 个用例），覆盖下载流 header 轮换、HTTP/HTTPS fallback、403 重试、取消和日志脱敏。
+
+### Fixed
+
+- 修复 `_batch_dialogs.py` 中 `_initialized` 在 `_on_input_changed` 信号触发前未被设置的问题。
+
+### Changed
+
+- 测试总数从 86 增加到 115（+29 个新测试用例）。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（115 通过，1 跳过）。
+
 ## v0.7.0 (2026-07-01)
 
 ### Fixed

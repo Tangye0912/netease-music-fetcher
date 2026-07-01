@@ -196,6 +196,7 @@ class BatchDownloadDialog(QDialog):
         self._table_syncing = False
         self._downloading = False
         self._download_cancel_requested = False
+        self._initialized = False
         self._download_queue: list[_workers.BatchDetectRow] = []
         self._download_total = 0
         self._download_next_index = 0
@@ -516,7 +517,7 @@ class BatchDownloadDialog(QDialog):
         self._update_detect_button_state()
         self.status_label.setText(T.BATCH_STATUS_DETECTING)
         set_label_state(self.status_label, "warning")
-        self.inspect_worker = _workers.BatchInspectWorker(raw_text, self.cookie, timeout=self.detect_timeout_sec)
+        self.inspect_worker = _workers.BatchInspectWorker(raw_text, self.cookie, timeout=self.detect_timeout_sec, detect_concurrency=self.download_concurrency)
         self.inspect_worker.progress.connect(self._on_detect_progress)
         self.inspect_worker.completed.connect(self._on_detect_completed)
         self.inspect_worker.failed.connect(self._on_detect_failed)

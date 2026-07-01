@@ -442,46 +442,58 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
 
 def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) -> list[str]:
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    max_tracks = 1000
-    query = parse.urlencode({"id": playlist_id, "n": str(max_tracks), "s": "0"})
-    url = f"{PLAYLIST_DETAIL_API}?{query}"
-    status, body = perform_json_get(url, headers, timeout=timeout)
-    if status in (401, 403):
-        raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
-    code = body.get("code")
-    if code in (301, 302, 401, 403):
-        raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
-    if status != 200 or code != 200:
-        message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
-        raise MusicFetchError("NETWORK_ERROR", message)
-    playlist = body.get("playlist") or {}
-    raw_track_ids = playlist.get("trackIds") or []
-    ids: list[str] = []
-    for row in raw_track_ids if isinstance(raw_track_ids, list) else []:
-        if isinstance(row, dict):
-            value = row.get("id")
-            if isinstance(value, int):
-                ids.append(str(value))
-    if not ids:
+    page_size = 1000
+    offset = 0
+    all_ids: list[str] = []
+    seen: set[str] = set()
+    while True:
+        query = parse.urlencode({"id": playlist_id, "n": str(page_size), "s": str(offset)})
+        url = f"{PLAYLIST_DETAIL_API}?{query}"
+        status, body = perform_json_get(url, headers, timeout=timeout)
+        if status in (401, 403):
+            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+        code = body.get("code")
+        if code in (301, 302, 401, 403):
+            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+        if status != 200 or code != 200:
+            message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
+            raise MusicFetchError("NETWORK_ERROR", message)
+        playlist = body.get("playlist") or {}
+        raw_track_ids = playlist.get("trackIds") or []
+        page_ids: list[str] = []
+        for row in raw_track_ids if isinstance(raw_track_ids, list) else []:
+            if isinstance(row, dict):
+                value = row.get("id")
+                if isinstance(value, int):
+                    sid = str(value)
+                    if sid not in seen:
+                        seen.add(sid)
+                        page_ids.append(sid)
+        if not page_ids:
+            break
+        all_ids.extend(page_ids)
+        if len(raw_track_ids) < page_size:
+            break
+        offset += page_size
+    if not all_ids:
+        # Fallback: try the legacy tracks field (only on first page when trackIds returned nothing)
+        playlist = body.get("playlist") or {}
         raw_tracks = playlist.get("tracks") or []
         for row in raw_tracks if isinstance(raw_tracks, list) else []:
             if isinstance(row, dict):
                 value = row.get("id")
                 if isinstance(value, int):
-                    ids.append(str(value))
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for song_id in ids:
-        if not song_id or song_id in seen:
-            continue
-        seen.add(song_id)
-        deduped.append(song_id)
-    if not deduped:
+                    sid = str(value)
+                    if sid not in seen:
+                        seen.add(sid)
+                        all_ids.append(sid)
+    if not all_ids:
         raise MusicFetchError("SONG_UNAVAILABLE", "Playlist is empty or unavailable.")
-    if len(deduped) >= max_tracks:
-        logger.warning("Playlist may exceed fetch limit. playlist_id=%s count=%s limit=%s", playlist_id, len(deduped), max_tracks)
-    logger.info("Fetched playlist songs. playlist_id=%s count=%s", playlist_id, len(deduped))
-    return deduped
+    if len(all_ids) >= page_size:
+        logger.info("Fetched playlist songs. playlist_id=%s count=%s (may have more)", playlist_id, len(all_ids))
+    else:
+        logger.info("Fetched playlist songs. playlist_id=%s count=%s", playlist_id, len(all_ids))
+    return all_ids
 
 
 def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
