@@ -115,7 +115,29 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
-## v0.6.0 (Completed - 2026-05-07)
+## v0.13.0 (Next)
+
+### Goal
+
+- 修复 v0.12.0 遗留的 HIGH 严重度 bug，补关键模块测试，继续 UI 完善。
+
+### Bug 修复（HIGH）
+
+- [ ] 修复 `_dialog_batch_settings.py:96` `NameError`：`set_label_state` 未导入。
+- [ ] 修复 CLI `--retry` 参数死代码：`run_download`/`run_playlist_download` 未接收 `retry_count`，`download_song_with_fallback` 无重试循环。
+
+### 测试补全
+
+- [ ] 补 `_cli.py` 单元测试（`run_download`、`run_playlist_download`、`build_parser`、`main`）。
+- [ ] 补 `_version_check.py` 单元测试（`version_key`、`fetch_latest_project_version`）。
+- [ ] 补 `_dialog_batch_settings.py` 单元测试（`BatchRuntimeSettingsDialog`）。
+
+### UI 与代码完善
+
+- [ ] 修复 `_dialog_progress.py` 恢复后状态标签显示 `"准备下载..."` → 应显示 `"下载恢复中..."`。
+- [ ] 清理 `_dialogs.py` 中 `.replace("状态：", "")` hack，为 `status_ui_settings_updated` 添加 `prefix` 参数。
+- [ ] 清理 `main.py` 未使用导入：`json`、`time`、`parse`、`request`。
+- [ ] 暗色主题补全：`QScrollBar`、`QToolTip`、`QStatusBar` 样式。
 
 ### Goal
 
