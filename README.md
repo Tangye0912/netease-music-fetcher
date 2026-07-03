@@ -3,17 +3,16 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v0.10.0）
+## 1. 版本概览（v0.12.0）
 
-### 1.1 v0.10.0 相对 v0.9.1 的更新
+### 1.1 近期更新（v0.10.0 → v0.12.0）
 
-- **新增**：`_batch_models.py` — 从 `_workers.py` 提取纯数据模型和格式化工具（`BatchDetectRow`、`format_bytes`、`format_duration`、`probe_media_size_bytes`）。
-- **新增**：`_gui_styles.py` — 从 `_dialogs.py` 提取样式构建和按钮/标签辅助函数，降低模块耦合度。
-- **新增**：`tests/test_dialogs.py`（42 个测试用例），覆盖 `_dialogs.py` 中 7 个对话框类和纯函数。
-- **新增**：下载暂停/恢复 — `DownloadWorker` 支持 `request_pause()`/`request_resume()`，暂停时保留 `.part` 文件。
-- **新增**：断点续传 — 恢复下载时使用 `Range` 请求头从已下载位置继续。
-- **新增**：暗色主题 — 软件设置中可切换浅色/深色主题，持久化到 `ui_theme`。
-- **改进**：`_workers.py` 和 `_dialogs.py` 模块体积大幅缩减，导入链更清晰。
+- **模块拆分**：新增 `_batch_models.py`、`_gui_styles.py`、`_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`、`_dialog_batch_settings.py`、`_version_check.py`，`_dialogs.py` 和 `_batch_dialogs.py` 体积大幅缩减。
+- **暂停/恢复**：`DownloadWorker` 支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
+- **暗色主题**：软件设置中可切换浅色/深色主题（Catppuccin 风格），持久化到 `ui_theme`。
+- **CLI 补全**：新增 `--format`（mp3/m4a/wav/flac/aac）、`--rename`、`--retry` 参数，支持播放列表批量下载，改用 `download_song_with_fallback`。
+- **测试**：从 115 → 188 个测试用例，覆盖 `_dialogs.py`、`_batch_models.py`、`app_logging.py` 等。
+- **代码质量**：消除硬编码中文、统一 `__all__` 定义、消除重复钳位模式、类型精确化。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
 迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
@@ -35,9 +34,9 @@
 
 ### 1.3 下一版本计划
 
-- 批量下载暂停/恢复 UI 集成（底层已支持）
 - 下载队列可视化进度条优化
-- 进一步拆分 `_dialogs.py` 中对话框类到独立文件
+- 批量下载暂停/恢复 UI 交互完善（按钮状态切换、暂停行高亮等）
+- 进一步拆分 `main.py` 和 `_batch_dialogs.py`
 
 ## 2. 环境准备
 
@@ -115,7 +114,7 @@ py -3 main.py
   --timeout 30
 ```
 
-说明：CLI 输出固定为 `mp4`（网易云原始格式），GUI 支持 `mp3/m4a/wav/flac/aac` 多种格式。
+说明：CLI 和 GUI 均支持 `mp3/m4a/wav/flac/aac` 多种格式，CLI 默认 `mp3`。播放列表链接会自动展开并逐首下载。
 
 ## 6. 错误码
 
@@ -127,7 +126,8 @@ py -3 main.py
 - `DOWNLOAD_CANCELED`：用户主动取消下载
 - `CONVERT_TOOL_MISSING`：缺少 ffmpeg，无法执行格式转换
 - `CONVERT_FAILED`：音频格式转换失败
-- `UNSUPPORTED_FORMAT`：不支持的输出格式（CLI 仍仅支持 `mp4`）
+- `UNSUPPORTED_FORMAT`：不支持的输出格式
+- `DOWNLOAD_PAUSED`：下载已暂停
 - `UNKNOWN_ERROR`：未预期异常
 
 ## 7. 项目架构
@@ -137,7 +137,7 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | 路径 | 职责 |
 | --- | --- |
 | `main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
-| `_dialogs.py` | 通用 GUI 对话框（登录、单曲确认、下载进度、依赖管理、下载管理、软件设置）和输入校验。 |
+| `_dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验、头像加载。 |
 | `_batch_dialogs.py` | 批量识别与批量下载界面，包含批量设置、失败项重试、CSV 导出和并发下载调度。 |
 | `_batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
 | `_workers.py` | 后台线程：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
@@ -147,6 +147,11 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | `music_fetch.py` | 向后兼容外观层，重新导出 `_api.py`、`_audio.py`、`_cli.py` 的公共能力。 |
 | `_batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具（`format_bytes`、`format_duration`、`probe_media_size_bytes`）。 |
 | `_gui_styles.py` | QSS 样式表构建（浅色/深色主题）、按钮角色和标签状态辅助函数。 |
+| `_dialog_login.py` | 登录对话框：内嵌网页扫码登录，cookie 提取与校验。 |
+| `_dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
+| `_dialog_manager.py` | 下载管理对话框：历史记录浏览、状态筛选、文件操作、失败重试。 |
+| `_dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
+| `_version_check.py` | GitHub API 版本检查：获取最新 release/tag。 |
 | `_combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助，供设置类对话框复用。 |
 | `app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则、项目链接。 |
 | `app_stores.py` | 本地持久化：登录会话、下载历史、状态字段兼容和边界值夹紧。 |
@@ -161,7 +166,7 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明、console script 和平铺模块打包清单。 |
 | `__init__.py` | 兼容平铺模块项目的包标记文件。 |
-| `tests/` | 159 个单元/回归测试，覆盖 API、解析、存储、批量结果、批量对话框、对话框、下载流、入口脚本和下载 worker。 |
+| `tests/` | 188 个单元/回归测试，覆盖 API、解析、存储、批量结果、批量对话框、对话框、下载流、入口脚本和下载 worker。 |
 | `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
@@ -203,7 +208,7 @@ feat: 简要说明这次迭代目标
 ## 10. 测试
 
 ```bash
-python3 -m unittest discover -s tests -p "test_*.py"
+python3 -m pytest tests/ -q
 ```
 
 ## 11. 日志与排障
