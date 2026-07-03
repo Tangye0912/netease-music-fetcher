@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.11.0 (2026-07-03)
+
+### Added
+
+- 暂停/恢复 UI：`DownloadProgressDialog` 新增暂停/继续按钮，`BatchDownloadDialog` 新增全部暂停/全部恢复按钮，`ui_texts.py` 新增暂停/恢复相关文案。
+- CLI 补全：重新添加 `--format` 参数（支持 `mp3/m4a/wav/flac/aac`），新增 `--rename` 参数，播放列表自动检测和批量下载（`run_playlist_download`），改用 `download_song_with_fallback` 替代 `fetch_playable_url`。
+- `tests/test_batch_models.py`（19 个测试用例），覆盖 `format_duration`、`format_bytes`、`probe_media_size_bytes`、`BatchDetectRow`。
+- `app_settings.py` 新增 `clamp_download_settings` 辅助函数，统一 4 字段下载参数钳位。
+
+### Changed
+
+- 拆分 `_dialogs.py`：`LoginDialog` + `build_cookie_from_fields` + `WEB_ENGINE_AVAILABLE` 提取到 `_dialog_login.py`。
+- `_batch_dialogs.py`、`_dialogs.py`、`_workers.py` 中重复的 4 字段 clamp 改为调用 `clamp_download_settings`。
+- `_api.py` 返回类型精确化：`dict` → `dict[str, object]`。
+- `_cli.py` 修复裸 `except Exception` 为 `except (OSError, ValueError, argparse.ArgumentError)`。
+- `pyproject.toml` 新增 `_dialog_login` 模块声明。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（178 通过，1 跳过）。
+
 ## v0.10.0 (2026-07-01)
 
 ### Added

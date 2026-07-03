@@ -312,7 +312,7 @@ def _perform_request(req: request.Request, timeout: int) -> Tuple[int, bytes]:
         raise MusicFetchError("NETWORK_ERROR", f"Network error: {url_err.reason}") from url_err
 
 
-def _decode_json(body: bytes) -> dict:
+def _decode_json(body: bytes) -> dict[str, object]:
     try:
         decoded = body.decode("utf-8")
         return json.loads(decoded) if decoded else {}

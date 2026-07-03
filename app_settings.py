@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"
@@ -55,3 +55,18 @@ def clamp(value: object, default: int, min_val: int, max_val: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(min_val, min(max_val, parsed))
+
+
+def clamp_download_settings(
+    detect_timeout_sec: object,
+    download_timeout_sec: object,
+    download_retry_count: object,
+    download_concurrency: object,
+) -> tuple[int, int, int, int]:
+    """Clamp all four download settings to their valid ranges at once."""
+    return (
+        clamp(detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC),
+        clamp(download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC),
+        clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT),
+        clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY),
+    )

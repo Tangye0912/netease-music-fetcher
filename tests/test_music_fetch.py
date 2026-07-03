@@ -127,19 +127,22 @@ class AccountProfileTests(unittest.TestCase):
 
 
 class RunDownloadTests(unittest.TestCase):
-    @mock.patch("_cli.download_audio_with_progress")
+    @mock.patch("_cli.download_song_with_fallback")
     @mock.patch("_cli.fetch_song_metadata")
-    @mock.patch("_cli.fetch_playable_url")
-    def test_run_download_success(self, playable_mock, meta_mock, download_mock):
-        playable_mock.return_value = ("https://example.com/media.mp4", 120000)
+    def test_run_download_success(self, meta_mock, fallback_mock):
         meta_mock.return_value = ("Track Name", 130000)
 
-        def write_file(media_url, output_path, timeout, progress_callback, cancel_checker, cookie):
-            _ = media_url, timeout, progress_callback, cancel_checker, cookie
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, progress_callback=None, cancel_checker=None, pause_checker=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"abc123")
+            return music_fetch.PlayableCandidate(
+                media_url="https://example.com/media.mp4",
+                duration_ms=120000,
+                level="standard",
+                encode_type="aac",
+            )
 
-        download_mock.side_effect = write_file
+        fallback_mock.side_effect = fake_fallback
 
         with tempfile.TemporaryDirectory() as tmp:
             cookie_file = Path(tmp) / "cookies.txt"
@@ -153,7 +156,7 @@ class RunDownloadTests(unittest.TestCase):
             )
 
             self.assertTrue(result.output_path.exists())
-            self.assertEqual(result.output_path.suffix, ".mp4")
+            self.assertEqual(result.output_path.suffix, ".mp3")
             self.assertEqual(result.size_bytes, 6)
             self.assertEqual(result.duration_ms, 130000)
 

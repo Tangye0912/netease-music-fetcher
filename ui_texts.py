@@ -116,6 +116,9 @@ DOWNLOAD_PROGRESS_INIT = "准备下载..."
 DOWNLOAD_PROGRESS_SPEED = "速度：-"
 DOWNLOAD_PROGRESS_PATH = "输出路径："
 DOWNLOAD_PROGRESS_CANCEL = "取消下载"
+DOWNLOAD_PROGRESS_PAUSE = "暂停"
+DOWNLOAD_PROGRESS_RESUME = "继续"
+DOWNLOAD_PROGRESS_PAUSED = "下载已暂停"
 DOWNLOAD_PROGRESS_DONE_BODY = "文件：{name}\n大小：{size}\n路径：{path}"
 DOWNLOAD_PROGRESS_DONE_FALLBACK_NOTE = "\n提示：未安装 ffmpeg，已按源格式保存。"
 DOWNLOAD_PROGRESS_TEXT_SIMPLE = "已下载 {downloaded}"
@@ -195,6 +198,8 @@ BATCH_BTN_DETECT = "开始识别"
 BATCH_BTN_SETTINGS = "下载设置"
 BATCH_BTN_DOWNLOAD = "下载选中项"
 BATCH_BTN_CANCEL = "取消下载"
+BATCH_BTN_PAUSE = "全部暂停"
+BATCH_BTN_RESUME = "全部恢复"
 BATCH_BTN_SELECT_ALL = "全选可下载"
 BATCH_BTN_CLEAR_ALL = "取消全选"
 BATCH_BTN_INVERT = "反选可下载"
@@ -221,6 +226,7 @@ BATCH_STATUS_DOWNLOADING_ITEM = "下载中"
 BATCH_STATUS_DOWNLOAD_SUCCESS = "下载成功"
 BATCH_STATUS_DOWNLOAD_FAILED = "下载失败"
 BATCH_STATUS_DOWNLOAD_CANCELED = "下载已取消"
+BATCH_STATUS_DOWNLOAD_PAUSED = "下载已暂停"
 BATCH_STATUS_SUMMARY = "识别完成：共 {total} 条，可下载 {ready} 条，重复 {duplicate} 条，失败/不可下载 {bad} 条。"
 BATCH_STATUS_DOWNLOADING = "状态：批量下载中..."
 BATCH_STATUS_CANCELING = "状态：正在取消批量下载..."
@@ -322,6 +328,7 @@ def batch_detect_status_text(status: str) -> str:
         "download_success": BATCH_STATUS_DOWNLOAD_SUCCESS,
         "download_failed": BATCH_STATUS_DOWNLOAD_FAILED,
         "download_canceled": BATCH_STATUS_DOWNLOAD_CANCELED,
+        "download_paused": BATCH_STATUS_DOWNLOAD_PAUSED,
     }
     return mapping.get(normalized, status or MSG_UNKNOWN)
 

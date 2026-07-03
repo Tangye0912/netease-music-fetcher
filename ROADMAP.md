@@ -74,18 +74,18 @@
 
 ### Phase 1 — 功能优先
 
-- [ ] 暂停/恢复 UI 集成：`DownloadProgressDialog` 和 `BatchDownloadDialog` 添加暂停/恢复按钮，连接 `worker.paused` 信号，新增 `ui_texts` 文案。
-- [ ] CLI 补全：重新添加 `--format` 参数（支持 `mp3/m4a/wav/flac/aac`），播放列表/批量下载支持，`download_song_with_fallback` 替代 `fetch_playable_url`。
-- [ ] 补 `_batch_models.py` 单元测试：`format_duration`、`format_bytes`、`probe_media_size_bytes` 零覆盖 → 补全。
-- [ ] 修复 `_cli.py:75` 裸 `except Exception`，改为捕获具体异常类型。
+- [x] 暂停/恢复 UI 集成（v0.11.0 已完成）：`DownloadProgressDialog` 和 `BatchDownloadDialog` 添加暂停/恢复按钮，连接 `worker.paused` 信号，新增 `ui_texts` 文案。
+- [x] CLI 补全：重新添加 `--format` 参数（v0.11.0 已完成）（支持 `mp3/m4a/wav/flac/aac`），播放列表/批量下载支持，`download_song_with_fallback` 替代 `fetch_playable_url`。
+- [x] 补 `_batch_models.py` 单元测试（v0.11.0 已完成）：`format_duration`、`format_bytes`、`probe_media_size_bytes` 零覆盖 → 补全。
+- [x] 修复 `_cli.py:75` 裸 `except Exception`（v0.11.0 已完成），改为捕获具体异常类型。
 
 ### Phase 2 — 重构与清理
 
-- [ ] 拆分 `_dialogs.py`：将 `LoginDialog`、`DownloadProgressDialog`、`DownloadManagerDialog` 等独立对话框类提取到 `_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`。
+- [x] 拆分 `_dialogs.py`：`LoginDialog` 已提取到 `_dialog_login.py`（v0.11.0 已完成）、`DownloadProgressDialog`、`DownloadManagerDialog` 等独立对话框类提取到 `_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`。
 - [ ] 拆分 `_batch_dialogs.py`：将 `BatchRuntimeSettingsDialog` 与 `BatchDownloadDialog` 分离到独立文件。
-- [ ] 消除重复设置钳位模式：`_batch_dialogs.py` 和 `_dialogs.py` 中相同的 4 字段 clamp 初始化 → 提取 `SettingsBundle` 或 `clamp_settings` 辅助函数。
+- [x] 消除重复设置钳位模式：提取 `clamp_download_settings`（v0.11.0 已完成）：`_batch_dialogs.py` 和 `_dialogs.py` 中相同的 4 字段 clamp 初始化 → 提取 `SettingsBundle` 或 `clamp_settings` 辅助函数。
 - [ ] 提取 `main.py` 中版本检查逻辑（`fetch_latest_project_version`、`version_key`）到独立模块。
-- [ ] `_api.py` 返回类型精确化：`dict` → `dict[str, Any]`。
+- [x] `_api.py` 返回类型精确化：`dict` → `dict[str, object]`（v0.11.0 已完成）：`dict` → `dict[str, Any]`。
 
 ## v0.6.0 (Completed - 2026-05-07)
 

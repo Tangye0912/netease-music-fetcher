@@ -24,6 +24,7 @@ from _batch_models import (
 )
 from app_logging import get_logger
 from app_settings import (
+    clamp_download_settings,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
     DEFAULT_GUI_TARGET_FORMAT,
@@ -262,8 +263,9 @@ class DownloadWorker(QThread):
         self.cookie = cookie
         self.target_format = target_format.lower().strip()
         # v0.4.0: keep timeout bounded so retry/download behavior is predictable.
-        self.timeout = clamp(timeout, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
-        self.retry_count = clamp(retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
+        _, self.timeout, self.retry_count, _ = clamp_download_settings(
+            0, timeout, retry_count, 0,
+        )
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
 

@@ -25,6 +25,7 @@ from batch_inputs import collect_batch_candidates, source_hint_map
 from error_texts import user_error_message
 from app_settings import (
     APP_VERSION,
+    clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DETECT_TIMEOUT_OPTIONS,
     DOWNLOAD_TIMEOUT_OPTIONS,
@@ -98,6 +99,7 @@ from _gui_styles import (
     set_label_state,
     set_secondary_button,
 )
+from _dialog_login import LoginDialog, build_cookie_from_fields, WEB_ENGINE_AVAILABLE
 
 try:
     from PySide6.QtCore import QSize, QThread, Qt, QTimer, QUrl, Signal
@@ -134,14 +136,6 @@ except ImportError as err:
         "Missing dependency: PySide6. Install it with `python3 -m pip install PySide6` before running main.py."
     ) from err
 
-try:
-    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-
-    WEB_ENGINE_AVAILABLE = True
-except ImportError:
-    WEB_ENGINE_AVAILABLE = False
-
 logger = get_logger("music_fetch.gui")
 BATCH_ROUTE_MIN_COUNT = 2
 
@@ -177,29 +171,6 @@ def clear_embedded_login_state() -> None:
         logger.exception("Failed to clear embedded login web state.")
 
 
-def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
-    """Build a Cookie header string from captured WebEngine cookies."""
-    music_u = (cookie_fields.get("MUSIC_U") or "").strip()
-    if not music_u:
-        return ""
-
-    parts: list[str] = []
-    seen: set[str] = set()
-    for key in ("MUSIC_U", "__csrf"):
-        value = (cookie_fields.get(key) or "").strip()
-        if value:
-            parts.append(f"{key}={value}")
-            seen.add(key)
-
-    for key in sorted(cookie_fields.keys()):
-        if key in seen:
-            continue
-        value = (cookie_fields.get(key) or "").strip()
-        if value:
-            parts.append(f"{key}={value}")
-    return "; ".join(parts)
-
-
 def validate_song_input(value: str) -> tuple[bool, str]:
     raw = value.strip()
     if not raw:
@@ -227,153 +198,6 @@ def validate_song_input(value: str) -> tuple[bool, str]:
     if has_song_id:
         return True, T.INPUT_VALIDATION_OK_URL
     return False, T.INPUT_VALIDATION_ID_MISSING
-
-
-class LoginDialog(QDialog):
-    login_success = Signal(str, bool)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle(T.LOGIN_DIALOG_TITLE)
-        self.cookie_fields: dict[str, str] = {}
-        self._configure_window_size()
-
-        root_layout = QVBoxLayout(self)
-        info = QLabel(T.LOGIN_INFO)
-        info.setWordWrap(True)
-        root_layout.addWidget(info)
-
-        self.remember_checkbox = QCheckBox(T.LOGIN_REMEMBER)
-        self.remember_checkbox.setChecked(True)
-        root_layout.addWidget(self.remember_checkbox)
-
-        if WEB_ENGINE_AVAILABLE:
-            self.web_group = self._build_web_login_group()
-            root_layout.addWidget(self.web_group, stretch=1)
-        else:
-            fallback_hint = QLabel(T.LOGIN_FALLBACK_HINT)
-            fallback_hint.setWordWrap(True)
-            root_layout.addWidget(fallback_hint)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        self.confirm_button = QPushButton(T.LOGIN_BTN_CONFIRM)
-        self.confirm_button.clicked.connect(self._on_confirm)
-        self.confirm_button.setEnabled(False)
-        set_button_role(self.confirm_button, "primary")
-        cancel_button = QPushButton(T.BTN_BACK)
-        cancel_button.clicked.connect(self.reject)
-        set_back_button(cancel_button)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(self.confirm_button)
-        root_layout.addLayout(buttons)
-
-    def _configure_window_size(self) -> None:
-        screen = QApplication.primaryScreen()
-        if screen is None:
-            self.resize(520, 760)
-            return
-        geometry = screen.availableGeometry()
-        width = max(500, min(760, int(geometry.width() * 0.45)))
-        height = max(700, min(980, int(geometry.height() * 0.88)))
-        self.resize(width, height)
-
-    def _build_web_login_group(self) -> QGroupBox:
-        group = QGroupBox(T.LOGIN_WEB_GROUP)
-        layout = QVBoxLayout(group)
-
-        # Use an off-the-record profile so each login starts clean.
-        self.web_profile = QWebEngineProfile(group)
-        self.web_page = QWebEnginePage(self.web_profile, group)
-        self.web_view = QWebEngineView(group)
-        self.web_view.setPage(self.web_page)
-        self.web_view.setUrl(QUrl(NETEASE_LOGIN_URL))
-        self.web_view.loadFinished.connect(self._try_focus_qr_login)
-        self.web_profile.cookieStore().cookieAdded.connect(self._on_cookie_added)
-
-        tip = QLabel(T.LOGIN_WEB_HINT)
-        tip.setWordWrap(True)
-        layout.addWidget(tip)
-        layout.addWidget(self.web_view, stretch=1)
-        return group
-
-    def _try_focus_qr_login(self, ok: bool) -> None:
-        if not ok:
-            return
-        # Best-effort: auto switch to the QR tab so users do not need extra clicks.
-        script = """
-        (() => {
-          const nodes = Array.from(document.querySelectorAll('a,button,div,span'));
-          const target = nodes.find((el) => {
-            const text = (el.innerText || el.textContent || '').trim();
-            return text.includes('扫码登录');
-          });
-          if (target) {
-            target.click();
-            return true;
-          }
-          return false;
-        })();
-        """
-        self.web_page.runJavaScript(script, self._on_qr_focus_result)
-
-    def _on_qr_focus_result(self, switched: object) -> None:
-        logger.info("Login dialog QR focus attempted. switched=%s", bool(switched))
-
-    def _on_cookie_added(self, cookie) -> None:
-        try:
-            name = bytes(cookie.name()).decode("utf-8", errors="ignore")
-            value = bytes(cookie.value()).decode("utf-8", errors="ignore")
-        except (TypeError, RuntimeError):
-            logger.debug("Failed to decode cookie from WebEngine.")
-            return
-        if not name or not value:
-            return
-        self.cookie_fields[name] = value
-        self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
-        if name in {"MUSIC_U", "__csrf", "NMTID", "MUSIC_A"}:
-            logger.info("Captured login cookie field from web page. name=%s", name)
-
-    def _on_confirm(self) -> None:
-        if not WEB_ENGINE_AVAILABLE:
-            QMessageBox.warning(self, T.TITLE_DEP_MISSING, T.MSG_LOGIN_REQUIRES_WEBENGINE)
-            return
-
-        cookie = build_cookie_from_fields(self.cookie_fields)
-        if not cookie:
-            cookie = build_cookie_string(
-                self.cookie_fields.get("MUSIC_U", ""),
-                self.cookie_fields.get("__csrf", ""),
-            )
-
-        if not cookie or "MUSIC_U=" not in cookie:
-            logger.info("Login confirm blocked because MUSIC_U is missing.")
-            QMessageBox.warning(self, T.TITLE_LOGIN_FAIL, T.MSG_LOGIN_COOKIE_MISSING)
-            return
-
-        try:
-            is_valid = check_login_status(cookie, timeout=10)
-        except MusicFetchError as err:
-            logger.warning("Login status online check failed. code=%s message=%s", err.code, err.message)
-            mapped = user_error_message(err.code, err.message)
-            answer = QMessageBox.question(
-                self,
-                T.TITLE_NETWORK_CHECK_FAIL,
-                f"{T.login_network_confirm(err.code)}\n{mapped}",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return
-            is_valid = True
-
-        if not is_valid:
-            QMessageBox.warning(self, T.TITLE_LOGIN_INVALID, T.MSG_LOGIN_INVALID)
-            return
-
-        self.login_success.emit(cookie, self.remember_checkbox.isChecked())
-        logger.info("LoginDialog confirmed success. remember_login=%s", self.remember_checkbox.isChecked())
-        self.accept()
 
 
 class SongConfirmDialog(QDialog):
@@ -608,6 +432,7 @@ class DownloadProgressDialog(QDialog):
         # v0.4.0: expose explicit task state to main workflow for unified status tracking.
         self.result_state = TASK_STATE_PENDING
         self.error_code = ""
+        self._pause_button_is_pause = True
 
         layout = QVBoxLayout(self)
         self.progress_bar = QProgressBar()
@@ -624,6 +449,9 @@ class DownloadProgressDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
+        self.pause_button = QPushButton(T.DOWNLOAD_PROGRESS_PAUSE)
+        self.pause_button.clicked.connect(self._on_pause_resume)
+        button_row.addWidget(self.pause_button)
         self.cancel_button = QPushButton(T.DOWNLOAD_PROGRESS_CANCEL)
         self.cancel_button.clicked.connect(self._on_cancel)
         button_row.addWidget(self.cancel_button)
@@ -642,6 +470,7 @@ class DownloadProgressDialog(QDialog):
         self.worker.failed.connect(self._on_failed)
         self.worker.canceled.connect(self._on_canceled)
         self.worker.succeeded.connect(self._on_succeeded)
+        self.worker.paused.connect(self._on_paused)
         self.worker.start()
         self.result_state = TASK_STATE_DOWNLOADING
         logger.info(
@@ -652,8 +481,27 @@ class DownloadProgressDialog(QDialog):
             self.retry_count,
         )
 
+    def _on_pause_resume(self) -> None:
+        if self._pause_button_is_pause:
+            self.pause_button.setText(T.DOWNLOAD_PROGRESS_RESUME)
+            self.status_label.setText(T.DOWNLOAD_PROGRESS_PAUSED)
+            self.worker.request_pause()
+            self._pause_button_is_pause = False
+            logger.info("Download pause requested. task_id=%s", self.task_id)
+        else:
+            self.pause_button.setText(T.DOWNLOAD_PROGRESS_PAUSE)
+            self.status_label.setText(T.DOWNLOAD_PROGRESS_INIT)
+            self.worker.request_resume()
+            self._pause_button_is_pause = True
+            logger.info("Download resume requested. task_id=%s", self.task_id)
+
+    def _on_paused(self) -> None:
+        self.result_state = TASK_STATE_CANCELED  # treated as non-success exit
+        logger.info("Download progress paused. task_id=%s", self.task_id)
+
     def _on_cancel(self) -> None:
         self.cancel_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
         self.status_label.setText(T.STATUS_CANCELING)
         self.result_state = TASK_STATE_CANCELED
         self.worker.request_cancel()
@@ -1030,10 +878,9 @@ class UiSettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.font_size = clamp_ui_font_size(current_font_size)
-        self.detect_timeout_sec = clamp(detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC)
-        self.download_timeout_sec = clamp(download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
-        self.download_retry_count = clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
-        self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
+        self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
+            detect_timeout_sec, download_timeout_sec, download_retry_count, download_concurrency,
+        )
         from app_settings import DEFAULT_UI_THEME, UI_THEME_OPTIONS
         self.ui_theme = (current_theme or "").strip().lower()
         if self.ui_theme not in UI_THEME_OPTIONS:
@@ -1127,21 +974,11 @@ class UiSettingsDialog(QDialog):
         self._refresh_preview()
 
     def _on_download_settings_changed(self, *_args: object) -> None:
-        self.detect_timeout_sec = clamp(
+        self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
             _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC,
-        )
-        self.download_timeout_sec = clamp(
             _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC,
-        )
-        self.download_retry_count = clamp(
             _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT,
-        )
-        self.download_concurrency = clamp(
             _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
-            DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY,
         )
         self._refresh_preview()
 

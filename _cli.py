@@ -1,13 +1,14 @@
 """
 Command-line interface for music-fetch.
 
-Provides run_download() (script-friendly API), build_parser() (argparse),
-and main() (CLI entry).  Depends on _api (fetching) and _audio (saving).
+Provides run_download() (script-friendly API), run_playlist_download(),
+build_parser() (argparse), and main() (CLI entry).  Depends on _api
+(fetching) and _audio (saving).
 """
 
 from __future__ import annotations
 
-__all__ = ["run_download", "build_parser", "main"]
+__all__ = ["run_download", "run_playlist_download", "build_parser", "main"]
 
 import argparse
 import sys
@@ -19,37 +20,160 @@ from _api import (
     DEFAULT_OUT_DIR,
     DownloadResult,
     MusicFetchError,
-    fetch_playable_url,
+    fetch_playlist_song_ids,
     fetch_song_metadata,
     load_cookie,
     logger,
+    parse_input_resource,
     parse_song_id,
 )
 from app_logging import default_log_path, setup_logging
-from _audio import download_audio_with_progress, resolve_output_path
+from app_settings import SUPPORTED_AUDIO_FORMATS
+from _audio import (
+    download_song_with_fallback,
+    resolve_output_path,
+)
 
 
-def run_download(song_url: str, out_dir: Path, cookie_file: Path, timeout: int = 30) -> DownloadResult:
-    logger.info("Run download started. out_dir=%s", out_dir)
+def run_download(
+    song_url: str,
+    out_dir: Path,
+    cookie_file: Path,
+    timeout: int = 30,
+    out_format: str = "mp3",
+    rename: Optional[str] = None,
+) -> DownloadResult:
+    logger.info("Run download started. out_dir=%s format=%s", out_dir, out_format)
     song_id = parse_song_id(song_url)
     cookie = load_cookie(cookie_file)
-    media_url, media_duration = fetch_playable_url(song_id, cookie, timeout=timeout)
     song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
-    output_path = resolve_output_path(out_dir=out_dir, song_id=song_id, song_name=song_name, rename=None, out_format="mp4")
-    download_audio_with_progress(media_url=media_url, output_path=output_path, timeout=timeout, progress_callback=None, cancel_checker=None, cookie=cookie)
+    output_path = resolve_output_path(
+        out_dir=out_dir,
+        song_id=song_id,
+        song_name=song_name,
+        rename=rename,
+        out_format=out_format,
+    )
+    candidate = download_song_with_fallback(
+        song_id=song_id,
+        cookie=cookie,
+        output_path=output_path,
+        timeout=timeout,
+        prefer_format=out_format,
+    )
     size_bytes = output_path.stat().st_size
-    duration_ms = meta_duration if meta_duration is not None else media_duration
-    logger.info("Run download completed. song_id=%s output=%s size_bytes=%s duration_ms=%s", song_id, output_path, size_bytes, duration_ms)
-    return DownloadResult(song_id=song_id, output_path=output_path.resolve(), size_bytes=size_bytes, duration_ms=duration_ms)
+    duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
+    logger.info(
+        "Run download completed. song_id=%s output=%s size_bytes=%s duration_ms=%s",
+        song_id,
+        output_path,
+        size_bytes,
+        duration_ms,
+    )
+    return DownloadResult(
+        song_id=song_id,
+        output_path=output_path.resolve(),
+        size_bytes=size_bytes,
+        duration_ms=duration_ms,
+    )
+
+
+def run_playlist_download(
+    playlist_url: str,
+    out_dir: Path,
+    cookie_file: Path,
+    timeout: int = 30,
+    out_format: str = "mp3",
+) -> list[DownloadResult]:
+    _, playlist_id = parse_input_resource(playlist_url)
+    cookie = load_cookie(cookie_file)
+    song_ids = fetch_playlist_song_ids(playlist_id, cookie, timeout=timeout)
+    logger.info(
+        "Playlist download started. playlist_id=%s song_count=%s format=%s",
+        playlist_id,
+        len(song_ids),
+        out_format,
+    )
+    results: list[DownloadResult] = []
+    for idx, song_id in enumerate(song_ids, start=1):
+        print(f"[{idx}/{len(song_ids)}] Downloading song {song_id} ...")
+        try:
+            song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
+            output_path = resolve_output_path(
+                out_dir=out_dir,
+                song_id=song_id,
+                song_name=song_name,
+                rename=None,
+                out_format=out_format,
+            )
+            candidate = download_song_with_fallback(
+                song_id=song_id,
+                cookie=cookie,
+                output_path=output_path,
+                timeout=timeout,
+                prefer_format=out_format,
+            )
+            size_bytes = output_path.stat().st_size
+            duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
+            result = DownloadResult(
+                song_id=song_id,
+                output_path=output_path.resolve(),
+                size_bytes=size_bytes,
+                duration_ms=duration_ms,
+            )
+            results.append(result)
+            print(f"  SUCCESS path={result.output_path}")
+        except MusicFetchError as err:
+            print(f"  {err.code}: {err.message}", file=sys.stderr)
+            logger.warning(
+                "Playlist song failed. song_id=%s code=%s message=%s",
+                song_id,
+                err.code,
+                err.message,
+            )
+    logger.info(
+        "Playlist download completed. total=%s success=%s failed=%s",
+        len(song_ids),
+        len(results),
+        len(song_ids) - len(results),
+    )
+    return results
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="music-fetch", description="Fetch a playable NetEase Cloud Music track by song URL.")
-    parser.add_argument("--url", required=True, help="NetEase song URL or numeric song id.")
-    parser.add_argument("--out", default=DEFAULT_OUT_DIR, help=f"Output directory (default: {DEFAULT_OUT_DIR}).")
-    parser.add_argument("--cookie-file", default=DEFAULT_COOKIE_FILE, help=f"Cookie file path (default: {DEFAULT_COOKIE_FILE}).")
-    parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds (default: 30).")
-    parser.add_argument("--log-file", default=str(default_log_path()), help=f"Log file path (default: {default_log_path()}).")
+    parser = argparse.ArgumentParser(
+        prog="music-fetch",
+        description="Fetch a playable NetEase Cloud Music track by song URL or playlist URL.",
+    )
+    parser.add_argument(
+        "--url", required=True,
+        help="NetEase song URL, playlist URL, or numeric song id.",
+    )
+    parser.add_argument(
+        "--out", default=DEFAULT_OUT_DIR,
+        help=f"Output directory (default: {DEFAULT_OUT_DIR}).",
+    )
+    parser.add_argument(
+        "--cookie-file", default=DEFAULT_COOKIE_FILE,
+        help=f"Cookie file path (default: {DEFAULT_COOKIE_FILE}).",
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=30,
+        help="HTTP timeout in seconds (default: 30).",
+    )
+    parser.add_argument(
+        "--format", dest="out_format", default="mp3",
+        choices=list(SUPPORTED_AUDIO_FORMATS),
+        help=f"Output audio format (default: mp3). Supported: {', '.join(SUPPORTED_AUDIO_FORMATS)}.",
+    )
+    parser.add_argument(
+        "--rename", default=None,
+        help="Custom output filename (without extension).",
+    )
+    parser.add_argument(
+        "--log-file", default=str(default_log_path()),
+        help=f"Log file path (default: {default_log_path()}).",
+    )
     return parser
 
 
@@ -59,11 +183,39 @@ def main(argv: Optional[list[str]] = None) -> int:
     log_path = setup_logging(Path(args.log_file))
     logger.info("CLI started. log_path=%s", log_path)
     try:
-        result = run_download(song_url=args.url, out_dir=Path(args.out).expanduser(), cookie_file=Path(args.cookie_file).expanduser(), timeout=args.timeout)
-        duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
-        print(f"SUCCESS path={result.output_path} size_bytes={result.size_bytes} duration_ms={duration_text}")
-        logger.info("CLI succeeded. output=%s", result.output_path)
-        return 0
+        resource_type, resource_id = parse_input_resource(args.url)
+        out_dir = Path(args.out).expanduser()
+        cookie_file = Path(args.cookie_file).expanduser()
+
+        if resource_type == "playlist":
+            results = run_playlist_download(
+                playlist_url=args.url,
+                out_dir=out_dir,
+                cookie_file=cookie_file,
+                timeout=args.timeout,
+                out_format=args.out_format,
+            )
+            if results:
+                print(f"\nDownloaded {len(results)} songs.")
+            else:
+                print("No songs were downloaded successfully.", file=sys.stderr)
+                return 1
+            return 0
+        else:
+            result = run_download(
+                song_url=args.url,
+                out_dir=out_dir,
+                cookie_file=cookie_file,
+                timeout=args.timeout,
+                out_format=args.out_format,
+                rename=args.rename,
+            )
+            duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
+            print(
+                f"SUCCESS path={result.output_path} size_bytes={result.size_bytes} duration_ms={duration_text}"
+            )
+            logger.info("CLI succeeded. output=%s", result.output_path)
+            return 0
     except MusicFetchError as err:
         print(f"{err.code}: {err.message}", file=sys.stderr)
         logger.warning("CLI failed with known error. code=%s message=%s", err.code, err.message)
@@ -72,7 +224,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("UNKNOWN_ERROR: Interrupted by user.", file=sys.stderr)
         logger.warning("CLI interrupted by user.")
         return 1
-    except Exception as err:
+    except (OSError, ValueError, argparse.ArgumentError) as err:
         print(f"UNKNOWN_ERROR: {err}", file=sys.stderr)
         logger.exception("CLI failed with unexpected error.")
         return 1

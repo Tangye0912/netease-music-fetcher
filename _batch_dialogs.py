@@ -11,6 +11,7 @@ from typing import Optional
 
 from app_logging import get_logger
 from app_settings import (
+    clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_DIR,
@@ -137,21 +138,11 @@ class BatchRuntimeSettingsDialog(QDialog):
         layout.addLayout(button_row)
 
     def _on_save(self) -> None:
-        self.detect_timeout_sec = clamp(
+        self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
             _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            DEFAULT_DETECT_TIMEOUT_SEC, MIN_DETECT_TIMEOUT_SEC, MAX_DETECT_TIMEOUT_SEC,
-        )
-        self.download_timeout_sec = clamp(
             _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC,
-        )
-        self.download_retry_count = clamp(
             _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT,
-        )
-        self.download_concurrency = clamp(
             _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
-            DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY,
         )
         self.accept()
 
@@ -189,6 +180,7 @@ class BatchDownloadDialog(QDialog):
         self._table_syncing = False
         self._downloading = False
         self._download_cancel_requested = False
+        self._download_paused = False
         self._initialized = False
         self._download_queue: list[BatchDetectRow] = []
         self._download_total = 0
@@ -311,6 +303,10 @@ class BatchDownloadDialog(QDialog):
         self.cancel_download_button.setEnabled(False)
         self.cancel_download_button.setVisible(False)
         self.cancel_download_button.clicked.connect(self._on_cancel_download_clicked)
+        self.pause_download_button = QPushButton(T.BATCH_BTN_PAUSE)
+        self.pause_download_button.setEnabled(False)
+        self.pause_download_button.setVisible(False)
+        self.pause_download_button.clicked.connect(self._on_pause_download_clicked)
         back_button = QPushButton(T.BTN_BACK)
         set_back_button(back_button)
         back_button.clicked.connect(self.reject)
@@ -687,6 +683,7 @@ class BatchDownloadDialog(QDialog):
         out_dir.mkdir(parents=True, exist_ok=True)
         self._downloading = True
         self._download_cancel_requested = False
+        self._download_paused = False
         self._download_queue = list(rows)
         self._download_total = len(self._download_queue)
         self._download_cursor = 0
@@ -704,6 +701,9 @@ class BatchDownloadDialog(QDialog):
         self.input_edit.setEnabled(False)
         self.cancel_download_button.setVisible(True)
         self.cancel_download_button.setEnabled(True)
+        self.pause_download_button.setVisible(True)
+        self.pause_download_button.setEnabled(True)
+        self.pause_download_button.setText(T.BATCH_BTN_PAUSE)
         self._update_detect_button_state()
         self._update_download_button_state()
         self._dispatch_download_workers()
@@ -723,6 +723,7 @@ class BatchDownloadDialog(QDialog):
             len(self._download_workers) < self.download_concurrency
             and self._download_next_index < self._download_total
             and not self._download_cancel_requested
+            and not self._download_paused
         ):
             row = self._download_queue[self._download_next_index]
             self._download_next_index += 1
@@ -775,6 +776,7 @@ class BatchDownloadDialog(QDialog):
             worker.succeeded.connect(functools.partial(self._on_download_succeeded, worker))
             worker.failed.connect(functools.partial(self._on_download_failed, worker))
             worker.canceled.connect(functools.partial(self._on_download_canceled, worker))
+            worker.paused.connect(functools.partial(self._on_download_paused, worker))
             worker.finished.connect(functools.partial(self._on_download_worker_finished, worker))
             worker.start()
             started = True
@@ -851,6 +853,17 @@ class BatchDownloadDialog(QDialog):
         self._download_failed += 1
         self._finalize_download_worker(worker)
 
+    def _on_download_paused(self, worker: _workers.DownloadWorker) -> None:
+        key = id(worker)
+        row = self._worker_rows.get(key)
+        if not row:
+            return
+        row.status = "download_paused"
+        row.message = T.DOWNLOAD_PROGRESS_PAUSED
+        self._render_rows()
+        self._refresh_download_status()
+        logger.info("Batch download worker paused. song_id=%s", row.song_id)
+
     def _on_download_canceled(self, worker: _workers.DownloadWorker) -> None:
         key = id(worker)
         row = self._worker_rows.get(key)
@@ -923,6 +936,27 @@ class BatchDownloadDialog(QDialog):
         )
         set_label_state(self.status_label, "warning")
 
+    def _on_pause_download_clicked(self) -> None:
+        if self._download_paused:
+            # Resume all
+            self._download_paused = False
+            self.pause_download_button.setText(T.BATCH_BTN_PAUSE)
+            self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}（并发 {self.download_concurrency} 路）")
+            set_label_state(self.status_label, "warning")
+            for worker in list(self._download_workers.values()):
+                worker.request_resume()
+            self._dispatch_download_workers()
+            logger.info("Batch download resumed. remaining=%s", self._download_total - self._download_cursor)
+        else:
+            # Pause all
+            self._download_paused = True
+            self.pause_download_button.setText(T.BATCH_BTN_RESUME)
+            self.status_label.setText(T.BATCH_STATUS_DOWNLOAD_PAUSED)
+            set_label_state(self.status_label, "muted")
+            for worker in list(self._download_workers.values()):
+                worker.request_pause()
+            logger.info("Batch download paused. cursor=%s/%s", self._download_cursor, self._download_total)
+
     def _on_cancel_download_clicked(self) -> None:
         if not self._downloading:
             return
@@ -942,6 +976,7 @@ class BatchDownloadDialog(QDialog):
         pending = max(total - processed, 0)
         self._downloading = False
         self._download_cancel_requested = False
+        self._download_paused = False
         self._download_workers = {}
         self._worker_rows = {}
         self._worker_output_paths = {}
@@ -949,6 +984,7 @@ class BatchDownloadDialog(QDialog):
         self._download_next_index = 0
         self.input_edit.setEnabled(True)
         self.cancel_download_button.setVisible(False)
+        self.pause_download_button.setVisible(False)
         self.cancel_download_button.setEnabled(False)
         if stopped:
             stopped_text = T.BATCH_DOWNLOAD_STOPPED.format(
