@@ -26,6 +26,8 @@ BATCH_CSV_FIELDS = (
 UNKNOWN_FAILURE_REASON = "未知原因"
 
 
+
+__all__ = ['BATCH_CSV_FIELDS', 'UNKNOWN_FAILURE_REASON', 'build_batch_results_csv', 'retryable_failed_rows', 'summarize_batch_rows']
 class BatchResultRow(Protocol):
     raw_input: str
     source_type: str

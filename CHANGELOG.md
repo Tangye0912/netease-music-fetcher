@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.12.0 (2026-07-03)
+
+### Fixed
+
+- 修复暂停后取消时 `.part` 临时文件残留：`_stop_download_flow` 和 `DownloadWorker.finally` 块清理 `.part` 文件，暂停时保留断点续传文件。
+
+### Changed
+
+- 硬编码中文清理：`_batch_dialogs.py` 中 6 处硬编码状态消息提取到 `ui_texts`（`batch_runtime_settings_updated`、`batch_download_concurrency_label` 等）。
+- `main.py` 中 4 处硬编码状态消息提取到 `ui_texts`（`status_update_available`、`status_update_latest`、`status_download_done`）。
+- Combo 后缀 `"次"`/`"路"` 提取到 `ui_texts.COUNT_SUFFIX` / `CONCURRENCY_SUFFIX`。
+- CLI 新增 `--retry` 参数，移除无效的 `argparse.ArgumentError` 捕获。
+
+### Refactored
+
+- 拆分 `_dialogs.py`：`DownloadProgressDialog` → `_dialog_progress.py`，`DownloadManagerDialog` → `_dialog_manager.py`。
+- 拆分 `_batch_dialogs.py`：`BatchRuntimeSettingsDialog` → `_dialog_batch_settings.py`。
+- 提取 `main.py` 版本检查：`version_key` + `fetch_latest_project_version` → `_version_check.py`。
+- 补 `__all__` 定义：11 个模块（`_batch_dialogs`、`_dialogs`、`_dialog_login`、`_batch_models`、`_batch_results`、`_gui_styles`、`_combo_utils`、`_dialog_progress`、`_dialog_manager`、`_dialog_batch_settings`、`_version_check`）。
+
+### QA
+
+- 新增 `tests/test_app_logging.py`（8 个测试用例），覆盖 `setup_logging`、`get_logger`、`mask_value`、`default_log_path`。
+- 回归测试：`python3 -m pytest tests/`（188 通过，1 跳过）。
+
 ## v0.11.0 (2026-07-03)
 
 ### Added

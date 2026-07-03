@@ -46,6 +46,7 @@ from music_fetch import (
 from _batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
 from _gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
 from _batch_models import BatchDetectRow, format_bytes
+from _dialog_batch_settings import BatchRuntimeSettingsDialog
 import _combo_utils
 import _workers
 import ui_texts as T
@@ -78,75 +79,8 @@ except ImportError as err:
 
 logger = get_logger("music_fetch.gui")
 
-class BatchRuntimeSettingsDialog(QDialog):
-    """Lightweight settings dialog used inside batch workflow."""
 
-    def __init__(
-        self,
-        detect_timeout_sec: int,
-        download_timeout_sec: int,
-        download_retry_count: int,
-        download_concurrency: int,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(parent)
-        self.detect_timeout_sec = int(detect_timeout_sec)
-        self.download_timeout_sec = int(download_timeout_sec)
-        self.download_retry_count = int(download_retry_count)
-        self.download_concurrency = int(download_concurrency)
-        self.setWindowTitle(T.BATCH_BTN_SETTINGS)
-        self.resize(420, 240)
-
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
-        self.detect_timeout_input = _combo_utils.build_options_combo(DETECT_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.detect_timeout_input, self.detect_timeout_sec)
-        form.addRow(T.UI_SETTINGS_DETECT_TIMEOUT, self.detect_timeout_input)
-
-        self.download_timeout_input = _combo_utils.build_options_combo(DOWNLOAD_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.download_timeout_input, self.download_timeout_sec)
-        form.addRow(T.UI_SETTINGS_DOWNLOAD_TIMEOUT, self.download_timeout_input)
-
-        self.download_retry_input = _combo_utils.build_value_combo(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT, "次")
-        _combo_utils.set_combo_value(self.download_retry_input, self.download_retry_count)
-        form.addRow(T.UI_SETTINGS_DOWNLOAD_RETRY, self.download_retry_input)
-
-        self.download_concurrency_input = _combo_utils.build_value_combo(
-            MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY, "路"
-        )
-        _combo_utils.set_combo_value(self.download_concurrency_input, self.download_concurrency)
-        form.addRow(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY, self.download_concurrency_input)
-        layout.addLayout(form)
-
-        hint = QLabel(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT)
-        hint.setWordWrap(True)
-        set_label_state(hint, "muted")
-        layout.addWidget(hint)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        cancel_button = QPushButton(T.BTN_BACK)
-        cancel_button.clicked.connect(self.reject)
-        set_back_button(cancel_button)
-        save_button = QPushButton(T.UI_SETTINGS_SAVE)
-        save_button.clicked.connect(self._on_save)
-        set_button_role(save_button, "primary")
-        button_row.addWidget(cancel_button)
-        button_row.addWidget(save_button)
-        layout.addLayout(button_row)
-
-    def _on_save(self) -> None:
-        self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
-            _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
-        )
-        self.accept()
-
-
+__all__ = ['BatchRuntimeSettingsDialog', 'BatchDownloadDialog']
 class BatchDownloadDialog(QDialog):
     # v0.5.0: batch detect + batch download workflow entry.
     def __init__(
@@ -473,8 +407,10 @@ class BatchDownloadDialog(QDialog):
         if self._downloading and not self._download_cancel_requested:
             self._dispatch_download_workers()
         self.status_label.setText(
-            f"下载设置已更新：检测超时 {self.detect_timeout_sec}s，下载超时 {self.download_timeout_sec}s，"
-            f"重试 {self.download_retry_count}，并发 {self.download_concurrency} 路。"
+            T.batch_runtime_settings_updated(
+                self.detect_timeout_sec, self.download_timeout_sec,
+                self.download_retry_count, self.download_concurrency,
+            )
         )
         set_label_state(self.status_label, "success")
 
@@ -696,7 +632,7 @@ class BatchDownloadDialog(QDialog):
         self._worker_output_paths = {}
         self.batch_progress.setRange(0, max(self._download_total, 1))
         self.batch_progress.setValue(0)
-        self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}（并发 {self.download_concurrency} 路）")
+        self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}{T.batch_download_concurrency_label(self.download_concurrency)}")
         set_label_state(self.status_label, "warning")
         self.input_edit.setEnabled(False)
         self.cancel_download_button.setVisible(True)
@@ -796,15 +732,21 @@ class BatchDownloadDialog(QDialog):
         finished = self._download_cursor
         if total > 0:
             self.status_label.setText(
-                f"{T.BATCH_STATUS_DOWNLOADING} {finished}/{self._download_total}（并发中 {active_count}） - "
-                f"{row.song_name or row.song_id} "
-                f"({format_bytes(downloaded)}/{format_bytes(total)} {T.speed_text(format_bytes(int(speed)))})"
+                T.batch_download_progress_with_song(
+                    finished, self._download_total, active_count,
+                    row.song_name or row.song_id,
+                    f"{format_bytes(downloaded)}/{format_bytes(total)}",
+                    T.speed_text(format_bytes(int(speed))),
+                )
             )
         else:
             self.status_label.setText(
-                f"{T.BATCH_STATUS_DOWNLOADING} {finished}/{self._download_total}（并发中 {active_count}） - "
-                f"{row.song_name or row.song_id} "
-                f"({format_bytes(downloaded)} {T.speed_text(format_bytes(int(speed)))})"
+                T.batch_download_progress_with_song(
+                    finished, self._download_total, active_count,
+                    row.song_name or row.song_id,
+                    format_bytes(downloaded),
+                    T.speed_text(format_bytes(int(speed))),
+                )
             )
         set_label_state(self.status_label, "warning")
 
@@ -932,7 +874,7 @@ class BatchDownloadDialog(QDialog):
             return
         active_count = len(self._download_workers)
         self.status_label.setText(
-            f"{T.BATCH_STATUS_DOWNLOADING} 已完成 {self._download_cursor}/{self._download_total}，并发中 {active_count} 路"
+            f"{T.BATCH_STATUS_DOWNLOADING} {T.batch_download_active_status(self._download_cursor, self._download_total, active_count)}"
         )
         set_label_state(self.status_label, "warning")
 
@@ -941,7 +883,7 @@ class BatchDownloadDialog(QDialog):
             # Resume all
             self._download_paused = False
             self.pause_download_button.setText(T.BATCH_BTN_PAUSE)
-            self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}（并发 {self.download_concurrency} 路）")
+            self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}{T.batch_download_concurrency_label(self.download_concurrency)}")
             set_label_state(self.status_label, "warning")
             for worker in list(self._download_workers.values()):
                 worker.request_resume()
@@ -974,6 +916,14 @@ class BatchDownloadDialog(QDialog):
         processed = self._download_cursor
         total = self._download_total
         pending = max(total - processed, 0)
+        # Clean up .part files from paused or canceled workers
+        for output_path in self._worker_output_paths.values():
+            part_path = output_path.with_name(f"{output_path.name}.part")
+            if part_path.exists():
+                part_path.unlink(missing_ok=True)
+            source_path = output_path.with_name(f"{output_path.name}.source")
+            if source_path.exists():
+                source_path.unlink(missing_ok=True)
         self._downloading = False
         self._download_cancel_requested = False
         self._download_paused = False

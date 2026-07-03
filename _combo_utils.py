@@ -11,6 +11,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import QComboBox
 
 
+
+__all__ = ['build_value_combo', 'build_options_combo', 'combo_int_value', 'set_combo_value']
 def build_value_combo(min_value: int, max_value: int, suffix: str) -> QComboBox:
     """Build a combo spanning every integer in [min_value, max_value]."""
     combo = QComboBox()

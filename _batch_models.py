@@ -18,6 +18,8 @@ import ui_texts as T
 logger = get_logger("music_fetch.gui")
 
 
+
+__all__ = ['BatchDetectRow', 'format_bytes', 'format_duration', 'probe_media_size_bytes']
 def format_duration(duration_ms: Optional[int]) -> str:
     if duration_ms is None:
         return T.MSG_UNKNOWN

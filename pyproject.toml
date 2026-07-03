@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "0.11.0"
+version = "0.12.0"
 description = "\u7f51\u6613\u4e91\u97f3\u4e50\u5355\u66f2\u4e0b\u8f7d\u5de5\u5177"
 requires-python = ">=3.9"
 dependencies = [
@@ -29,9 +29,13 @@ py-modules = [
     "_batch_results",
     "_cli",
     "_combo_utils",
+    "_dialog_batch_settings",
     "_dialog_login",
+    "_dialog_manager",
+    "_dialog_progress",
     "_dialogs",
     "_gui_styles",
+    "_version_check",
     "_workers",
     "app_logging",
     "app_settings",

@@ -186,6 +186,9 @@ UI_SETTINGS_THEME = "界面主题"
 UI_SETTINGS_THEME_LIGHT = "浅色"
 UI_SETTINGS_THEME_DARK = "深色"
 
+COUNT_SUFFIX = "次"
+CONCURRENCY_SUFFIX = "路"
+
 BATCH_DIALOG_TITLE = "批量识别与下载"
 BATCH_DIALOG_DESC = "支持粘贴多行链接或分享文案，先识别再批量下载可下载歌曲。"
 BATCH_INPUT_LABEL = "批量输入（支持直接粘贴多个链接/ID或整段分享文案）"
@@ -272,6 +275,40 @@ def detect_auth_expired(code: str, message: str) -> str:
 
 def status_download_done(filename: str) -> str:
     return f"状态：下载完成 -> {filename}"
+
+
+def status_update_available(latest_version: str) -> str:
+    return f"状态：发现新版本 {latest_version}"
+
+
+def status_update_latest(version: str) -> str:
+    return f"状态：当前已是最新版本 {version}"
+
+
+def batch_runtime_settings_updated(
+    detect_timeout: int, download_timeout: int, retry_count: int, concurrency: int,
+) -> str:
+    return (
+        f"下载设置已更新：检测超时 {detect_timeout}s，下载超时 {download_timeout}s，"
+        f"重试 {retry_count}，并发 {concurrency} 路。"
+    )
+
+
+def batch_download_concurrency_label(concurrency: int) -> str:
+    return f"（并发 {concurrency} 路）"
+
+
+def batch_download_active_status(
+    cursor: int, total: int, active_count: int,
+) -> str:
+    return f"已完成 {cursor}/{total}，并发中 {active_count} 路"
+
+
+def batch_download_progress_with_song(
+    cursor: int, total: int, active_count: int,
+    song_info: str, downloaded: str, extra: str,
+) -> str:
+    return f"{cursor}/{total}（并发中 {active_count}） - {song_info} ({downloaded} {extra})"
 
 
 def status_ui_settings_updated(

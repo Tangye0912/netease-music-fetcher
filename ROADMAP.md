@@ -93,27 +93,27 @@
 
 ### Bug 修复
 
-- [ ] 修复暂停后取消时 `.part` 文件残留：`_stop_download_flow` 应清理暂停 worker 的 `.part` 临时文件。
-- [ ] 修正 ROADMAP v0.11.0 中 `DownloadProgressDialog`/`DownloadManagerDialog` 误标为已完成 → 实际未拆分。
+- [x] 修复暂停后取消时 `.part` 文件残留（v0.12.0 已完成）：`_stop_download_flow` 应清理暂停 worker 的 `.part` 临时文件。
+- [x] 修正 ROADMAP v0.11.0 中 `DownloadProgressDialog`（v0.12.0 已完成）/`DownloadManagerDialog` 误标为已完成 → 实际未拆分。
 
 ### 硬编码清理
 
-- [ ] `_batch_dialogs.py` 硬编码中文状态消息提取到 `ui_texts`（`下载设置已更新`、`并发 N 路`、`已完成` 等）。
-- [ ] `main.py` 硬编码中文状态消息提取到 `ui_texts`（`发现新版本`、`已是最新版本`、`下载完成`、`网络错误`）。
-- [ ] `_batch_dialogs.py` / `_dialogs.py` 中 `"次"` / `"路"` 后缀提取到 `ui_texts`。
+- [x] `_batch_dialogs.py` 硬编码中文状态消息提取到 `ui_texts`（v0.12.0 已完成）（`下载设置已更新`、`并发 N 路`、`已完成` 等）。
+- [x] `main.py` 硬编码中文状态消息提取到 `ui_texts`（v0.12.0 已完成）（`发现新版本`、`已是最新版本`、`下载完成`、`网络错误`）。
+- [x] `_batch_dialogs.py` / `_dialogs.py` 中 `"次"` / `"路"` 后缀提取到 `ui_texts`（v0.12.0 已完成）。
 
 ### 模块拆分
 
-- [ ] 拆分 `_dialogs.py`：`DownloadProgressDialog` → `_dialog_progress.py`，`DownloadManagerDialog` → `_dialog_manager.py`。
-- [ ] 拆分 `_batch_dialogs.py`：`BatchRuntimeSettingsDialog` → `_dialog_batch_settings.py`。
-- [ ] 提取 `main.py` 中版本检查逻辑（`fetch_latest_project_version`、`version_key`）到 `_version_check.py`。
+- [x] 拆分 `_dialogs.py`：`DownloadProgressDialog` → `_dialog_progress.py`（v0.12.0 已完成），`DownloadManagerDialog` → `_dialog_manager.py`。
+- [x] 拆分 `_batch_dialogs.py`：`BatchRuntimeSettingsDialog` → `_dialog_batch_settings.py`（v0.12.0 已完成）。
+- [x] 提取 `main.py` 中版本检查逻辑（v0.12.0 已完成）（`fetch_latest_project_version`、`version_key`）到 `_version_check.py`。
 
 ### 测试与质量
 
-- [ ] 补 `__all__` 定义：`_batch_dialogs.py`、`_dialogs.py`、`_dialog_login.py`、`_batch_models.py`、`_batch_results.py`、`_gui_styles.py`、`_combo_utils.py`。
-- [ ] 补 `app_logging.py` 单元测试。
-- [ ] CLI 添加 `--retry` 参数。
-- [ ] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获。
+- [x] 补 `__all__` 定义（v0.12.0 已完成）：`_batch_dialogs.py`、`_dialogs.py`、`_dialog_login.py`、`_batch_models.py`、`_batch_results.py`、`_gui_styles.py`、`_combo_utils.py`。
+- [x] 补 `app_logging.py` 单元测试（v0.12.0 已完成）。
+- [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
+- [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
 ## v0.6.0 (Completed - 2026-05-07)
 

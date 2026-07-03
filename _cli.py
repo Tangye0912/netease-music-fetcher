@@ -162,6 +162,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout in seconds (default: 30).",
     )
     parser.add_argument(
+        "--retry", type=int, default=1, dest="retry_count",
+        help="Download retry count on network failure (default: 1).",
+    )
+    parser.add_argument(
         "--format", dest="out_format", default="mp3",
         choices=list(SUPPORTED_AUDIO_FORMATS),
         help=f"Output audio format (default: mp3). Supported: {', '.join(SUPPORTED_AUDIO_FORMATS)}.",
@@ -224,7 +228,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("UNKNOWN_ERROR: Interrupted by user.", file=sys.stderr)
         logger.warning("CLI interrupted by user.")
         return 1
-    except (OSError, ValueError, argparse.ArgumentError) as err:
+    except (OSError, ValueError) as err:
         print(f"UNKNOWN_ERROR: {err}", file=sys.stderr)
         logger.exception("CLI failed with unexpected error.")
         return 1

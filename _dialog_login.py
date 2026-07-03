@@ -53,6 +53,8 @@ except ImportError:
 logger = get_logger("music_fetch.gui")
 
 
+
+__all__ = ['LoginDialog', 'build_cookie_from_fields', 'WEB_ENGINE_AVAILABLE']
 def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
     """Build a Cookie header string from captured WebEngine cookies."""
     music_u = (cookie_fields.get("MUSIC_U") or "").strip()

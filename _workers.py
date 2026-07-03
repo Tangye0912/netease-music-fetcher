@@ -407,6 +407,10 @@ class DownloadWorker(QThread):
             if err.code == "DOWNLOAD_PAUSED":
                 logger.info("DownloadWorker paused by user. task_id=%s output=%s", self.task_id, self.output_path)
                 self.paused.emit()
+                # Keep .part file for resume; clean up .source only
+                stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
+                if stale_source.exists():
+                    stale_source.unlink(missing_ok=True)
                 return
             logger.warning("DownloadWorker failed. task_id=%s code=%s message=%s", self.task_id, err.code, err.message)
             self.failed.emit(err.code, err.message)
@@ -417,3 +421,6 @@ class DownloadWorker(QThread):
             stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
             if stale_source.exists():
                 stale_source.unlink(missing_ok=True)
+            stale_part = self.output_path.with_name(f"{self.output_path.name}.part")
+            if stale_part.exists():
+                stale_part.unlink(missing_ok=True)

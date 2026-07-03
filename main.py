@@ -67,37 +67,7 @@ from _dialogs import (
 logger = get_logger("music_fetch.gui")
 
 
-def version_key(version: str) -> tuple[int, ...]:
-    parts = [int(part) for part in re.findall(r"\d+", version or "")]
-    return tuple(parts) if parts else (0,)
-
-
-def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
-    headers = {"User-Agent": "music-fetch-gui", "Accept": "application/vnd.github+json"}
-    endpoints = ((PROJECT_RELEASE_API, "release"), (PROJECT_TAGS_API, "tag"))
-    for endpoint, mode in endpoints:
-        req = request.Request(endpoint, headers=headers, method="GET")
-        try:
-            with request.urlopen(req, timeout=timeout) as resp:
-                body_raw = resp.read().decode("utf-8")
-        except (error.URLError, error.HTTPError, OSError):
-            continue
-        try:
-            payload = json.loads(body_raw or "{}")
-        except json.JSONDecodeError:
-            continue
-        if mode == "release" and isinstance(payload, dict):
-            tag_name = str(payload.get("tag_name") or "").strip()
-            html_url = str(payload.get("html_url") or PROJECT_GITHUB_URL).strip() or PROJECT_GITHUB_URL
-            if tag_name:
-                return tag_name, html_url
-            continue
-        if mode == "tag" and isinstance(payload, list) and payload:
-            first = payload[0] if isinstance(payload[0], dict) else {}
-            tag_name = str(first.get("name") or "").strip()
-            if tag_name:
-                return tag_name, PROJECT_GITHUB_URL
-    raise RuntimeError("GitHub API unavailable")
+from _version_check import version_key, fetch_latest_project_version
 
 
 class MainWindow(QMainWindow):
@@ -248,17 +218,17 @@ class MainWindow(QMainWindow):
             return
         except (error.URLError, error.HTTPError, OSError) as err:
             self._set_status("", "muted")
-            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=f"网络错误: {err}"))
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
             return
         current_key = version_key(APP_VERSION)
         latest_key = version_key(latest_version)
         if latest_key > current_key:
-            self._set_status(f"状态：发现新版本 {latest_version}", "warning")
+            self._set_status(T.status_update_available(latest_version), "warning")
             answer = QMessageBox.question(self, T.TITLE_WARNING, T.MSG_UPDATE_AVAILABLE.format(latest=latest_version, current=APP_VERSION), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
             if answer == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(release_url or PROJECT_GITHUB_URL))
             return
-        self._set_status(f"状态：当前已是最新版本 {APP_VERSION}", "success")
+        self._set_status(T.status_update_latest(APP_VERSION), "success")
         QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_LATEST.format(current=APP_VERSION))
 
     def _set_detect_busy(self, busy: bool) -> None:
@@ -582,7 +552,7 @@ class MainWindow(QMainWindow):
             size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
             self._record_download_result(song_id=result.song_id, song_name=result.song_name or "", output_path=progress.output_path, size_bytes=size_bytes, status=TASK_STATE_SUCCESS)
             self._set_latest_task_state(result.song_id, progress.output_path, TASK_STATE_SUCCESS)
-            status_text = f"状态：下载完成 -> {progress.output_path.name}"
+            status_text = T.status_download_done(progress.output_path.name)
             self._set_status(status_text, "success")
             logger.info("GUI flow finished successfully. task_id=%s output=%s", task_id, progress.output_path)
         else:
