@@ -3,15 +3,17 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v0.9.0）
+## 1. 版本概览（v0.10.0）
 
-### 1.1 v0.9.0 相对 v0.8.0 的更新
+### 1.1 v0.10.0 相对 v0.9.1 的更新
 
-- **修复**：消除 `main.py` 星号导入，改为显式导入 17 个名字，提升 linter 可追踪性。
-- **修复**：定义 `error_texts.UNKNOWN_ERROR` 常量，统一 5 处散落引用。
-- **修复**：提取硬编码中文错误消息到 `ui_texts.py`。
-- **修复**：版本检查异常处理区分 `RuntimeError` 和网络错误。
-- **改进**：设置状态文本复用 `T.status_ui_settings_updated()`，消除重复拼接。
+- **新增**：`_batch_models.py` — 从 `_workers.py` 提取纯数据模型和格式化工具（`BatchDetectRow`、`format_bytes`、`format_duration`、`probe_media_size_bytes`）。
+- **新增**：`_gui_styles.py` — 从 `_dialogs.py` 提取样式构建和按钮/标签辅助函数，降低模块耦合度。
+- **新增**：`tests/test_dialogs.py`（42 个测试用例），覆盖 `_dialogs.py` 中 7 个对话框类和纯函数。
+- **新增**：下载暂停/恢复 — `DownloadWorker` 支持 `request_pause()`/`request_resume()`，暂停时保留 `.part` 文件。
+- **新增**：断点续传 — 恢复下载时使用 `Range` 请求头从已下载位置继续。
+- **新增**：暗色主题 — 软件设置中可切换浅色/深色主题，持久化到 `ui_theme`。
+- **改进**：`_workers.py` 和 `_dialogs.py` 模块体积大幅缩减，导入链更清晰。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
 迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
@@ -28,14 +30,14 @@
 - 下载管理：支持状态筛选、重试失败任务、打开目录、删除记录
 - 依赖降级：未安装 `ffmpeg` 时自动回退 `mp3` 并限制转码选项
 - 日志：关键流程全链路记录，便于排障
+- 主题：支持浅色/深色主题切换
+- 暂停/恢复：下载队列支持暂停/恢复与断点续传
 
 ### 1.3 下一版本计划
 
-- 提取通用 `clamp` 函数，消除 17 处重复钳位模式
-- 拆分 `_dialogs.py`（1293 行）和 `_batch_dialogs.py`（1006 行）
-- 补 `_dialogs.py` 中 7 个对话框类的单元测试
-- 下载队列暂停/恢复与断点续传
-- 软件设置增加暗色主题切换
+- 批量下载暂停/恢复 UI 集成（底层已支持）
+- 下载队列可视化进度条优化
+- 进一步拆分 `_dialogs.py` 中对话框类到独立文件
 
 ## 2. 环境准备
 
@@ -135,14 +137,16 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | 路径 | 职责 |
 | --- | --- |
 | `main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
-| `_dialogs.py` | 通用 GUI 对话框与样式辅助，包含登录、单曲确认、下载进度、依赖管理、下载管理、软件设置等。 |
+| `_dialogs.py` | 通用 GUI 对话框（登录、单曲确认、下载进度、依赖管理、下载管理、软件设置）和输入校验。 |
 | `_batch_dialogs.py` | 批量识别与批量下载界面，包含批量设置、失败项重试、CSV 导出和并发下载调度。 |
 | `_batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
-| `_workers.py` | 后台线程：单曲识别、批量识别、下载执行，以及进度、大小、时长格式化辅助。 |
+| `_workers.py` | 后台线程：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
 | `_api.py` | 网易云接口层：链接解析、短链解析、cookie 处理、登录校验、歌曲/歌单/账号 API。 |
 | `_audio.py` | 音频下载与处理：候选资源下载、403 fallback、断点清理、格式推断、ffmpeg 转码。 |
 | `_cli.py` | CLI 命令行入口和脚本化下载流程。 |
 | `music_fetch.py` | 向后兼容外观层，重新导出 `_api.py`、`_audio.py`、`_cli.py` 的公共能力。 |
+| `_batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具（`format_bytes`、`format_duration`、`probe_media_size_bytes`）。 |
+| `_gui_styles.py` | QSS 样式表构建（浅色/深色主题）、按钮角色和标签状态辅助函数。 |
 | `_combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助，供设置类对话框复用。 |
 | `app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则、项目链接。 |
 | `app_stores.py` | 本地持久化：登录会话、下载历史、状态字段兼容和边界值夹紧。 |
@@ -157,7 +161,7 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明、console script 和平铺模块打包清单。 |
 | `__init__.py` | 兼容平铺模块项目的包标记文件。 |
-| `tests/` | 115 个单元/回归测试，覆盖 API、解析、存储、批量结果、批量对话框、下载流、入口脚本和下载 worker。 |
+| `tests/` | 159 个单元/回归测试，覆盖 API、解析、存储、批量结果、批量对话框、对话框、下载流、入口脚本和下载 worker。 |
 | `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |

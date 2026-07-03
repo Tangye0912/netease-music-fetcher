@@ -58,13 +58,13 @@
 
 ### Scope
 
-- [ ] 提取通用 `clamp` 函数，消除 17 处重复钳位模式。
-- [ ] 消除 `BatchRuntimeSettingsDialog` 和 `UiSettingsDialog` 的重复钳位逻辑。
-- [ ] 拆分 `_workers.py` 中工具函数和模型到 `_batch_models.py`。
-- [ ] 拆分 `_dialogs.py` 中样式工具到 `_gui_styles.py`。
-- [ ] 补 `_dialogs.py` 中 7 个对话框类的单元测试。
-- [ ] 下载队列暂停/恢复与断点续传。
-- [ ] 软件设置增加暗色主题切换。
+- [x] 提取通用 `clamp` 函数，消除 17 处重复钳位模式。（v0.9.1 已完成）
+- [x] 消除 `BatchRuntimeSettingsDialog` 和 `UiSettingsDialog` 的重复钳位逻辑。（v0.9.1 已完成）
+- [x] 拆分 `_workers.py` 中工具函数和模型到 `_batch_models.py`。（v0.10.0 已完成）
+- [x] 拆分 `_dialogs.py` 中样式工具到 `_gui_styles.py`。（v0.10.0 已完成）
+- [x] 补 `_dialogs.py` 中 7 个对话框类的单元测试。（v0.10.0 已完成）
+- [x] 下载队列暂停/恢复与断点续传。（v0.10.0 已完成）
+- [x] 软件设置增加暗色主题切换。（v0.10.0 已完成）
 
 ## v0.6.0 (Completed - 2026-05-07)
 

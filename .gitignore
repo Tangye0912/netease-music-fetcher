@@ -26,3 +26,4 @@ env/
 # Runtime
 logs/
 *.log
+.reasonix/

@@ -88,6 +88,16 @@ from music_fetch import (
 import ui_texts as T
 import _combo_utils
 import _workers
+from _batch_models import format_bytes, format_duration
+from _gui_styles import (
+    apply_app_style,
+    build_app_stylesheet,
+    clamp_ui_font_size,
+    set_back_button,
+    set_button_role,
+    set_label_state,
+    set_secondary_button,
+)
 
 try:
     from PySide6.QtCore import QSize, QThread, Qt, QTimer, QUrl, Signal
@@ -188,135 +198,6 @@ def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
         if value:
             parts.append(f"{key}={value}")
     return "; ".join(parts)
-
-
-def clamp_ui_font_size(value: object) -> int:
-    return clamp(value, DEFAULT_UI_FONT_SIZE, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
-
-
-def build_app_stylesheet(font_size: int) -> str:
-    field_height = max(34, int(font_size * 2.2))
-    button_height = max(36, int(font_size * 2.35))
-    radius = max(8, int(font_size * 0.55))
-    return f"""
-    QWidget {{
-        font-size: {font_size}px;
-    }}
-    QPushButton {{
-        min-height: {button_height}px;
-        padding: 4px 14px;
-        border-radius: {radius}px;
-        border: 1px solid #d0d7de;
-        background: #f6f8fa;
-        color: #24292f;
-    }}
-    QPushButton:hover {{
-        background: #eef3f8;
-    }}
-    QPushButton:focus {{
-        border-color: #0969da;
-        background: #eef3f8;
-    }}
-    QPushButton[role="primary"] {{
-        background: #0969da;
-        border-color: #0969da;
-        color: #ffffff;
-        font-weight: 600;
-    }}
-    QPushButton[role="primary"]:hover {{
-        background: #0550ae;
-        border-color: #0550ae;
-    }}
-    QPushButton[role="primary"]:focus {{
-        background: #0550ae;
-        border-color: #0550ae;
-    }}
-    QPushButton[navRole="back"] {{
-        min-width: 96px;
-    }}
-    QLineEdit, QPlainTextEdit, QComboBox {{
-        min-height: {field_height}px;
-        border: 1px solid #d0d7de;
-        border-radius: {radius}px;
-        padding: 0 10px;
-        background: #ffffff;
-        color: #24292f;
-        selection-background-color: #0969da;
-        selection-color: #ffffff;
-    }}
-    QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{
-        border-color: #0969da;
-    }}
-    QComboBox QAbstractItemView {{
-        border: 1px solid #d0d7de;
-        background: #ffffff;
-        selection-background-color: #0969da;
-        selection-color: #ffffff;
-        outline: 0;
-    }}
-    QComboBox QAbstractItemView::item:hover {{
-        background: #dbeafe;
-        color: #111827;
-    }}
-    QComboBox QAbstractItemView::item:selected {{
-        background: #0969da;
-        color: #ffffff;
-    }}
-    QLabel[state="success"] {{
-        color: #1a7f37;
-        font-weight: 600;
-    }}
-    QLabel[state="warning"] {{
-        color: #9a6700;
-        font-weight: 600;
-    }}
-    QLabel[state="error"] {{
-        color: #cf222e;
-        font-weight: 600;
-    }}
-    QLabel[state="muted"] {{
-        color: #656d76;
-    }}
-    QProgressBar {{
-        min-height: {field_height}px;
-    }}
-    """
-
-
-def apply_app_style(app: QApplication, font_size: int) -> int:
-    normalized = clamp_ui_font_size(font_size)
-    app.setStyleSheet(build_app_stylesheet(normalized))
-    return normalized
-
-
-def set_button_role(button: QPushButton, role: Optional[str]) -> None:
-    button.setProperty("role", role or "")
-    button.style().unpolish(button)
-    button.style().polish(button)
-    if role == "primary":
-        button.setDefault(True)
-        button.setAutoDefault(True)
-
-
-def set_back_button(button: QPushButton) -> None:
-    button.setProperty("navRole", "back")
-    button.setAutoDefault(False)
-    button.setDefault(False)
-    button.style().unpolish(button)
-    button.style().polish(button)
-
-
-def set_secondary_button(button: QPushButton) -> None:
-    button.setAutoDefault(False)
-    button.setDefault(False)
-    button.style().unpolish(button)
-    button.style().polish(button)
-
-
-def set_label_state(label: QLabel, state: str) -> None:
-    label.setProperty("state", state)
-    label.style().unpolish(label)
-    label.style().polish(label)
 
 
 def validate_song_input(value: str) -> tuple[bool, str]:
@@ -509,7 +390,7 @@ class SongConfirmDialog(QDialog):
         grid.addWidget(QLabel(T.SONG_CONFIRM_NAME), 1, 0)
         grid.addWidget(QLabel(result.song_name or T.MSG_UNKNOWN), 1, 1)
         grid.addWidget(QLabel(T.SONG_CONFIRM_DURATION), 2, 0)
-        grid.addWidget(QLabel(_workers.format_duration(result.duration_ms)), 2, 1)
+        grid.addWidget(QLabel(format_duration(result.duration_ms)), 2, 1)
         status = T.SONG_CONFIRM_CAN_DOWNLOAD if result.can_download else T.SONG_CONFIRM_CANT_DOWNLOAD
         status_label = QLabel(status)
         status_label.setStyleSheet("color: #1f7a1f;" if result.can_download else "color: #a32929;")
@@ -781,14 +662,14 @@ class DownloadProgressDialog(QDialog):
     def _on_progress(self, downloaded: int, total: int, speed: float) -> None:
         if total <= 0:
             self.progress_bar.setRange(0, 0)
-            self.status_label.setText(T.DOWNLOAD_PROGRESS_TEXT_SIMPLE.format(downloaded=_workers.format_bytes(downloaded)))
+            self.status_label.setText(T.DOWNLOAD_PROGRESS_TEXT_SIMPLE.format(downloaded=format_bytes(downloaded)))
         else:
             self.progress_bar.setRange(0, total)
             self.progress_bar.setValue(min(downloaded, total))
             self.status_label.setText(
-                T.DOWNLOAD_PROGRESS_TEXT_FULL.format(downloaded=_workers.format_bytes(downloaded), total=_workers.format_bytes(total))
+                T.DOWNLOAD_PROGRESS_TEXT_FULL.format(downloaded=format_bytes(downloaded), total=format_bytes(total))
             )
-        self.speed_label.setText(T.speed_text(_workers.format_bytes(int(speed))))
+        self.speed_label.setText(T.speed_text(format_bytes(int(speed))))
 
     def _on_failed(self, code: str, message: str) -> None:
         self.result_state = TASK_STATE_FAILED
@@ -819,7 +700,7 @@ class DownloadProgressDialog(QDialog):
                 T.TITLE_DOWNLOAD_DONE,
                 T.DOWNLOAD_PROGRESS_DONE_BODY.format(
                     name=self.output_path.name,
-                    size=_workers.format_bytes(file_size),
+                    size=format_bytes(file_size),
                     path=self.output_path,
                 )
                 + fallback_note,
@@ -1001,7 +882,7 @@ class DownloadManagerDialog(QDialog):
             file_name = Path(record.output_path).name
             self.table.setItem(row, 0, QTableWidgetItem(record.song_name))
             self.table.setItem(row, 1, QTableWidgetItem(file_name))
-            self.table.setItem(row, 2, QTableWidgetItem(_workers.format_bytes(record.size_bytes)))
+            self.table.setItem(row, 2, QTableWidgetItem(format_bytes(record.size_bytes)))
             self.table.setItem(row, 3, QTableWidgetItem(record.downloaded_at))
             self.table.setItem(row, 4, QTableWidgetItem(T.manager_status_text(record.status)))
             self.table.setItem(row, 5, QTableWidgetItem(record.output_path))
@@ -1144,6 +1025,7 @@ class UiSettingsDialog(QDialog):
         download_timeout_sec: int,
         download_retry_count: int,
         download_concurrency: int,
+        current_theme: str = "light",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -1152,8 +1034,12 @@ class UiSettingsDialog(QDialog):
         self.download_timeout_sec = clamp(download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
         self.download_retry_count = clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
         self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
+        from app_settings import DEFAULT_UI_THEME, UI_THEME_OPTIONS
+        self.ui_theme = (current_theme or "").strip().lower()
+        if self.ui_theme not in UI_THEME_OPTIONS:
+            self.ui_theme = DEFAULT_UI_THEME
         self.setWindowTitle(T.UI_SETTINGS_TITLE)
-        self.resize(520, 320)
+        self.resize(520, 380)
 
         layout = QVBoxLayout(self)
         desc = QLabel(T.UI_SETTINGS_DESC)
@@ -1166,6 +1052,16 @@ class UiSettingsDialog(QDialog):
         _combo_utils.set_combo_value(self.font_size_input, self.font_size)
         self.font_size_input.currentIndexChanged.connect(self._on_font_size_changed)
         form.addRow(T.UI_SETTINGS_FONT_SIZE, self.font_size_input)
+        # Theme selector
+        self.theme_combo = QComboBox()
+        theme_labels = {"light": T.UI_SETTINGS_THEME_LIGHT, "dark": T.UI_SETTINGS_THEME_DARK}
+        for theme_key in UI_THEME_OPTIONS:
+            self.theme_combo.addItem(theme_labels.get(theme_key, theme_key), theme_key)
+        idx = self.theme_combo.findData(self.ui_theme)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        form.addRow(T.UI_SETTINGS_THEME, self.theme_combo)
         layout.addLayout(form)
 
         download_title = QLabel(T.UI_SETTINGS_DOWNLOAD_GROUP)
@@ -1221,6 +1117,10 @@ class UiSettingsDialog(QDialog):
         button_row.addWidget(back_button)
         button_row.addWidget(save_button)
         layout.addLayout(button_row)
+
+    def _on_theme_changed(self, _index: int) -> None:
+        self.ui_theme = str(self.theme_combo.currentData() or DEFAULT_UI_THEME)
+        self._refresh_preview()
 
     def _on_font_size_changed(self, _index: int) -> None:
         self.font_size = clamp_ui_font_size(_combo_utils.combo_int_value(self.font_size_input, DEFAULT_UI_FONT_SIZE))

@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.10.0 (2026-07-01)
+
+### Added
+
+- 新增 `_batch_models.py`：从 `_workers.py` 提取 `BatchDetectRow`、`format_bytes`、`format_duration`、`probe_media_size_bytes` 等纯数据模型和格式化工具，降低模块耦合度。
+- 新增 `_gui_styles.py`：从 `_dialogs.py` 提取样式构建（`build_app_stylesheet`、`apply_app_style`）、按钮角色（`set_button_role`、`set_back_button`、`set_secondary_button`）和标签状态（`set_label_state`）等样式辅助函数。
+- 新增 `tests/test_dialogs.py`（42 个测试用例），覆盖 `_dialogs.py` 中 7 个对话框类（`LoginDialog`、`SongConfirmDialog`、`DownloadOptionsDialog`、`DownloadProgressDialog`、`DependencyManagerDialog`、`DownloadManagerDialog`、`UiSettingsDialog`）和纯函数（`build_cookie_from_fields`、`validate_song_input`、`load_avatar_icon`、`clear_embedded_login_state`）。
+- 下载暂停/恢复：`DownloadWorker` 新增 `paused` 信号、`request_pause()` 和 `request_resume()` 方法，`_audio.py` 新增 `pause_checker` 回调支持，暂停时保留 `.part` 文件以便恢复。
+- 断点续传：`_download_audio_stream` 支持从 `.part` 文件恢复下载（使用 `Range: bytes={offset}-` 请求头），避免重复下载已传输数据。
+- 暗色主题：新增 `build_dark_stylesheet`（Catppuccin 风格），`UiSettingsDialog` 新增主题切换下拉框，`app_stores.py` 新增 `ui_theme` 持久化字段，`apply_app_style` 支持 `theme` 参数。
+- `error_texts.py` 新增 `DOWNLOAD_PAUSED` 错误码映射。
+- `_api.py` 新增 `PauseChecker` 类型别名。
+
+### Changed
+
+- `_workers.py` 从 `_batch_models.py` 导入并重新导出 `BatchDetectRow`、`format_bytes`、`format_duration`、`probe_media_size_bytes`，保持向后兼容。
+- `_dialogs.py` 从 `_gui_styles.py` 导入样式函数，原有本地定义已移除。
+- `_batch_dialogs.py` 和 `main.py` 改为直接从 `_batch_models.py` / `_gui_styles.py` 导入。
+- `pyproject.toml` 新增 `_batch_models` 和 `_gui_styles` 模块声明。
+- `UiSettingsDialog` 新增 `current_theme` 参数（默认 `"light"`），窗口高度略微增加以容纳主题选择器。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（159 通过，1 跳过）。
+
 ## v0.9.1 (2026-07-01)
 
 ### Fixed

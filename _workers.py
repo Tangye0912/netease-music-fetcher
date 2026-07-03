@@ -10,79 +10,41 @@ which are shared by both workers and dialogs.
 
 from __future__ import annotations
 
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from urllib import error, parse, request
 
-from app_logging import default_log_path, get_logger, setup_logging
+from _batch_models import (
+    BatchDetectRow,
+    format_bytes,
+    format_duration,
+    probe_media_size_bytes,
+)
+from app_logging import get_logger
 from app_settings import (
-    APP_VERSION,
-    DEFAULT_DETECT_TIMEOUT_SEC,
-    DETECT_TIMEOUT_OPTIONS,
-    DOWNLOAD_TIMEOUT_OPTIONS,
-    DEFAULT_DOWNLOAD_CONCURRENCY,
-    DEFAULT_DOWNLOAD_DIR,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
     DEFAULT_GUI_TARGET_FORMAT,
-    DEFAULT_UI_FONT_SIZE,
-    DOWNLOAD_HISTORY_FILE,
-    MAX_DETECT_TIMEOUT_SEC,
-    MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
-    MAX_UI_FONT_SIZE,
-    MIN_DETECT_TIMEOUT_SEC,
-    MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
-    MIN_UI_FONT_SIZE,
-    NETEASE_LOGIN_URL,
-    PROJECT_GITHUB_URL,
-    PROJECT_RELEASE_API,
-    PROJECT_TAGS_API,
-    SESSION_FILE,
     clamp,
 )
 from batch_inputs import collect_batch_candidates, source_hint_map
-from download_retry import can_retry_status, retry_target_format
-from download_tasks import (
-    build_task_id,
-    DownloadTaskSnapshot,
-    TASK_STATE_CANCELED,
-    TASK_STATE_DOWNLOADING,
-    TASK_STATE_FAILED,
-    TASK_STATE_PENDING,
-    TASK_STATE_SUCCESS,
-    next_task_snapshot,
-)
-from app_stores import AppSession, DownloadHistoryStore, DownloadRecord
 from error_texts import UNKNOWN_ERROR, user_error_message
 from music_fetch import (
-    AccountProfile,
     MusicFetchError,
-    SongDetectionResult,
     SUPPORTED_GUI_AUDIO_FORMATS,
-    build_cookie_string,
-    check_login_status,
     convert_audio_file,
     detect_song,
     download_song_with_fallback,
-    fetch_account_profile,
     fetch_playlist_song_ids,
-    extract_url_from_input,
-    is_netease_music_host,
     infer_audio_format_from_url,
     is_ffmpeg_available,
     parse_input_resource,
-    resolve_output_path,
-    sanitize_filename,
-    SHORT_LINK_HOSTS,
 )
 import ui_texts as T
 
@@ -95,70 +57,17 @@ except ImportError as err:
 
 logger = get_logger("music_fetch.gui")
 
-
-def format_duration(duration_ms: Optional[int]) -> str:
-    if duration_ms is None:
-        return T.MSG_UNKNOWN
-    seconds = max(int(duration_ms / 1000), 0)
-    mins, secs = divmod(seconds, 60)
-    hours, mins = divmod(mins, 60)
-    if hours > 0:
-        return f"{hours:02d}:{mins:02d}:{secs:02d}"
-    return f"{mins:02d}:{secs:02d}"
-
-
-def format_bytes(value: int) -> str:
-    units = ["B", "KB", "MB", "GB"]
-    size = float(max(value, 0))
-    for unit in units:
-        if size < 1024 or unit == units[-1]:
-            return f"{size:.1f}{unit}"
-        size /= 1024
-    return f"{value}B"
-
-
-def probe_media_size_bytes(media_url: str, timeout: int = 8) -> int:
-    """Best-effort remote media size probing for batch preview."""
-    if not media_url:
-        return 0
-    headers = {"User-Agent": "Mozilla/5.0"}
-    head_req = request.Request(media_url, headers=headers, method="HEAD")
-    try:
-        with request.urlopen(head_req, timeout=timeout) as resp:
-            content_length = str(getattr(resp, "headers", {}).get("Content-Length") or "").strip()
-            if content_length.isdigit():
-                return int(content_length)
-    except (error.URLError, error.HTTPError, OSError):
-        logger.debug("HEAD request failed for size probing. media_url=%s", media_url)
-
-    # Fallback: parse total from Content-Range of a tiny range request.
-    range_req = request.Request(
-        media_url,
-        headers={"User-Agent": "Mozilla/5.0", "Range": "bytes=0-0"},
-        method="GET",
-    )
-    try:
-        with request.urlopen(range_req, timeout=timeout) as resp:
-            content_range = str(getattr(resp, "headers", {}).get("Content-Range") or "").strip()
-            match = re.search(r"/(\d+)$", content_range)
-            if match:
-                return int(match.group(1))
-    except (error.URLError, error.HTTPError, OSError):
-        logger.debug("Range request failed for size probing. media_url=%s", media_url)
-    return 0
-
-
-@dataclass
-class BatchDetectRow:
-    raw_input: str
-    source_type: str = "unknown"
-    source_label: str = ""
-    song_id: str = ""
-    song_name: str = ""
-    status: str = "failed"
-    message: str = ""
-    media_size_bytes: int = 0
-    selected: bool = False
+# Re-exported from _batch_models.py for backward compatibility.
+# New code should import directly from _batch_models.
+__all__ = [
+    "BatchDetectRow",
+    "BatchInspectWorker",
+    "DownloadWorker",
+    "InspectWorker",
+    "format_bytes",
+    "format_duration",
+    "probe_media_size_bytes",
+]
 
 
 class BatchInspectWorker(QThread):
@@ -334,6 +243,7 @@ class DownloadWorker(QThread):
     succeeded = Signal(str, int)
     failed = Signal(str, str)
     canceled = Signal()
+    paused = Signal()
 
     def __init__(
         self,
@@ -355,9 +265,16 @@ class DownloadWorker(QThread):
         self.timeout = clamp(timeout, DEFAULT_DOWNLOAD_TIMEOUT_SEC, MIN_DOWNLOAD_TIMEOUT_SEC, MAX_DOWNLOAD_TIMEOUT_SEC)
         self.retry_count = clamp(retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
         self._cancel_event = threading.Event()
+        self._pause_event = threading.Event()
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
+
+    def request_pause(self) -> None:
+        self._pause_event.set()
+
+    def request_resume(self) -> None:
+        self._pause_event.clear()
 
     def _cleanup_paths(self, *paths: Path) -> None:
         for path in paths:
@@ -390,6 +307,9 @@ class DownloadWorker(QThread):
         def should_cancel() -> bool:
             return self._cancel_event.is_set()
 
+        def should_pause() -> bool:
+            return self._pause_event.is_set()
+
         try:
             # Download to a temporary source file first, then convert/move to final path.
             # This avoids exposing partial or half-converted output files to users.
@@ -408,10 +328,11 @@ class DownloadWorker(QThread):
                         prefer_format=self.target_format,
                         progress_callback=on_progress,
                         cancel_checker=should_cancel,
+                        pause_checker=should_pause,
                     )
                     break
                 except MusicFetchError as err:
-                    if err.code == "DOWNLOAD_CANCELED":
+                    if err.code in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
                         raise
                     is_last_attempt = attempt >= self.retry_count + 1
                     retriable = err.code in {"DOWNLOAD_FAILED", "NETWORK_ERROR"}
@@ -480,6 +401,10 @@ class DownloadWorker(QThread):
             if err.code == "DOWNLOAD_CANCELED":
                 logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
                 self.canceled.emit()
+                return
+            if err.code == "DOWNLOAD_PAUSED":
+                logger.info("DownloadWorker paused by user. task_id=%s output=%s", self.task_id, self.output_path)
+                self.paused.emit()
                 return
             logger.warning("DownloadWorker failed. task_id=%s code=%s message=%s", self.task_id, err.code, err.message)
             self.failed.emit(err.code, err.message)

@@ -12,8 +12,9 @@ _app = QApplication.instance()
 if _app is None:
     _app = QApplication(["test"])
 
+from _batch_models import BatchDetectRow
 from _batch_dialogs import BatchDownloadDialog
-from _workers import BatchDetectRow, DownloadWorker
+from _workers import DownloadWorker
 from app_stores import DownloadHistoryStore, DownloadRecord
 from download_tasks import TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS
 

@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "0.9.1"
+APP_VERSION = "0.10.0"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"
@@ -22,6 +22,8 @@ SUPPORTED_AUDIO_FORMATS = ("mp3", "m4a", "wav", "flac", "aac")
 DEFAULT_UI_FONT_SIZE = 14
 MIN_UI_FONT_SIZE = 12
 MAX_UI_FONT_SIZE = 20
+DEFAULT_UI_THEME = "light"
+UI_THEME_OPTIONS = ("light", "dark")
 DETECT_TIMEOUT_OPTIONS = (1, 3, 5)
 DOWNLOAD_TIMEOUT_OPTIONS = (3, 5, 10)
 DEFAULT_DETECT_TIMEOUT_SEC = 5

@@ -9,7 +9,7 @@ from _batch_results import (
     retryable_failed_rows,
     summarize_batch_rows,
 )
-from _workers import BatchDetectRow
+from _batch_models import BatchDetectRow
 
 
 class BatchResultsTests(unittest.TestCase):

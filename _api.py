@@ -9,7 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "MusicFetchError", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
-    "ProgressCallback", "CancelChecker",
+    "ProgressCallback", "CancelChecker", "PauseChecker",
     "parse_song_id", "parse_playlist_id", "parse_input_resource",
     "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
     "load_cookie", "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
@@ -102,6 +102,7 @@ class PlayableCandidate:
 
 ProgressCallback = Callable[[int, Optional[int]], None]
 CancelChecker = Callable[[], bool]
+PauseChecker = Callable[[], bool]
 
 
 # ── URL / Input parsing ──────────────────────────────────────────

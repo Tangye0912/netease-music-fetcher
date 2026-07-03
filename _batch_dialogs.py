@@ -43,7 +43,8 @@ from music_fetch import (
     resolve_output_path,
 )
 from _batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
-from _dialogs import set_button_role, set_label_state, set_secondary_button, set_back_button
+from _gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
+from _batch_models import BatchDetectRow, format_bytes
 import _combo_utils
 import _workers
 import ui_texts as T
@@ -168,7 +169,7 @@ class BatchDownloadDialog(QDialog):
         download_concurrency: int,
         initial_input_text: str = "",
         auto_detect_on_open: bool = False,
-        preloaded_rows: Optional[list[_workers.BatchDetectRow]] = None,
+        preloaded_rows: Optional[list[BatchDetectRow]] = None,
         preloaded_signature: str = "",
         parent: Optional[QWidget] = None,
     ) -> None:
@@ -180,7 +181,7 @@ class BatchDownloadDialog(QDialog):
         self.download_retry_count = clamp(download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
         self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
         self.ffmpeg_available = is_ffmpeg_available()
-        self.rows: list[_workers.BatchDetectRow] = []
+        self.rows: list[BatchDetectRow] = []
         self.inspect_worker: Optional[_workers.BatchInspectWorker] = None
         self.auto_detect_on_open = auto_detect_on_open
         self._last_detect_signature = ""
@@ -189,7 +190,7 @@ class BatchDownloadDialog(QDialog):
         self._downloading = False
         self._download_cancel_requested = False
         self._initialized = False
-        self._download_queue: list[_workers.BatchDetectRow] = []
+        self._download_queue: list[BatchDetectRow] = []
         self._download_total = 0
         self._download_next_index = 0
         self._download_cursor = 0
@@ -197,7 +198,7 @@ class BatchDownloadDialog(QDialog):
         self._download_failed = 0
         self._download_canceled = 0
         self._download_workers: dict[int, _workers.DownloadWorker] = {}
-        self._worker_rows: dict[int, _workers.BatchDetectRow] = {}
+        self._worker_rows: dict[int, BatchDetectRow] = {}
         self._worker_output_paths: dict[int, Path] = {}
 
         self.setWindowTitle(T.BATCH_DIALOG_TITLE)
@@ -438,7 +439,7 @@ class BatchDownloadDialog(QDialog):
             T.BATCH_SELECTION_SUMMARY.format(selected=selected_count, ready=ready_count)
         )
 
-    def _selected_ready_rows(self) -> list[_workers.BatchDetectRow]:
+    def _selected_ready_rows(self) -> list[BatchDetectRow]:
         return [row for row in self.rows if row.status == "ready" and row.selected]
 
     def _on_select_all_ready(self) -> None:
@@ -534,7 +535,7 @@ class BatchDownloadDialog(QDialog):
         self._update_detect_button_state()
         self._update_download_button_state()
 
-    def _on_detect_completed(self, rows: list[_workers.BatchDetectRow]) -> None:
+    def _on_detect_completed(self, rows: list[BatchDetectRow]) -> None:
         self._last_detect_signature = self._current_input_signature()
         self.rows = rows
         self._render_rows()
@@ -566,7 +567,7 @@ class BatchDownloadDialog(QDialog):
             self.table.setItem(row_index, 1, source_item)
             self.table.setItem(row_index, 2, QTableWidgetItem(row.song_id))
             self.table.setItem(row_index, 3, QTableWidgetItem(row.song_name))
-            size_text = _workers.format_bytes(row.media_size_bytes) if row.media_size_bytes > 0 else T.MSG_UNKNOWN
+            size_text = format_bytes(row.media_size_bytes) if row.media_size_bytes > 0 else T.MSG_UNKNOWN
             self.table.setItem(row_index, 4, QTableWidgetItem(size_text))
             status_item = QTableWidgetItem(T.batch_detect_status_text(row.status))
             if row.message:
@@ -677,7 +678,7 @@ class BatchDownloadDialog(QDialog):
         QMessageBox.information(self, T.TITLE_DOWNLOAD_DONE, T.MSG_BATCH_EXPORT_DONE.format(path=selected))
         logger.info("Batch results exported. path=%s rows=%s", selected, len(self.rows))
 
-    def _start_download_rows(self, rows: list[_workers.BatchDetectRow]) -> None:
+    def _start_download_rows(self, rows: list[BatchDetectRow]) -> None:
         out_dir_raw = self.out_dir_input.text().strip()
         if not out_dir_raw:
             QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.MSG_BATCH_DOWNLOAD_NO_OUTPUT)
@@ -795,13 +796,13 @@ class BatchDownloadDialog(QDialog):
             self.status_label.setText(
                 f"{T.BATCH_STATUS_DOWNLOADING} {finished}/{self._download_total}（并发中 {active_count}） - "
                 f"{row.song_name or row.song_id} "
-                f"({_workers.format_bytes(downloaded)}/{_workers.format_bytes(total)} {T.speed_text(_workers.format_bytes(int(speed)))})"
+                f"({format_bytes(downloaded)}/{format_bytes(total)} {T.speed_text(format_bytes(int(speed)))})"
             )
         else:
             self.status_label.setText(
                 f"{T.BATCH_STATUS_DOWNLOADING} {finished}/{self._download_total}（并发中 {active_count}） - "
                 f"{row.song_name or row.song_id} "
-                f"({_workers.format_bytes(downloaded)} {T.speed_text(_workers.format_bytes(int(speed)))})"
+                f"({format_bytes(downloaded)} {T.speed_text(format_bytes(int(speed)))})"
             )
         set_label_state(self.status_label, "warning")
 

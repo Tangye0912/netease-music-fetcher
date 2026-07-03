@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app_logging import get_logger
 from app_settings import (
+    DEFAULT_UI_THEME,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_DIR,
@@ -44,6 +45,7 @@ class AppSession:
     download_timeout_sec: int = DEFAULT_DOWNLOAD_TIMEOUT_SEC
     download_retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT
     download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
+    ui_theme: str = DEFAULT_UI_THEME
 
 
 @dataclass
@@ -80,6 +82,7 @@ class SessionStore:
             download_timeout_sec=self._safe_download_timeout(raw.get("download_timeout_sec")),
             download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
+            ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
         )
 
     def save(self, session: AppSession) -> None:
@@ -94,6 +97,7 @@ class SessionStore:
             "download_timeout_sec": self._safe_download_timeout(session.download_timeout_sec),
             "download_retry_count": self._safe_download_retry_count(session.download_retry_count),
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
+            "ui_theme": self._safe_ui_theme(session.ui_theme),
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
@@ -113,6 +117,14 @@ class SessionStore:
     @staticmethod
     def _safe_download_retry_count(value: object) -> int:
         return clamp(value, DEFAULT_DOWNLOAD_RETRY_COUNT, MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT)
+
+    @staticmethod
+    def _safe_ui_theme(value: object) -> str:
+        from app_settings import UI_THEME_OPTIONS
+        normalized = str(value or "").strip().lower()
+        if normalized in UI_THEME_OPTIONS:
+            return normalized
+        return DEFAULT_UI_THEME
 
     @staticmethod
     def _safe_download_concurrency(value: object) -> int:

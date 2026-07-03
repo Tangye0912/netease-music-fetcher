@@ -28,6 +28,7 @@ from _api import (
     OUTER_MEDIA_URL_API,
     USER_AGENT,
     CancelChecker,
+    PauseChecker,
     PlayableCandidate,
     ProgressCallback,
     SUPPORTED_GUI_AUDIO_FORMATS,
@@ -120,11 +121,11 @@ def download_audio(media_url: str, output_path: Path, timeout: int) -> None:
     _download_audio_stream(media_url, output_path, timeout, progress_callback=None, cancel_checker=None, cookie="")
 
 
-def download_audio_with_progress(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, cookie: str = "") -> None:
-    _download_audio_stream(media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, cookie=cookie)
+def download_audio_with_progress(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, pause_checker: Optional[PauseChecker] = None, cookie: str = "") -> None:
+    _download_audio_stream(media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)
 
 
-def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, timeout: int, prefer_format: Optional[str] = None, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None) -> PlayableCandidate:
+def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, timeout: int, prefer_format: Optional[str] = None, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, pause_checker: Optional[PauseChecker] = None) -> PlayableCandidate:
     candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
     if prefer_format:
         candidates = prioritize_candidates_by_format(candidates, prefer_format=prefer_format)
@@ -133,10 +134,10 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
     for idx, candidate in enumerate(candidates, start=1):
         logger.info("Trying candidate download. song_id=%s candidate=%s/%s level=%s encode=%s", song_id, idx, len(candidates), candidate.level, candidate.encode_type)
         try:
-            _download_audio_stream(candidate.media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, cookie=cookie)
+            _download_audio_stream(candidate.media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)
             return candidate
         except MusicFetchError as err:
-            if err.code == "DOWNLOAD_CANCELED":
+            if err.code in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
                 raise
             if err.code == "DOWNLOAD_FAILED" and "HTTP 403" in err.message:
                 last_403 = err
@@ -148,12 +149,12 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
     if outer_url:
         outer_available = True
         try:
-            _download_audio_stream(outer_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, cookie="")
+            _download_audio_stream(outer_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie="")
             logger.info("Outer-url fallback download succeeded. song_id=%s", song_id)
             return PlayableCandidate(media_url=outer_url, duration_ms=None, level="outer", encode_type=(infer_audio_format_from_url(outer_url) or "unknown"))
         except MusicFetchError as err:
             logger.warning("Outer-url fallback failed. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-            if err.code != "DOWNLOAD_CANCELED":
+            if err.code not in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
                 last_403 = err
             else:
                 raise
@@ -251,13 +252,21 @@ def _candidate_media_urls(url: str) -> list[str]:
     return candidates
 
 
-def _download_audio_stream(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback], cancel_checker: Optional[CancelChecker], cookie: str) -> None:
+def _download_audio_stream(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback], cancel_checker: Optional[CancelChecker], pause_checker: Optional[PauseChecker] = None, cookie: str = "") -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(f"{output_path.name}.part")
+
+    # Resume from partial download if .part file exists
+    resume_offset = 0
+    if tmp_path.exists():
+        resume_offset = tmp_path.stat().st_size
+        if resume_offset > 0:
+            logger.info("Resuming partial download. output=%s offset=%s", output_path, resume_offset)
+
     attempts = _build_download_attempt_headers(cookie)
     media_urls = _candidate_media_urls(media_url)
     media_host = parse.urlparse(media_urls[0]).netloc
-    logger.info("Starting media download. output=%s media_host=%s attempts=%s media_url=%s variants=%s", output_path, media_host, len(attempts), _url_for_log(media_urls[0]), len(media_urls))
-    tmp_path = output_path.with_name(f"{output_path.name}.part")
+    logger.info("Starting media download. output=%s media_host=%s attempts=%s media_url=%s variants=%s resume_offset=%s", output_path, media_host, len(attempts), _url_for_log(media_urls[0]), len(media_urls), resume_offset)
     last_403_error: Optional[error.HTTPError] = None
     last_network_error: Optional[error.URLError] = None
     total_attempts = len(attempts) * len(media_urls)
@@ -265,12 +274,21 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
     for candidate_url in media_urls:
         for headers in attempts:
             attempt_no += 1
-            if progress_callback:
-                progress_callback(0, None)
-            downloaded = 0
+            downloaded = resume_offset
             total_bytes: Optional[int] = None
+
+            # Apply Range header for resume
+            if resume_offset > 0:
+                headers = dict(headers)
+                headers["Range"] = f"bytes={resume_offset}-"
+                logger.info("Resume Range header set. offset=%s", resume_offset)
+            else:
+                headers = dict(headers)
+
+            if progress_callback:
+                progress_callback(downloaded, None)
             req = request.Request(candidate_url, headers=headers, method="GET")
-            logger.info("Download attempt started. attempt=%s/%s scheme=%s referer=%s cookie=%s", attempt_no, total_attempts, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no")
+            logger.info("Download attempt started. attempt=%s/%s scheme=%s referer=%s cookie=%s offset=%s", attempt_no, total_attempts, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no", resume_offset)
             try:
                 with request.urlopen(req, timeout=timeout) as resp:
                     status = getattr(resp, "status", resp.getcode())
@@ -278,11 +296,14 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                         raise MusicFetchError("DOWNLOAD_FAILED", f"Media request failed: HTTP {status}.")
                     content_length = getattr(resp, "headers", {}).get("Content-Length")
                     if content_length and content_length.isdigit():
-                        total_bytes = int(content_length)
-                    with tmp_path.open("wb") as file_obj:
+                        total_bytes = int(content_length) + resume_offset
+                    file_mode = "ab" if resume_offset > 0 else "wb"
+                    with tmp_path.open(file_mode) as file_obj:
                         while True:
                             if cancel_checker and cancel_checker():
                                 raise MusicFetchError("DOWNLOAD_CANCELED", "Download canceled by user.")
+                            if pause_checker and pause_checker():
+                                raise MusicFetchError("DOWNLOAD_PAUSED", "Download paused by user.")
                             chunk = resp.read(64 * 1024)
                             if not chunk:
                                 break
@@ -296,7 +317,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 logger.info("Media download finished. output=%s downloaded_bytes=%s total_bytes=%s attempt=%s", output_path, downloaded, total_bytes if total_bytes is not None else "unknown", attempt_no)
                 return
             except error.HTTPError as http_err:
-                if tmp_path.exists():
+                if resume_offset == 0 and tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
                 body_preview = ""
                 try:
@@ -309,12 +330,15 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     continue
                 raise MusicFetchError("DOWNLOAD_FAILED", f"Media request failed: HTTP {http_err.code}.") from http_err
             except error.URLError as url_err:
-                if tmp_path.exists():
+                if resume_offset == 0 and tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
                 logger.warning("Download attempt network error. attempt=%s/%s reason=%s", attempt_no, total_attempts, url_err.reason)
                 last_network_error = url_err
                 continue
-            except MusicFetchError:
+            except MusicFetchError as err:
+                if err.code == "DOWNLOAD_PAUSED":
+                    logger.info("Media download paused, partial file kept. output=%s offset=%s", output_path, downloaded)
+                    raise
                 if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
                 if output_path.exists():

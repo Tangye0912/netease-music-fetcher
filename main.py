@@ -46,7 +46,9 @@ from error_texts import user_error_message
 import ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
-from _workers import BatchDetectRow, InspectWorker
+from _batch_models import BatchDetectRow
+from _workers import InspectWorker
+from _gui_styles import apply_app_style, clamp_ui_font_size, set_button_role, set_label_state
 from _dialogs import (
     BATCH_ROUTE_MIN_COUNT,
     WEB_ENGINE_AVAILABLE,
@@ -57,12 +59,8 @@ from _dialogs import (
     DependencyManagerDialog,
     DownloadManagerDialog,
     UiSettingsDialog,
-    apply_app_style,
-    clamp_ui_font_size,
     clear_embedded_login_state,
     load_avatar_icon,
-    set_button_role,
-    set_label_state,
     validate_song_input,
 )
 
@@ -468,6 +466,7 @@ class MainWindow(QMainWindow):
             download_timeout_sec=self.session.download_timeout_sec,
             download_retry_count=self.session.download_retry_count,
             download_concurrency=self.session.download_concurrency,
+            current_theme=self.session.ui_theme,
             parent=self,
         )
         if dialog.exec() != QDialog.Accepted:
@@ -478,10 +477,11 @@ class MainWindow(QMainWindow):
         self.session.download_timeout_sec = dialog.download_timeout_sec
         self.session.download_retry_count = dialog.download_retry_count
         self.session.download_concurrency = dialog.download_concurrency
+        self.session.ui_theme = dialog.ui_theme
         self.session_store.save(self.session)
         app = QApplication.instance()
         if app is not None:
-            apply_app_style(app, normalized)
+            apply_app_style(app, normalized, theme=self.session.ui_theme)
         self._set_status(
             T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency),
             "success",
@@ -646,7 +646,7 @@ def main() -> int:
     if session is None:
         logger.info("GUI app exit due to missing session.")
         return 0
-    session.ui_font_size = apply_app_style(app, session.ui_font_size)
+    session.ui_font_size = apply_app_style(app, session.ui_font_size, theme=session.ui_theme)
     window = MainWindow(session_store=session_store, history_store=history_store, session=session)
     window.show()
     exit_code = app.exec()

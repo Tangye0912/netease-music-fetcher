@@ -179,6 +179,9 @@ UI_SETTINGS_DOWNLOAD_CONCURRENCY = "并发上限"
 UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT = "批量下载同时执行的任务数。网络较慢时建议 1-2 路，更稳定。"
 UI_SETTINGS_RESET = "恢复默认"
 UI_SETTINGS_SAVE = "保存"
+UI_SETTINGS_THEME = "界面主题"
+UI_SETTINGS_THEME_LIGHT = "浅色"
+UI_SETTINGS_THEME_DARK = "深色"
 
 BATCH_DIALOG_TITLE = "批量识别与下载"
 BATCH_DIALOG_DESC = "支持粘贴多行链接或分享文案，先识别再批量下载可下载歌曲。"
@@ -288,6 +291,12 @@ def nickname_text(name: str) -> str:
 
 def ui_settings_preview(font_size: int) -> str:
     return f"预览：当前字体大小 {font_size}px。"
+
+
+def ui_settings_theme_preview(theme: str) -> str:
+    theme_labels = {"light": UI_SETTINGS_THEME_LIGHT, "dark": UI_SETTINGS_THEME_DARK}
+    label = theme_labels.get((theme or "").strip().lower(), theme or "")
+    return f"主题：{label}"
 
 
 def manager_status_text(status: str) -> str:

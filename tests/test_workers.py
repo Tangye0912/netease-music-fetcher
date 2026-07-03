@@ -53,5 +53,59 @@ class DownloadWorkerCancellationTests(unittest.TestCase):
             self.assertFalse(output_path.with_name(f"{output_path.name}.source").exists())
 
 
+    def test_pause_emits_paused_signal(self):
+        from music_fetch import MusicFetchError
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "song.mp3"
+            worker = _workers.DownloadWorker(
+                task_id="task-pause",
+                song_id="42",
+                output_path=output_path,
+                cookie="MUSIC_U=abc",
+                target_format="mp3",
+                timeout=3,
+                retry_count=0,
+            )
+            paused = []
+            canceled = []
+            worker.paused.connect(lambda: paused.append(True))
+            worker.canceled.connect(lambda: canceled.append(True))
+
+            def fake_download(**kwargs):
+                # Simulate the pause_checker triggering
+                pause_checker = kwargs.get("pause_checker")
+                if pause_checker and pause_checker():
+                    raise MusicFetchError("DOWNLOAD_PAUSED", "Download paused by user.")
+                return music_fetch.PlayableCandidate(
+                    media_url="https://m801.music.126.net/source.m4a",
+                    duration_ms=None,
+                    level="standard",
+                    encode_type="aac",
+                )
+
+            with mock.patch("_workers.download_song_with_fallback", side_effect=fake_download):
+                # Trigger pause before run
+                worker.request_pause()
+                worker.run()
+
+            self.assertEqual(paused, [True])
+            self.assertEqual(canceled, [])
+
+    def test_resume_clears_pause_event(self):
+        worker = _workers.DownloadWorker(
+            task_id="task-resume",
+            song_id="42",
+            output_path=Path("/tmp/test.mp3"),
+            cookie="MUSIC_U=abc",
+            target_format="mp3",
+            timeout=3,
+            retry_count=0,
+        )
+        worker.request_pause()
+        self.assertTrue(worker._pause_event.is_set())
+        worker.request_resume()
+        self.assertFalse(worker._pause_event.is_set())
+
+
 if __name__ == "__main__":
     unittest.main()

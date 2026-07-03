@@ -31,5 +31,5 @@ feat: 优化登录与启动体验
 提交前建议执行：
 
 ```bash
-python3 -m unittest discover -s tests -p "test_*.py"
+python3 -m pytest tests/ -q
 ```
