@@ -66,7 +66,7 @@
 - [x] 下载队列暂停/恢复与断点续传。（v0.10.0 已完成）
 - [x] 软件设置增加暗色主题切换。（v0.10.0 已完成）
 
-## v0.11.0 (Next)
+## v0.11.0 (Completed - 2026-07-03)
 
 ### Goal
 
@@ -74,18 +74,46 @@
 
 ### Phase 1 — 功能优先
 
-- [x] 暂停/恢复 UI 集成（v0.11.0 已完成）：`DownloadProgressDialog` 和 `BatchDownloadDialog` 添加暂停/恢复按钮，连接 `worker.paused` 信号，新增 `ui_texts` 文案。
-- [x] CLI 补全：重新添加 `--format` 参数（v0.11.0 已完成）（支持 `mp3/m4a/wav/flac/aac`），播放列表/批量下载支持，`download_song_with_fallback` 替代 `fetch_playable_url`。
-- [x] 补 `_batch_models.py` 单元测试（v0.11.0 已完成）：`format_duration`、`format_bytes`、`probe_media_size_bytes` 零覆盖 → 补全。
-- [x] 修复 `_cli.py:75` 裸 `except Exception`（v0.11.0 已完成），改为捕获具体异常类型。
+- [x] 暂停/恢复 UI 集成（v0.11.0 已完成）
+- [x] CLI 补全：`--format`、`--rename`、播放列表批量下载、`download_song_with_fallback`（v0.11.0 已完成）
+- [x] 补 `_batch_models.py` 单元测试（v0.11.0 已完成）
+- [x] 修复 `_cli.py` 裸 `except Exception`（v0.11.0 已完成）
 
 ### Phase 2 — 重构与清理
 
-- [x] 拆分 `_dialogs.py`：`LoginDialog` 已提取到 `_dialog_login.py`（v0.11.0 已完成）、`DownloadProgressDialog`、`DownloadManagerDialog` 等独立对话框类提取到 `_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`。
-- [ ] 拆分 `_batch_dialogs.py`：将 `BatchRuntimeSettingsDialog` 与 `BatchDownloadDialog` 分离到独立文件。
-- [x] 消除重复设置钳位模式：提取 `clamp_download_settings`（v0.11.0 已完成）：`_batch_dialogs.py` 和 `_dialogs.py` 中相同的 4 字段 clamp 初始化 → 提取 `SettingsBundle` 或 `clamp_settings` 辅助函数。
-- [ ] 提取 `main.py` 中版本检查逻辑（`fetch_latest_project_version`、`version_key`）到独立模块。
-- [x] `_api.py` 返回类型精确化：`dict` → `dict[str, object]`（v0.11.0 已完成）：`dict` → `dict[str, Any]`。
+- [x] 拆分 `_dialogs.py`：`LoginDialog` → `_dialog_login.py`（v0.11.0 已完成）
+- [x] 消除重复设置钳位模式：`clamp_download_settings`（v0.11.0 已完成）
+- [x] `_api.py` 返回类型精确化（v0.11.0 已完成）
+
+## v0.12.0 (Next)
+
+### Goal
+
+- 修复已知 bug，清理硬编码中文，继续拆分大模块，补测试和类型覆盖。
+
+### Bug 修复
+
+- [ ] 修复暂停后取消时 `.part` 文件残留：`_stop_download_flow` 应清理暂停 worker 的 `.part` 临时文件。
+- [ ] 修正 ROADMAP v0.11.0 中 `DownloadProgressDialog`/`DownloadManagerDialog` 误标为已完成 → 实际未拆分。
+
+### 硬编码清理
+
+- [ ] `_batch_dialogs.py` 硬编码中文状态消息提取到 `ui_texts`（`下载设置已更新`、`并发 N 路`、`已完成` 等）。
+- [ ] `main.py` 硬编码中文状态消息提取到 `ui_texts`（`发现新版本`、`已是最新版本`、`下载完成`、`网络错误`）。
+- [ ] `_batch_dialogs.py` / `_dialogs.py` 中 `"次"` / `"路"` 后缀提取到 `ui_texts`。
+
+### 模块拆分
+
+- [ ] 拆分 `_dialogs.py`：`DownloadProgressDialog` → `_dialog_progress.py`，`DownloadManagerDialog` → `_dialog_manager.py`。
+- [ ] 拆分 `_batch_dialogs.py`：`BatchRuntimeSettingsDialog` → `_dialog_batch_settings.py`。
+- [ ] 提取 `main.py` 中版本检查逻辑（`fetch_latest_project_version`、`version_key`）到 `_version_check.py`。
+
+### 测试与质量
+
+- [ ] 补 `__all__` 定义：`_batch_dialogs.py`、`_dialogs.py`、`_dialog_login.py`、`_batch_models.py`、`_batch_results.py`、`_gui_styles.py`、`_combo_utils.py`。
+- [ ] 补 `app_logging.py` 单元测试。
+- [ ] CLI 添加 `--retry` 参数。
+- [ ] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获。
 
 ## v0.6.0 (Completed - 2026-05-07)
 
