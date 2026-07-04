@@ -61,7 +61,6 @@ from music_fetch.audio import (
     download_song_with_fallback,
     prioritize_candidates_by_format,
     fetch_outer_media_url,
-    SUPPORTED_GUI_AUDIO_FORMATS,
 )
 
 from music_fetch.cli import (
