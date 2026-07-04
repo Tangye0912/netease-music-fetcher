@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.0 (2026-07-04)
+
+### Breaking
+
+- 包结构：所有模块从根目录迁移到 `music_fetch/` 包，`import _api` → `from music_fetch.api import ...`。`import music_fetch` 顶层导入保持不变。
+- `music_fetch/__init__.py` 公开 API 收紧：`perform_json_post`、`perform_json_get`、`USER_AGENT` 等内部实现不再通过星号导入暴露。
+
+### Added
+
+- `ErrorCode` 枚举（11 个错误码），`MusicFetchError` 接受 `str | ErrorCode`。
+- `DownloadCanceled` / `DownloadPaused` 专用异常类，从 `MusicFetchError` 中分离控制流。
+- `DownloadPipeline`（`run_download_pipeline`）：GUI 和 CLI 共享的纯逻辑下载管道。
+- 暗色主题：`QScrollBar`、`QToolTip`、`QStatusBar`、`QTableWidget`、`QMenu` 等全面覆盖。
+- `tests/test_gui_styles.py`（7 个测试）、`tests/test_pipeline.py`（7 个测试）。
+
+### Fixed
+
+- `music-fetch` shell wrapper 引用修复（`-m _cli` → `-m music_fetch.cli`）。
+- `load_cookie` 添加 `UnicodeDecodeError` 捕获（cookie 文件损坏）。
+- 下载目录不可写时映射为友好错误码。
+- `from music_fetch import X` 间接导入改为直接子模块导入（6 个模块）。
+- PySide6 版本约束加 `<7.0` 上限。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（219 通过，1 跳过）。
+
 ## v0.14.0 (2026-07-04)
 
 ### Architecture

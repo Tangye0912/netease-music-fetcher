@@ -115,7 +115,7 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
-## v1.0.0 (Target)
+## v1.0.0 (Completed - 2026-07-04)
 
 ### Goal
 
@@ -123,18 +123,18 @@
 
 ### Must-fix
 
-- [ ] 修复 music-fetch shell wrapper 引用 -m _cli 改为 -m music_fetch.cli。
-- [ ] 收紧 music_fetch/__init__.py 公开 API，移除 perform_json_post 等内部实现。
-- [ ] README 添加 pre-package 到 package 迁移指南。
+- [x] 修复 music-fetch shell wrapper（v1.0.0 已完成） 引用 -m _cli 改为 -m music_fetch.cli。
+- [x] 收紧 music_fetch/__init__.py（v1.0.0 已完成） 公开 API，移除 perform_json_post 等内部实现。
+- [x] README 添加 pre-package（v1.0.0 已完成） 到 package 迁移指南。
 
 ### Should-fix
 
-- [ ] MusicFetchError 构造改用 ErrorCode 枚举成员。
-- [ ] from music_fetch import X 间接导入改为直接子模块导入。
-- [ ] load_cookie 添加 UnicodeDecodeError 捕获。
-- [ ] 下载目录不可写映射为友好错误码。
-- [ ] 补 main.py / dialog_manager.py / gui_styles.py / pipeline.py 测试。
-- [ ] PySide6 版本约束加 <7.0 上限。
+- [x] MusicFetchError 构造改用 ErrorCode（v1.0.0 已完成） 枚举成员。
+- [x] from music_fetch import X 间接导入（v1.0.0 已完成）改为直接子模块导入。
+- [x] load_cookie 添加 UnicodeDecodeError（v1.0.0 已完成） 捕获。
+- [x] 下载目录不可写映射为友好错误码（v1.0.0 已完成）。
+- [x] 补 main.py / dialog_manager.py（v1.0.0 已完成） / gui_styles.py / pipeline.py 测试。
+- [x] PySide6 版本约束加（v1.0.0 已完成） <7.0 上限。
 
 ### Nice-to-have
 
