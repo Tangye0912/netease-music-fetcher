@@ -2,14 +2,14 @@ import csv
 import io
 import unittest
 
-from _batch_results import (
+from music_fetch.batch_results import (
     BATCH_CSV_FIELDS,
     UNKNOWN_FAILURE_REASON,
     build_batch_results_csv,
     retryable_failed_rows,
     summarize_batch_rows,
 )
-from _batch_models import BatchDetectRow
+from music_fetch.batch_models import BatchDetectRow
 
 
 class BatchResultsTests(unittest.TestCase):

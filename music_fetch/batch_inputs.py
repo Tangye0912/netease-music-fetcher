@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 
-from app_settings import TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
+from music_fetch.app_settings import TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
 
 PLAYLIST_SHARE_PATTERN = re.compile(r"歌单《([^》]+)》")
 SONG_SHARE_PATTERN = re.compile(r"分享(.+?)的单曲《([^》]+)》")

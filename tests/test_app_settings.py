@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from app_settings import (
+from music_fetch.app_settings import (
     APP_NAME,
     APP_VERSION,
     URL_IN_TEXT_PATTERN,

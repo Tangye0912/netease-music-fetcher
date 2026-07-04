@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.14.0 (2026-07-04)
+
+### Architecture
+
+- **包结构迁移**：26 个平铺模块迁移到 `music_fetch/` 包目录，`music_fetch.py` 外观层替换为 `music_fetch/__init__.py`，`pyproject.toml` 从 `py-modules` 改为 `packages`。
+- **错误处理重构**：新增 `ErrorCode` 枚举（11 个错误码），`MusicFetchError.__init__` 接受 `str | ErrorCode`；新增 `DownloadCanceled`/`DownloadPaused` 专用异常类，从 `MusicFetchError` 中分离控制流信号。
+- **下载管道抽象**：新增 `music_fetch/pipeline.py`（`run_download_pipeline` + `DownloadPipelineResult`），GUI 的 `DownloadWorker.run()` 从 120 行简化到 55 行，CLI 的 `run_download`/`run_playlist_download` 共用同一套逻辑。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（206 通过，1 跳过）。
+
 ## v0.13.0 (2026-07-03)
 
 ### Fixed

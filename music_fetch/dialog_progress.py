@@ -3,7 +3,7 @@
 Download progress dialog — single-song download with progress bar, pause/resume,
 and cancel support.
 
-Extracted from _dialogs.py to reduce module size.
+Extracted from music_fetch.dialogs.py to reduce module size.
 """
 
 from __future__ import annotations
@@ -11,24 +11,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
 )
-from download_tasks import (
+from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
     TASK_STATE_DOWNLOADING,
     TASK_STATE_FAILED,
     TASK_STATE_PENDING,
     TASK_STATE_SUCCESS,
 )
-from error_texts import user_error_message
-from _batch_models import format_bytes
-import _workers
-import ui_texts as T
+from music_fetch.error_texts import user_error_message
+from music_fetch.batch_models import format_bytes
+import music_fetch.workers
+import music_fetch.ui_texts as T
 
 try:
     from PySide6.QtWidgets import (
@@ -99,7 +99,7 @@ class DownloadProgressDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
 
-        self.worker = _workers.DownloadWorker(
+        self.worker = music_fetch.workers.DownloadWorker(
             task_id=task_id,
             song_id=song_id,
             output_path=output_path,

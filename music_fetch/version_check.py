@@ -11,7 +11,7 @@ import json
 import re
 from urllib import error, request
 
-from app_settings import PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
+from music_fetch.app_settings import PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
 
 
 

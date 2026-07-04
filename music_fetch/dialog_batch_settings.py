@@ -3,12 +3,12 @@
 Batch runtime settings dialog — lightweight in-workflow settings for
 detect/download timeout, retry count, and concurrency.
 
-Extracted from _batch_dialogs.py to reduce module size.
+Extracted from _batchmusic_fetch.dialogs.py to reduce module size.
 """
 
 from __future__ import annotations
 
-from app_settings import (
+from music_fetch.app_settings import (
     clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
@@ -24,13 +24,13 @@ from app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     clamp,
 )
-from _gui_styles import (
+from music_fetch.gui_styles import (
     set_back_button,
     set_button_role,
     set_label_state,
 )
-import _combo_utils
-import ui_texts as T
+import music_fetch.combo_utils
+import music_fetch.ui_texts as T
 
 try:
     from PySide6.QtCore import Qt
@@ -73,22 +73,22 @@ class BatchRuntimeSettingsDialog(QDialog):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.detect_timeout_input = _combo_utils.build_options_combo(DETECT_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.detect_timeout_input, self.detect_timeout_sec)
+        self.detect_timeout_input = music_fetch.combo_utils.build_options_combo(DETECT_TIMEOUT_OPTIONS, "s")
+        music_fetch.combo_utils.set_combo_value(self.detect_timeout_input, self.detect_timeout_sec)
         form.addRow(T.UI_SETTINGS_DETECT_TIMEOUT, self.detect_timeout_input)
 
-        self.download_timeout_input = _combo_utils.build_options_combo(DOWNLOAD_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.download_timeout_input, self.download_timeout_sec)
+        self.download_timeout_input = music_fetch.combo_utils.build_options_combo(DOWNLOAD_TIMEOUT_OPTIONS, "s")
+        music_fetch.combo_utils.set_combo_value(self.download_timeout_input, self.download_timeout_sec)
         form.addRow(T.UI_SETTINGS_DOWNLOAD_TIMEOUT, self.download_timeout_input)
 
-        self.download_retry_input = _combo_utils.build_value_combo(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT, T.COUNT_SUFFIX)
-        _combo_utils.set_combo_value(self.download_retry_input, self.download_retry_count)
+        self.download_retry_input = music_fetch.combo_utils.build_value_combo(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT, T.COUNT_SUFFIX)
+        music_fetch.combo_utils.set_combo_value(self.download_retry_input, self.download_retry_count)
         form.addRow(T.UI_SETTINGS_DOWNLOAD_RETRY, self.download_retry_input)
 
-        self.download_concurrency_input = _combo_utils.build_value_combo(
+        self.download_concurrency_input = music_fetch.combo_utils.build_value_combo(
             MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY, T.CONCURRENCY_SUFFIX
         )
-        _combo_utils.set_combo_value(self.download_concurrency_input, self.download_concurrency)
+        music_fetch.combo_utils.set_combo_value(self.download_concurrency_input, self.download_concurrency)
         form.addRow(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY, self.download_concurrency_input)
         layout.addLayout(form)
 
@@ -111,10 +111,10 @@ class BatchRuntimeSettingsDialog(QDialog):
 
     def _on_save(self) -> None:
         self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
-            _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
+            music_fetch.combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
+            music_fetch.combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
+            music_fetch.combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
+            music_fetch.combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
         )
         self.accept()
 

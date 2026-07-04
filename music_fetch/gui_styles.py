@@ -3,7 +3,7 @@
 GUI style helpers: QSS stylesheet builder, button role/label state helpers,
 and the app-wide style application function.
 
-Extracted from _dialogs.py to reduce module size and centralize visual
+Extracted from music_fetch.dialogs.py to reduce module size and centralize visual
 appearance logic.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app_settings import (
+from music_fetch.app_settings import (
     DEFAULT_UI_FONT_SIZE,
     MAX_UI_FONT_SIZE,
     MIN_UI_FONT_SIZE,

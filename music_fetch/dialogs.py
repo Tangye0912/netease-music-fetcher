@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Optional
 from urllib import error, parse, request
 
-from app_logging import default_log_path, get_logger, setup_logging
-from batch_inputs import collect_batch_candidates, source_hint_map
-from error_texts import user_error_message
-from app_settings import (
+from music_fetch.app_logging import default_log_path, get_logger, setup_logging
+from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
+from music_fetch.error_texts import user_error_message
+from music_fetch.app_settings import (
     APP_VERSION,
     clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
@@ -53,8 +53,8 @@ from app_settings import (
     SESSION_FILE,
     clamp,
 )
-from download_retry import can_retry_status, retry_target_format
-from download_tasks import (
+from music_fetch.download_retry import can_retry_status, retry_target_format
+from music_fetch.download_tasks import (
     build_task_id,
     DownloadTaskSnapshot,
     TASK_STATE_CANCELED,
@@ -64,7 +64,7 @@ from download_tasks import (
     TASK_STATE_SUCCESS,
     next_task_snapshot,
 )
-from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
+from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch import (
     AccountProfile,
     MusicFetchError,
@@ -86,11 +86,11 @@ from music_fetch import (
     sanitize_filename,
     SHORT_LINK_HOSTS,
 )
-import ui_texts as T
-import _combo_utils
-import _workers
-from _batch_models import format_bytes, format_duration
-from _gui_styles import (
+import music_fetch.ui_texts as T
+import music_fetch.combo_utils
+import music_fetch.workers
+from music_fetch.batch_models import format_bytes, format_duration
+from music_fetch.gui_styles import (
     apply_app_style,
     build_app_stylesheet,
     clamp_ui_font_size,
@@ -99,9 +99,9 @@ from _gui_styles import (
     set_label_state,
     set_secondary_button,
 )
-from _dialog_login import LoginDialog, build_cookie_from_fields, WEB_ENGINE_AVAILABLE
-from _dialog_progress import DownloadProgressDialog
-from _dialog_manager import DownloadManagerDialog
+from music_fetch.dialog_login import LoginDialog, build_cookie_from_fields, WEB_ENGINE_AVAILABLE
+from music_fetch.dialog_progress import DownloadProgressDialog
+from music_fetch.dialog_manager import DownloadManagerDialog
 
 try:
     from PySide6.QtCore import QSize, QThread, Qt, QTimer, QUrl, Signal
@@ -492,7 +492,7 @@ class UiSettingsDialog(QDialog):
         self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
             detect_timeout_sec, download_timeout_sec, download_retry_count, download_concurrency,
         )
-        from app_settings import DEFAULT_UI_THEME, UI_THEME_OPTIONS
+        from music_fetch.app_settings import DEFAULT_UI_THEME, UI_THEME_OPTIONS
         self.ui_theme = (current_theme or "").strip().lower()
         if self.ui_theme not in UI_THEME_OPTIONS:
             self.ui_theme = DEFAULT_UI_THEME
@@ -506,8 +506,8 @@ class UiSettingsDialog(QDialog):
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.font_size_input = _combo_utils.build_value_combo(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE, "px")
-        _combo_utils.set_combo_value(self.font_size_input, self.font_size)
+        self.font_size_input = music_fetch.combo_utils.build_value_combo(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE, "px")
+        music_fetch.combo_utils.set_combo_value(self.font_size_input, self.font_size)
         self.font_size_input.currentIndexChanged.connect(self._on_font_size_changed)
         form.addRow(T.UI_SETTINGS_FONT_SIZE, self.font_size_input)
         # Theme selector
@@ -527,25 +527,25 @@ class UiSettingsDialog(QDialog):
         layout.addWidget(download_title)
         download_form = QFormLayout()
         download_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.detect_timeout_input = _combo_utils.build_options_combo(DETECT_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.detect_timeout_input, self.detect_timeout_sec)
+        self.detect_timeout_input = music_fetch.combo_utils.build_options_combo(DETECT_TIMEOUT_OPTIONS, "s")
+        music_fetch.combo_utils.set_combo_value(self.detect_timeout_input, self.detect_timeout_sec)
         self.detect_timeout_input.currentIndexChanged.connect(self._on_download_settings_changed)
         download_form.addRow(T.UI_SETTINGS_DETECT_TIMEOUT, self.detect_timeout_input)
 
-        self.download_timeout_input = _combo_utils.build_options_combo(DOWNLOAD_TIMEOUT_OPTIONS, "s")
-        _combo_utils.set_combo_value(self.download_timeout_input, self.download_timeout_sec)
+        self.download_timeout_input = music_fetch.combo_utils.build_options_combo(DOWNLOAD_TIMEOUT_OPTIONS, "s")
+        music_fetch.combo_utils.set_combo_value(self.download_timeout_input, self.download_timeout_sec)
         self.download_timeout_input.currentIndexChanged.connect(self._on_download_settings_changed)
         download_form.addRow(T.UI_SETTINGS_DOWNLOAD_TIMEOUT, self.download_timeout_input)
 
-        self.download_retry_input = _combo_utils.build_value_combo(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT, T.COUNT_SUFFIX)
-        _combo_utils.set_combo_value(self.download_retry_input, self.download_retry_count)
+        self.download_retry_input = music_fetch.combo_utils.build_value_combo(MIN_DOWNLOAD_RETRY_COUNT, MAX_DOWNLOAD_RETRY_COUNT, T.COUNT_SUFFIX)
+        music_fetch.combo_utils.set_combo_value(self.download_retry_input, self.download_retry_count)
         self.download_retry_input.currentIndexChanged.connect(self._on_download_settings_changed)
         download_form.addRow(T.UI_SETTINGS_DOWNLOAD_RETRY, self.download_retry_input)
 
-        self.download_concurrency_input = _combo_utils.build_value_combo(
+        self.download_concurrency_input = music_fetch.combo_utils.build_value_combo(
             MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY, T.CONCURRENCY_SUFFIX
         )
-        _combo_utils.set_combo_value(self.download_concurrency_input, self.download_concurrency)
+        music_fetch.combo_utils.set_combo_value(self.download_concurrency_input, self.download_concurrency)
         self.download_concurrency_input.currentIndexChanged.connect(self._on_download_settings_changed)
         download_form.addRow(T.UI_SETTINGS_DOWNLOAD_CONCURRENCY, self.download_concurrency_input)
 
@@ -581,24 +581,24 @@ class UiSettingsDialog(QDialog):
         self._refresh_preview()
 
     def _on_font_size_changed(self, _index: int) -> None:
-        self.font_size = clamp_ui_font_size(_combo_utils.combo_int_value(self.font_size_input, DEFAULT_UI_FONT_SIZE))
+        self.font_size = clamp_ui_font_size(music_fetch.combo_utils.combo_int_value(self.font_size_input, DEFAULT_UI_FONT_SIZE))
         self._refresh_preview()
 
     def _on_download_settings_changed(self, *_args: object) -> None:
         self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
-            _combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
-            _combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
-            _combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
+            music_fetch.combo_utils.combo_int_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC),
+            music_fetch.combo_utils.combo_int_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC),
+            music_fetch.combo_utils.combo_int_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT),
+            music_fetch.combo_utils.combo_int_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY),
         )
         self._refresh_preview()
 
     def _reset_default(self) -> None:
-        _combo_utils.set_combo_value(self.font_size_input, DEFAULT_UI_FONT_SIZE)
-        _combo_utils.set_combo_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC)
-        _combo_utils.set_combo_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
-        _combo_utils.set_combo_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT)
-        _combo_utils.set_combo_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY)
+        music_fetch.combo_utils.set_combo_value(self.font_size_input, DEFAULT_UI_FONT_SIZE)
+        music_fetch.combo_utils.set_combo_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC)
+        music_fetch.combo_utils.set_combo_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
+        music_fetch.combo_utils.set_combo_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT)
+        music_fetch.combo_utils.set_combo_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY)
         self._on_download_settings_changed()
         self._on_font_size_changed(0)
 

@@ -1,4 +1,4 @@
-"""Tests for _dialogs.py pure functions and dialog classes.
+"""Tests for music_fetch.dialogs.py pure functions and dialog classes.
 
 Covers the 7 dialog classes (LoginDialog, SongConfirmDialog,
 DownloadOptionsDialog, DownloadProgressDialog, DependencyManagerDialog,
@@ -22,8 +22,8 @@ if _app is None:
 from PySide6.QtWidgets import QPushButton, QLabel, QDialog
 from PySide6.QtCore import Qt
 
-import _dialogs
-from _gui_styles import (
+import music_fetch.dialogs
+from music_fetch.gui_styles import (
     apply_app_style,
     build_app_stylesheet,
     clamp_ui_font_size,
@@ -32,8 +32,8 @@ from _gui_styles import (
     set_label_state,
     set_secondary_button,
 )
-from app_stores import DownloadHistoryStore, DownloadRecord
-from download_tasks import TASK_STATE_SUCCESS, TASK_STATE_FAILED
+from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
+from music_fetch.download_tasks import TASK_STATE_SUCCESS, TASK_STATE_FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -42,22 +42,22 @@ from download_tasks import TASK_STATE_SUCCESS, TASK_STATE_FAILED
 
 class BuildCookieFromFieldsTests(unittest.TestCase):
     def test_empty_fields_returns_empty_string(self):
-        self.assertEqual(_dialogs.build_cookie_from_fields({}), "")
-        self.assertEqual(_dialogs.build_cookie_from_fields({"MUSIC_U": "  "}), "")
+        self.assertEqual(music_fetch.dialogs.build_cookie_from_fields({}), "")
+        self.assertEqual(music_fetch.dialogs.build_cookie_from_fields({"MUSIC_U": "  "}), "")
 
     def test_music_u_only(self):
-        result = _dialogs.build_cookie_from_fields({"MUSIC_U": "abc123"})
+        result = music_fetch.dialogs.build_cookie_from_fields({"MUSIC_U": "abc123"})
         self.assertIn("MUSIC_U=abc123", result)
 
     def test_music_u_and_csrf(self):
-        result = _dialogs.build_cookie_from_fields(
+        result = music_fetch.dialogs.build_cookie_from_fields(
             {"MUSIC_U": "abc", "__csrf": "xyz"}
         )
         self.assertIn("MUSIC_U=abc", result)
         self.assertIn("__csrf=xyz", result)
 
     def test_extra_fields_sorted(self):
-        result = _dialogs.build_cookie_from_fields(
+        result = music_fetch.dialogs.build_cookie_from_fields(
             {"MUSIC_U": "abc", "extra_b": "v2", "extra_a": "v1"}
         )
         parts = result.split("; ")
@@ -70,56 +70,56 @@ class BuildCookieFromFieldsTests(unittest.TestCase):
 
 class ValidateSongInputTests(unittest.TestCase):
     def test_empty_input(self):
-        ok, msg = _dialogs.validate_song_input("")
+        ok, msg = music_fetch.dialogs.validate_song_input("")
         self.assertFalse(ok)
         self.assertTrue(len(msg) > 0)
 
     def test_pure_song_id(self):
-        ok, msg = _dialogs.validate_song_input("33894312")
+        ok, msg = music_fetch.dialogs.validate_song_input("33894312")
         self.assertTrue(ok)
 
     def test_bad_host(self):
-        ok, msg = _dialogs.validate_song_input("https://example.com/foo")
+        ok, msg = music_fetch.dialogs.validate_song_input("https://example.com/foo")
         self.assertFalse(ok)
 
     def test_netease_url_with_song_id(self):
-        ok, msg = _dialogs.validate_song_input(
+        ok, msg = music_fetch.dialogs.validate_song_input(
             "https://music.163.com/song?id=33894312"
         )
         self.assertTrue(ok)
 
     def test_short_link_host(self):
-        ok, msg = _dialogs.validate_song_input("https://163cn.tv/abc")
+        ok, msg = music_fetch.dialogs.validate_song_input("https://163cn.tv/abc")
         self.assertTrue(ok)
 
 
 class LoadAvatarIconTests(unittest.TestCase):
     def test_empty_url_returns_none(self):
-        self.assertIsNone(_dialogs.load_avatar_icon(""))
+        self.assertIsNone(music_fetch.dialogs.load_avatar_icon(""))
 
-    @mock.patch("_dialogs.request.urlopen")
+    @mock.patch("music_fetch.dialogs.request.urlopen")
     def test_http_error_returns_none(self, mock_urlopen):
         from urllib.error import HTTPError
         mock_urlopen.side_effect = HTTPError(
             "http://x.com", 404, "Not Found", {}, None
         )
-        result = _dialogs.load_avatar_icon("http://x.com/avatar.png")
+        result = music_fetch.dialogs.load_avatar_icon("http://x.com/avatar.png")
         self.assertIsNone(result)
 
-    @mock.patch("_dialogs.request.urlopen")
+    @mock.patch("music_fetch.dialogs.request.urlopen")
     def test_invalid_image_data_returns_none(self, mock_urlopen):
         mock_urlopen.return_value.__enter__.return_value.read.return_value = (
             b"not-an-image"
         )
-        result = _dialogs.load_avatar_icon("http://x.com/avatar.png")
+        result = music_fetch.dialogs.load_avatar_icon("http://x.com/avatar.png")
         self.assertIsNone(result)
 
 
 class ClearEmbeddedLoginStateTests(unittest.TestCase):
     def test_no_webengine_does_nothing(self):
-        with mock.patch.object(_dialogs, "WEB_ENGINE_AVAILABLE", False):
+        with mock.patch.object(music_fetch.dialogs, "WEB_ENGINE_AVAILABLE", False):
             # Should not raise
-            _dialogs.clear_embedded_login_state()
+            music_fetch.dialogs.clear_embedded_login_state()
 
 
 # ---------------------------------------------------------------------------
@@ -133,12 +133,12 @@ class StyleHelperTests(unittest.TestCase):
         self.assertLessEqual(result, 20)
 
     def test_clamp_ui_font_size_below_min(self):
-        from app_settings import MIN_UI_FONT_SIZE
+        from music_fetch.app_settings import MIN_UI_FONT_SIZE
         result = clamp_ui_font_size(1)
         self.assertEqual(result, MIN_UI_FONT_SIZE)
 
     def test_clamp_ui_font_size_above_max(self):
-        from app_settings import MAX_UI_FONT_SIZE
+        from music_fetch.app_settings import MAX_UI_FONT_SIZE
         result = clamp_ui_font_size(999)
         self.assertEqual(result, MAX_UI_FONT_SIZE)
 
@@ -149,7 +149,7 @@ class StyleHelperTests(unittest.TestCase):
         self.assertIn("QLineEdit", sheet)
 
     def test_apply_app_style_returns_normalized_size(self):
-        from app_settings import DEFAULT_UI_FONT_SIZE
+        from music_fetch.app_settings import DEFAULT_UI_FONT_SIZE
         result = apply_app_style(_app, 9999)
         self.assertLessEqual(result, 20)
 
@@ -188,18 +188,18 @@ class SetButtonRoleTests(unittest.TestCase):
 
 class LoginDialogTests(unittest.TestCase):
     def test_creates_without_crash(self):
-        dlg = _dialogs.LoginDialog()
+        dlg = music_fetch.dialogs.LoginDialog()
         self.assertIsInstance(dlg, QDialog)
         self.assertFalse(dlg.confirm_button.isEnabled())
         dlg.close()
 
     def test_cookie_from_fields_empty_initially(self):
-        dlg = _dialogs.LoginDialog()
+        dlg = music_fetch.dialogs.LoginDialog()
         self.assertEqual(dlg.cookie_fields, {})
         dlg.close()
 
     def test_remember_checkbox_default_checked(self):
-        dlg = _dialogs.LoginDialog()
+        dlg = music_fetch.dialogs.LoginDialog()
         self.assertTrue(dlg.remember_checkbox.isChecked())
         dlg.close()
 
@@ -215,7 +215,7 @@ class SongConfirmDialogTests(unittest.TestCase):
             media_url=None,
             unavailable_reason="版权限制",
         )
-        dlg = _dialogs.SongConfirmDialog(result)
+        dlg = music_fetch.dialogs.SongConfirmDialog(result)
         self.assertIsInstance(dlg, QDialog)
         dlg.close()
 
@@ -229,7 +229,7 @@ class SongConfirmDialogTests(unittest.TestCase):
             duration_ms=240000,
             unavailable_reason=None,
         )
-        dlg = _dialogs.SongConfirmDialog(result)
+        dlg = music_fetch.dialogs.SongConfirmDialog(result)
         self.assertIsInstance(dlg, QDialog)
         dlg.close()
 
@@ -245,7 +245,7 @@ class DownloadOptionsDialogTests(unittest.TestCase):
             media_url=None,
             unavailable_reason=None,
         )
-        dlg = _dialogs.DownloadOptionsDialog(
+        dlg = music_fetch.dialogs.DownloadOptionsDialog(
             result=result,
             last_download_dir="/tmp",
         )
@@ -262,7 +262,7 @@ class DownloadOptionsDialogTests(unittest.TestCase):
             media_url=None,
             unavailable_reason=None,
         )
-        dlg = _dialogs.DownloadOptionsDialog(
+        dlg = music_fetch.dialogs.DownloadOptionsDialog(
             result=result,
             last_download_dir="/tmp",
         )
@@ -273,8 +273,8 @@ class DownloadProgressDialogTests(unittest.TestCase):
     def test_creates_with_basic_params(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "test.mp3"
-            with mock.patch("_dialogs._workers.DownloadWorker.start"):
-                dlg = _dialogs.DownloadProgressDialog(
+            with mock.patch("music_fetch.dialog_progress.music_fetch.workers.DownloadWorker.start"):
+                dlg = music_fetch.dialogs.DownloadProgressDialog(
                     task_id="task-1",
                     song_id="123",
                     output_path=output_path,
@@ -289,8 +289,8 @@ class DownloadProgressDialogTests(unittest.TestCase):
     def test_progress_signals(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "test.mp3"
-            with mock.patch("_dialogs._workers.DownloadWorker.start"):
-                dlg = _dialogs.DownloadProgressDialog(
+            with mock.patch("music_fetch.dialog_progress.music_fetch.workers.DownloadWorker.start"):
+                dlg = music_fetch.dialogs.DownloadProgressDialog(
                     task_id="task-2",
                     song_id="456",
                     output_path=output_path,
@@ -307,7 +307,7 @@ class DownloadProgressDialogTests(unittest.TestCase):
 
 class DependencyManagerDialogTests(unittest.TestCase):
     def test_creates_and_displays(self):
-        dlg = _dialogs.DependencyManagerDialog()
+        dlg = music_fetch.dialogs.DependencyManagerDialog()
         self.assertIsInstance(dlg, QDialog)
         dlg.close()
 
@@ -322,7 +322,7 @@ class DownloadManagerDialogTests(unittest.TestCase):
         self.tmp_dir.cleanup()
 
     def test_creates_empty_manager(self):
-        dlg = _dialogs.DownloadManagerDialog(
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
             history_store=self.history_store,
             cookie="MUSIC_U=test",
             download_timeout_sec=10,
@@ -342,7 +342,7 @@ class DownloadManagerDialogTests(unittest.TestCase):
                 status=TASK_STATE_SUCCESS,
             )
         )
-        dlg = _dialogs.DownloadManagerDialog(
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
             history_store=self.history_store,
             cookie="MUSIC_U=test",
             download_timeout_sec=10,
@@ -373,7 +373,7 @@ class DownloadManagerDialogTests(unittest.TestCase):
                 error_code="DOWNLOAD_FAILED",
             )
         )
-        dlg = _dialogs.DownloadManagerDialog(
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
             history_store=self.history_store,
             cookie="MUSIC_U=test",
             download_timeout_sec=10,
@@ -392,7 +392,7 @@ class DownloadManagerDialogTests(unittest.TestCase):
 
 class UiSettingsDialogTests(unittest.TestCase):
     def test_creates_with_defaults(self):
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=14,
             detect_timeout_sec=5,
             download_timeout_sec=10,
@@ -403,14 +403,14 @@ class UiSettingsDialogTests(unittest.TestCase):
         dlg.close()
 
     def test_reset_button_restores_defaults(self):
-        from app_settings import (
+        from music_fetch.app_settings import (
             DEFAULT_UI_FONT_SIZE,
             DEFAULT_DETECT_TIMEOUT_SEC,
             DEFAULT_DOWNLOAD_TIMEOUT_SEC,
             DEFAULT_DOWNLOAD_RETRY_COUNT,
             DEFAULT_DOWNLOAD_CONCURRENCY,
         )
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=18,
             detect_timeout_sec=1,
             download_timeout_sec=3,
@@ -427,11 +427,11 @@ class UiSettingsDialogTests(unittest.TestCase):
         dlg.close()
 
     def test_clamps_extreme_values(self):
-        from app_settings import (
+        from music_fetch.app_settings import (
             MIN_UI_FONT_SIZE,
             MAX_UI_FONT_SIZE,
         )
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=9999,
             detect_timeout_sec=9999,
             download_timeout_sec=9999,
@@ -443,7 +443,7 @@ class UiSettingsDialogTests(unittest.TestCase):
         dlg.close()
 
     def test_theme_defaults_to_light(self):
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=14,
             detect_timeout_sec=5,
             download_timeout_sec=10,
@@ -454,7 +454,7 @@ class UiSettingsDialogTests(unittest.TestCase):
         dlg.close()
 
     def test_theme_dark(self):
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=14,
             detect_timeout_sec=5,
             download_timeout_sec=10,
@@ -466,7 +466,7 @@ class UiSettingsDialogTests(unittest.TestCase):
         dlg.close()
 
     def test_theme_invalid_falls_back(self):
-        dlg = _dialogs.UiSettingsDialog(
+        dlg = music_fetch.dialogs.UiSettingsDialog(
             current_font_size=14,
             detect_timeout_sec=5,
             download_timeout_sec=10,

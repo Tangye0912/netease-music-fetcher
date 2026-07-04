@@ -1,11 +1,11 @@
-"""Tests for _audio.py download stream logic."""
+"""Tests for music_fetch.audio.py download stream logic."""
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-import _audio
-from _api import MusicFetchError
+import music_fetch.audio
+from music_fetch.api import DownloadCanceled, MusicFetchError
 
 
 class DownloadAudioStreamTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_build_attempt_headers_without_cookie(self):
-        attempts = _audio._build_download_attempt_headers("")
+        attempts = music_fetch.audio._build_download_attempt_headers("")
         self.assertEqual(len(attempts), 3)
         for headers in attempts:
             self.assertIn("User-Agent", headers)
@@ -25,26 +25,26 @@ class DownloadAudioStreamTests(unittest.TestCase):
             self.assertIn("Range", headers)
 
     def test_build_attempt_headers_with_cookie(self):
-        attempts = _audio._build_download_attempt_headers("MUSIC_U=abc")
+        attempts = music_fetch.audio._build_download_attempt_headers("MUSIC_U=abc")
         self.assertEqual(len(attempts), 4)
         cookie_attempt = attempts[-1]
         self.assertIn("Cookie", cookie_attempt)
         self.assertEqual(cookie_attempt["Cookie"], "MUSIC_U=abc")
 
     def test_candidate_media_urls_adds_http_fallback_for_https_cdn(self):
-        urls = _audio._candidate_media_urls("https://m801.music.126.net/abc.mp3")
+        urls = music_fetch.audio._candidate_media_urls("https://m801.music.126.net/abc.mp3")
         self.assertEqual(len(urls), 2)
         self.assertEqual(urls[0], "https://m801.music.126.net/abc.mp3")
         self.assertEqual(urls[1], "http://m801.music.126.net/abc.mp3")
 
     def test_candidate_media_urls_no_fallback_for_non_cdn(self):
-        urls = _audio._candidate_media_urls("https://example.com/abc.mp3")
+        urls = music_fetch.audio._candidate_media_urls("https://example.com/abc.mp3")
         self.assertEqual(len(urls), 1)
         self.assertEqual(urls[0], "https://example.com/abc.mp3")
 
     def test_candidate_media_urls_http_no_double(self):
         # HTTP CDN URL gets normalized to HTTPS first, then HTTP fallback is added
-        urls = _audio._candidate_media_urls("http://m801.music.126.net/abc.mp3")
+        urls = music_fetch.audio._candidate_media_urls("http://m801.music.126.net/abc.mp3")
         # normalize_media_url upgrades http->https, then candidate adds http fallback
         self.assertEqual(urls[0], "https://m801.music.126.net/abc.mp3")
         self.assertEqual(urls[1], "http://m801.music.126.net/abc.mp3")
@@ -60,7 +60,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
         fake_resp.read.side_effect = [b"aaaa", b""]
 
         with mock.patch("urllib.request.urlopen", return_value=fake_resp):
-            _audio._download_audio_stream(
+            music_fetch.audio._download_audio_stream(
                 "https://m801.music.126.net/abc.mp3",
                 self.output_path,
                 timeout=10,
@@ -87,7 +87,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
         fake_ok.read.side_effect = [b"bbbb", b""]
 
         with mock.patch("urllib.request.urlopen", side_effect=[fake_403, fake_ok]):
-            _audio._download_audio_stream(
+            music_fetch.audio._download_audio_stream(
                 "https://m801.music.126.net/abc.mp3",
                 self.output_path,
                 timeout=10,
@@ -106,7 +106,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
 
         with mock.patch("urllib.request.urlopen", side_effect=fake_403):
             with self.assertRaises(MusicFetchError) as ctx:
-                _audio._download_audio_stream(
+                music_fetch.audio._download_audio_stream(
                     "https://m801.music.126.net/abc.mp3",
                     self.output_path,
                     timeout=10,
@@ -133,8 +133,8 @@ class DownloadAudioStreamTests(unittest.TestCase):
             return cancel_count[0] >= 2  # cancel after 2 chunks
 
         with mock.patch("urllib.request.urlopen", return_value=fake_resp):
-            with self.assertRaises(MusicFetchError) as ctx:
-                _audio._download_audio_stream(
+            with self.assertRaises(DownloadCanceled):
+                music_fetch.audio._download_audio_stream(
                     "https://m801.music.126.net/abc.mp3",
                     self.output_path,
                     timeout=10,
@@ -142,7 +142,6 @@ class DownloadAudioStreamTests(unittest.TestCase):
                     cancel_checker=canceller,
                     cookie="",
                 )
-            self.assertEqual(ctx.exception.code, "DOWNLOAD_CANCELED")
 
         self.assertFalse(self.output_path.exists())
         self.assertFalse(self.output_path.with_name(f"{self.output_path.name}.part").exists())
@@ -162,7 +161,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
         fake_ok.read.side_effect = [b"cccc", b""]
 
         with mock.patch("urllib.request.urlopen", side_effect=[fake_net_err, fake_ok]):
-            _audio._download_audio_stream(
+            music_fetch.audio._download_audio_stream(
                 "https://m801.music.126.net/abc.mp3",
                 self.output_path,
                 timeout=10,
@@ -176,7 +175,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
 
     def test_url_for_log_masks_tokens(self):
         url = "https://m801.music.126.net/abc.mp3?token=secret123&expire=1000&authsecret=abc"
-        safe = _audio._url_for_log(url)
+        safe = music_fetch.audio._url_for_log(url)
         self.assertIn("token=***", safe)
         self.assertIn("authsecret=***", safe)
         self.assertNotIn("secret123", safe)
@@ -201,7 +200,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
             fake_403, fake_403, fake_403,  # https attempts
             fake_ok,  # http first attempt succeeds
         ]):
-            _audio._download_audio_stream(
+            music_fetch.audio._download_audio_stream(
                 "https://m801.music.126.net/abc.mp3",
                 self.output_path,
                 timeout=10,

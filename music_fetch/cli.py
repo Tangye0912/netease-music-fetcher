@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from _api import (
+from music_fetch.api import (
     DEFAULT_COOKIE_FILE,
     DEFAULT_OUT_DIR,
     DownloadResult,
@@ -27,12 +27,10 @@ from _api import (
     parse_input_resource,
     parse_song_id,
 )
-from app_logging import default_log_path, setup_logging
-from app_settings import SUPPORTED_AUDIO_FORMATS
-from _audio import (
-    download_song_with_fallback,
-    resolve_output_path,
-)
+from music_fetch.app_logging import default_log_path, setup_logging
+from music_fetch.app_settings import SUPPORTED_AUDIO_FORMATS
+from music_fetch.audio import resolve_output_path
+from music_fetch.pipeline import run_download_pipeline
 
 
 def run_download(
@@ -55,42 +53,23 @@ def run_download(
         rename=rename,
         out_format=out_format,
     )
-    last_err: Optional[MusicFetchError] = None
-    for attempt in range(retry_count + 1):
-        try:
-            candidate = download_song_with_fallback(
-                song_id=song_id,
-                cookie=cookie,
-                output_path=output_path,
-                timeout=timeout,
-                prefer_format=out_format,
-            )
-            break
-        except MusicFetchError as err:
-            last_err = err
-            if err.code in ("DOWNLOAD_FAILED", "NETWORK_ERROR") and attempt < retry_count:
-                logger.warning(
-                    "Download attempt failed, retrying. attempt=%s/%s code=%s",
-                    attempt + 1, retry_count + 1, err.code,
-                )
-                continue
-            raise
-    else:
-        raise last_err  # type: ignore[misc]
-    size_bytes = output_path.stat().st_size
-    duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
+    result = run_download_pipeline(
+        song_id=song_id,
+        cookie=cookie,
+        output_path=output_path,
+        target_format=out_format,
+        timeout=timeout,
+        retry_count=retry_count,
+    )
     logger.info(
         "Run download completed. song_id=%s output=%s size_bytes=%s duration_ms=%s",
-        song_id,
-        output_path,
-        size_bytes,
-        duration_ms,
+        song_id, result.output_path, result.file_size, meta_duration,
     )
     return DownloadResult(
         song_id=song_id,
-        output_path=output_path.resolve(),
-        size_bytes=size_bytes,
-        duration_ms=duration_ms,
+        output_path=result.output_path.resolve(),
+        size_bytes=result.file_size,
+        duration_ms=meta_duration,
     )
 
 
@@ -124,35 +103,19 @@ def run_playlist_download(
                 rename=None,
                 out_format=out_format,
             )
-            last_err: Optional[MusicFetchError] = None
-            for attempt in range(retry_count + 1):
-                try:
-                    candidate = download_song_with_fallback(
-                        song_id=song_id,
-                        cookie=cookie,
-                        output_path=output_path,
-                        timeout=timeout,
-                        prefer_format=out_format,
-                    )
-                    break
-                except MusicFetchError as err:
-                    last_err = err
-                    if err.code in ("DOWNLOAD_FAILED", "NETWORK_ERROR") and attempt < retry_count:
-                        logger.warning(
-                            "Playlist song download retry. song_id=%s attempt=%s/%s code=%s",
-                            song_id, attempt + 1, retry_count + 1, err.code,
-                        )
-                        continue
-                    raise
-            else:
-                raise last_err  # type: ignore[misc]
-            size_bytes = output_path.stat().st_size
-            duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
+            pipeline_result = run_download_pipeline(
+                song_id=song_id,
+                cookie=cookie,
+                output_path=output_path,
+                target_format=out_format,
+                timeout=timeout,
+                retry_count=retry_count,
+            )
             result = DownloadResult(
                 song_id=song_id,
-                output_path=output_path.resolve(),
-                size_bytes=size_bytes,
-                duration_ms=duration_ms,
+                output_path=pipeline_result.output_path.resolve(),
+                size_bytes=pipeline_result.file_size,
+                duration_ms=meta_duration,
             )
             results.append(result)
             print(f"  SUCCESS path={result.output_path}")

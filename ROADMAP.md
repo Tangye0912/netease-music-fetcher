@@ -115,6 +115,18 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
+## v0.14.0 (Completed - 2026-07-04)
+
+### Goal
+
+- 结构性大升级：包迁移、错误处理重构、下载管道抽象，为 1.0.0 奠定基础。
+
+### Scope
+
+- [x] 包结构迁移：26 个平铺模块迁移到 music_fetch/ 包，music_fetch.py 替换为 __init__.py。
+- [x] 错误处理重构：ErrorCode 枚举 + DownloadCanceled/DownloadPaused 专用异常。
+- [x] 下载管道抽象：DownloadPipeline 纯逻辑类，GUI/CLI 统一下载逻辑。
+
 ## v0.13.0 (Next)
 
 ### Goal

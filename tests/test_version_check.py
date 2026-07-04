@@ -1,10 +1,10 @@
-"""Tests for _version_check.py — version_key and fetch_latest_project_version."""
+"""Tests for music_fetch.version_check.py — version_key and fetch_latest_project_version."""
 
 import json
 import unittest
 from unittest import mock
 
-from _version_check import fetch_latest_project_version, version_key
+from music_fetch.version_check import fetch_latest_project_version, version_key
 
 
 class VersionKeyTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class FetchLatestVersionTests(unittest.TestCase):
             "html_url": "https://github.com/test/releases/tag/v0.12.0",
         }).encode("utf-8")
 
-        with mock.patch("_version_check.request.urlopen", return_value=mock_resp):
+        with mock.patch("music_fetch.version_check.request.urlopen", return_value=mock_resp):
             tag, url = fetch_latest_project_version(timeout=3)
             self.assertEqual(tag, "v0.12.0")
             self.assertIn("github.com", url)
@@ -60,14 +60,14 @@ class FetchLatestVersionTests(unittest.TestCase):
             ]).encode("utf-8")
             return mock_resp
 
-        with mock.patch("_version_check.request.urlopen", side_effect=urlopen_side_effect):
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=urlopen_side_effect):
             tag, url = fetch_latest_project_version(timeout=3)
             self.assertEqual(tag, "v0.11.0")
 
     def test_both_endpoints_fail_raises(self):
         from urllib.error import URLError
 
-        with mock.patch("_version_check.request.urlopen", side_effect=URLError("timeout")):
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
             with self.assertRaises(RuntimeError):
                 fetch_latest_project_version(timeout=3)
 

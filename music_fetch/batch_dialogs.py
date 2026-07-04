@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch download dialogs extracted from _dialogs.py."""
+"""Batch download dialogs extracted from music_fetch.dialogs.py."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
@@ -29,27 +29,27 @@ from app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     clamp,
 )
-from app_stores import DownloadHistoryStore, DownloadRecord
-from download_tasks import (
+from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
+from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
     TASK_STATE_FAILED,
     TASK_STATE_SUCCESS,
     build_task_id,
 )
-from error_texts import UNKNOWN_ERROR, user_error_message
+from music_fetch.error_texts import UNKNOWN_ERROR, user_error_message
 from music_fetch import (
     MusicFetchError,
     SUPPORTED_GUI_AUDIO_FORMATS,
     is_ffmpeg_available,
     resolve_output_path,
 )
-from _batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
-from _gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
-from _batch_models import BatchDetectRow, format_bytes
-from _dialog_batch_settings import BatchRuntimeSettingsDialog
-import _combo_utils
-import _workers
-import ui_texts as T
+from music_fetch.batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
+from music_fetch.gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
+from music_fetch.batch_models import BatchDetectRow, format_bytes
+from music_fetch.dialog_batch_settings import BatchRuntimeSettingsDialog
+import music_fetch.combo_utils
+import music_fetch.workers
+import music_fetch.ui_texts as T
 
 try:
     from PySide6.QtCore import Qt, QTimer
@@ -107,7 +107,7 @@ class BatchDownloadDialog(QDialog):
         self.download_concurrency = clamp(download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
         self.ffmpeg_available = is_ffmpeg_available()
         self.rows: list[BatchDetectRow] = []
-        self.inspect_worker: Optional[_workers.BatchInspectWorker] = None
+        self.inspect_worker: Optional[music_fetch.workers.BatchInspectWorker] = None
         self.auto_detect_on_open = auto_detect_on_open
         self._last_detect_signature = ""
         self._restored_from_cache = False
@@ -123,7 +123,7 @@ class BatchDownloadDialog(QDialog):
         self._download_success = 0
         self._download_failed = 0
         self._download_canceled = 0
-        self._download_workers: dict[int, _workers.DownloadWorker] = {}
+        self._download_workers: dict[int, music_fetch.workers.DownloadWorker] = {}
         self._worker_rows: dict[int, BatchDetectRow] = {}
         self._worker_output_paths: dict[int, Path] = {}
 
@@ -442,7 +442,7 @@ class BatchDownloadDialog(QDialog):
         self._update_detect_button_state()
         self.status_label.setText(T.BATCH_STATUS_DETECTING)
         set_label_state(self.status_label, "warning")
-        self.inspect_worker = _workers.BatchInspectWorker(raw_text, self.cookie, timeout=self.detect_timeout_sec, detect_concurrency=self.download_concurrency)
+        self.inspect_worker = music_fetch.workers.BatchInspectWorker(raw_text, self.cookie, timeout=self.detect_timeout_sec, detect_concurrency=self.download_concurrency)
         self.inspect_worker.progress.connect(self._on_detect_progress)
         self.inspect_worker.completed.connect(self._on_detect_completed)
         self.inspect_worker.failed.connect(self._on_detect_failed)
@@ -695,7 +695,7 @@ class BatchDownloadDialog(QDialog):
             row.status = "downloading"
             row.message = ""
             task_id = build_task_id(row.song_id)
-            worker = _workers.DownloadWorker(
+            worker = music_fetch.workers.DownloadWorker(
                 task_id=task_id,
                 song_id=row.song_id,
                 output_path=output_path,
@@ -724,7 +724,7 @@ class BatchDownloadDialog(QDialog):
         if self._download_cursor >= self._download_total and not self._download_workers:
             self._stop_download_flow(stopped=self._download_cancel_requested)
 
-    def _on_download_progress(self, worker: _workers.DownloadWorker, downloaded: int, total: int, speed: float) -> None:
+    def _on_download_progress(self, worker: music_fetch.workers.DownloadWorker, downloaded: int, total: int, speed: float) -> None:
         row = self._worker_rows.get(id(worker))
         if not row:
             return
@@ -750,7 +750,7 @@ class BatchDownloadDialog(QDialog):
             )
         set_label_state(self.status_label, "warning")
 
-    def _on_download_succeeded(self, worker: _workers.DownloadWorker, output_path: str, file_size: int) -> None:
+    def _on_download_succeeded(self, worker: music_fetch.workers.DownloadWorker, output_path: str, file_size: int) -> None:
         row = self._worker_rows.get(id(worker))
         if not row:
             return
@@ -771,7 +771,7 @@ class BatchDownloadDialog(QDialog):
         self._download_success += 1
         self._finalize_download_worker(worker)
 
-    def _on_download_failed(self, worker: _workers.DownloadWorker, code: str, message: str) -> None:
+    def _on_download_failed(self, worker: music_fetch.workers.DownloadWorker, code: str, message: str) -> None:
         key = id(worker)
         row = self._worker_rows.get(key)
         output_path = self._worker_output_paths.get(key)
@@ -795,7 +795,7 @@ class BatchDownloadDialog(QDialog):
         self._download_failed += 1
         self._finalize_download_worker(worker)
 
-    def _on_download_paused(self, worker: _workers.DownloadWorker) -> None:
+    def _on_download_paused(self, worker: music_fetch.workers.DownloadWorker) -> None:
         key = id(worker)
         row = self._worker_rows.get(key)
         if not row:
@@ -806,7 +806,7 @@ class BatchDownloadDialog(QDialog):
         self._refresh_download_status()
         logger.info("Batch download worker paused. song_id=%s", row.song_id)
 
-    def _on_download_canceled(self, worker: _workers.DownloadWorker) -> None:
+    def _on_download_canceled(self, worker: music_fetch.workers.DownloadWorker) -> None:
         key = id(worker)
         row = self._worker_rows.get(key)
         output_path = self._worker_output_paths.get(key)
@@ -828,7 +828,7 @@ class BatchDownloadDialog(QDialog):
         self._download_canceled += 1
         self._finalize_download_worker(worker)
 
-    def _on_download_worker_finished(self, worker: _workers.DownloadWorker) -> None:
+    def _on_download_worker_finished(self, worker: music_fetch.workers.DownloadWorker) -> None:
         # Defensive cleanup: worker may finish unexpectedly without status callbacks.
         if id(worker) not in self._download_workers:
             return
@@ -852,7 +852,7 @@ class BatchDownloadDialog(QDialog):
             )
         self._finalize_download_worker(worker)
 
-    def _finalize_download_worker(self, worker: _workers.DownloadWorker) -> None:
+    def _finalize_download_worker(self, worker: music_fetch.workers.DownloadWorker) -> None:
         key = id(worker)
         if key not in self._download_workers:
             return

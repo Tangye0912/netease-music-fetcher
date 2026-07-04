@@ -1,6 +1,6 @@
 """Tests for BatchDownloadDialog pure-logic methods and download scheduling."""
 import tempfile
-from error_texts import UNKNOWN_ERROR
+from music_fetch.error_texts import UNKNOWN_ERROR
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -12,11 +12,11 @@ _app = QApplication.instance()
 if _app is None:
     _app = QApplication(["test"])
 
-from _batch_models import BatchDetectRow
-from _batch_dialogs import BatchDownloadDialog
-from _workers import DownloadWorker
-from app_stores import DownloadHistoryStore, DownloadRecord
-from download_tasks import TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS
+from music_fetch.batch_models import BatchDetectRow
+from music_fetch.batch_dialogs import BatchDownloadDialog
+from music_fetch.workers import DownloadWorker
+from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
+from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS
 
 
 def _make_row(song_id: str, status: str = "ready", selected: bool = True) -> BatchDetectRow:

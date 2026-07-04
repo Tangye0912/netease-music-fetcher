@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Optional
 from urllib import error, parse, request
 
-from _api import (
+from music_fetch.api import (
+    DownloadCanceled,
+    DownloadPaused,
     MusicFetchError,
     OUTER_MEDIA_URL_API,
     USER_AGENT,
@@ -136,9 +138,9 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         try:
             _download_audio_stream(candidate.media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)
             return candidate
+        except (DownloadCanceled, DownloadPaused):
+            raise
         except MusicFetchError as err:
-            if err.code in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
-                raise
             if err.code == "DOWNLOAD_FAILED" and "HTTP 403" in err.message:
                 last_403 = err
                 logger.warning("Candidate rejected by CDN with 403. song_id=%s level=%s encode=%s", song_id, candidate.level, candidate.encode_type)
@@ -154,7 +156,7 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
             return PlayableCandidate(media_url=outer_url, duration_ms=None, level="outer", encode_type=(infer_audio_format_from_url(outer_url) or "unknown"))
         except MusicFetchError as err:
             logger.warning("Outer-url fallback failed. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-            if err.code not in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
+            if isinstance(err, MusicFetchError):
                 last_403 = err
             else:
                 raise
@@ -301,9 +303,9 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     with tmp_path.open(file_mode) as file_obj:
                         while True:
                             if cancel_checker and cancel_checker():
-                                raise MusicFetchError("DOWNLOAD_CANCELED", "Download canceled by user.")
+                                raise DownloadCanceled()
                             if pause_checker and pause_checker():
-                                raise MusicFetchError("DOWNLOAD_PAUSED", "Download paused by user.")
+                                raise DownloadPaused()
                             chunk = resp.read(64 * 1024)
                             if not chunk:
                                 break
@@ -335,10 +337,17 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 logger.warning("Download attempt network error. attempt=%s/%s reason=%s", attempt_no, total_attempts, url_err.reason)
                 last_network_error = url_err
                 continue
+            except DownloadPaused:
+                logger.info("Media download paused, partial file kept. output=%s offset=%s", output_path, downloaded)
+                raise
+            except DownloadCanceled:
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+                if output_path.exists():
+                    output_path.unlink(missing_ok=True)
+                logger.info("Media download canceled, partial file removed. output=%s", output_path)
+                raise
             except MusicFetchError as err:
-                if err.code == "DOWNLOAD_PAUSED":
-                    logger.info("Media download paused, partial file kept. output=%s offset=%s", output_path, downloaded)
-                    raise
                 if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
                 if output_path.exists():

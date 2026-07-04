@@ -1,10 +1,10 @@
-"""Tests for _batch_models.py — format_duration, format_bytes,
+"""Tests for music_fetch.batch_models.py — format_duration, format_bytes,
 probe_media_size_bytes, and BatchDetectRow."""
 
 import unittest
 from unittest import mock
 
-from _batch_models import (
+from music_fetch.batch_models import (
     BatchDetectRow,
     format_bytes,
     format_duration,
@@ -57,7 +57,7 @@ class ProbeMediaSizeBytesTests(unittest.TestCase):
         self.assertEqual(probe_media_size_bytes(""), 0)
 
     def test_head_request_returns_content_length(self):
-        with mock.patch("_batch_models.request.urlopen") as mock_urlopen:
+        with mock.patch("music_fetch.batch_models.request.urlopen") as mock_urlopen:
             mock_resp = mock.MagicMock()
             mock_resp.headers = {"Content-Length": "12345"}
             mock_urlopen.return_value.__enter__.return_value = mock_resp
@@ -66,7 +66,7 @@ class ProbeMediaSizeBytesTests(unittest.TestCase):
             self.assertEqual(result, 12345)
 
     def test_head_request_non_digit_does_range_fallback(self):
-        with mock.patch("_batch_models.request.urlopen") as mock_urlopen:
+        with mock.patch("music_fetch.batch_models.request.urlopen") as mock_urlopen:
             mock_resp = mock.MagicMock()
             mock_resp.headers = {"Content-Length": "unknown"}
             mock_urlopen.return_value.__enter__.return_value = mock_resp
@@ -89,14 +89,14 @@ class ProbeMediaSizeBytesTests(unittest.TestCase):
             mock_resp.headers = {"Content-Range": "bytes 0-0/99999"}
             return mock_resp
 
-        with mock.patch("_batch_models.request.urlopen", side_effect=urlopen_side_effect):
+        with mock.patch("music_fetch.batch_models.request.urlopen", side_effect=urlopen_side_effect):
             result = probe_media_size_bytes("https://example.com/song.mp4")
             self.assertEqual(result, 99999)
 
     def test_both_requests_fail_returns_zero(self):
         from urllib.error import URLError
 
-        with mock.patch("_batch_models.request.urlopen", side_effect=URLError("timeout")):
+        with mock.patch("music_fetch.batch_models.request.urlopen", side_effect=URLError("timeout")):
             result = probe_media_size_bytes("https://example.com/song.mp4")
             self.assertEqual(result, 0)
 

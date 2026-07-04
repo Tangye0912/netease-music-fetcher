@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from app_settings import (
+from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
+from music_fetch.app_settings import (
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
@@ -20,7 +20,7 @@ from app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     MIN_UI_FONT_SIZE,
 )
-from download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS
+from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS
 
 
 class SessionStoreTests(unittest.TestCase):

@@ -17,7 +17,7 @@ if not defined PY_CMD (
   exit /b 1
 )
 
-%PY_CMD% main.py
+%PY_CMD% music_fetch/main.py
 
 if errorlevel 1 (
   echo.

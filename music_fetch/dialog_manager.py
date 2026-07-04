@@ -3,7 +3,7 @@
 Download manager dialog — history browser with status filter, file open/delete,
 and failed-task retry.
 
-Extracted from _dialogs.py to reduce module size.
+Extracted from music_fetch.dialogs.py to reduce module size.
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
 )
-from app_stores import DownloadHistoryStore, DownloadRecord
-from download_retry import can_retry_status, retry_target_format
-from download_tasks import (
+from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
+from music_fetch.download_retry import can_retry_status, retry_target_format
+from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
     TASK_STATE_FAILED,
     TASK_STATE_PENDING,
@@ -29,12 +29,12 @@ from download_tasks import (
     TASK_STATE_DOWNLOADING,
     build_task_id,
 )
-from _batch_models import format_bytes
-from _gui_styles import (
+from music_fetch.batch_models import format_bytes
+from music_fetch.gui_styles import (
     set_back_button,
     set_label_state,
 )
-import ui_texts as T
+import music_fetch.ui_texts as T
 
 try:
     from PySide6.QtCore import Qt, QUrl

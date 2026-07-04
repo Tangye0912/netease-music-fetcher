@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from io import StringIO
 from typing import Iterable, Protocol
 
-import ui_texts as T
+import music_fetch.ui_texts as T
 
 
 BATCH_CSV_FIELDS = (

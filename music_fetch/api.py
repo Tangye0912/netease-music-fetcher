@@ -2,13 +2,13 @@
 NetEase Cloud Music API client.
 
 Data-flow: constants → data-classes → URL/cookie helpers → HTTP helpers → API functions.
-Depended on by _audio.py (download) and _cli.py (CLI entry point).  No reverse dependency.
+Depended on by music_fetch.audio.py (download) and music_fetch.cli.py (CLI entry point).  No reverse dependency.
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "MusicFetchError", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
+    "MusicFetchError", "ErrorCode", "DownloadCanceled", "DownloadPaused", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
     "ProgressCallback", "CancelChecker", "PauseChecker",
     "parse_song_id", "parse_playlist_id", "parse_input_resource",
     "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
@@ -26,13 +26,14 @@ __all__ = [
 import json
 import logging
 import re
+from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 from urllib import error, parse, request
 
-from app_logging import get_logger, mask_value
-from app_settings import SHORT_LINK_HOSTS, SUPPORTED_AUDIO_FORMATS, TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
+from music_fetch.app_logging import get_logger, mask_value
+from music_fetch.app_settings import SHORT_LINK_HOSTS, SUPPORTED_AUDIO_FORMATS, TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -59,10 +60,33 @@ SUPPORTED_GUI_AUDIO_FORMATS = SUPPORTED_AUDIO_FORMATS
 class MusicFetchError(Exception):
     """Standardized error with stable code and human-readable message."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str | ErrorCode, message: str) -> None:
         super().__init__(message)
-        self.code = code
+        self.code = code.value if isinstance(code, ErrorCode) else code
         self.message = message
+
+
+class ErrorCode(Enum):
+    """Stable error codes for MusicFetchError."""
+    INVALID_URL = "INVALID_URL"
+    AUTH_EXPIRED = "AUTH_EXPIRED"
+    SONG_UNAVAILABLE = "SONG_UNAVAILABLE"
+    NETWORK_ERROR = "NETWORK_ERROR"
+    DOWNLOAD_FAILED = "DOWNLOAD_FAILED"
+    DOWNLOAD_CANCELED = "DOWNLOAD_CANCELED"
+    DOWNLOAD_PAUSED = "DOWNLOAD_PAUSED"
+    UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
+    CONVERT_TOOL_MISSING = "CONVERT_TOOL_MISSING"
+    CONVERT_FAILED = "CONVERT_FAILED"
+    UNKNOWN_ERROR = "UNKNOWN_ERROR"
+
+
+class DownloadCanceled(Exception):
+    """Control-flow signal: download was canceled by user. Not a subprocess error."""
+
+
+class DownloadPaused(Exception):
+    """Control-flow signal: download was paused by user. Not a subprocess error."""
 
 
 @dataclass

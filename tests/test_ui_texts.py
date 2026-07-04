@@ -1,6 +1,6 @@
 import unittest
 
-import ui_texts as T
+import music_fetch.ui_texts as T
 
 
 class UiTextsTests(unittest.TestCase):

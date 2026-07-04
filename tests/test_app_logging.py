@@ -1,11 +1,11 @@
-"""Tests for app_logging.py — setup_logging, get_logger, mask_value, default_log_path."""
+"""Tests for music_fetch.app_logging.py — setup_logging, get_logger, mask_value, default_log_path."""
 
 import logging
 import tempfile
 import unittest
 from pathlib import Path
 
-from app_logging import (
+from music_fetch.app_logging import (
     default_log_path,
     get_logger,
     mask_value,
@@ -74,15 +74,15 @@ class SetupLoggingTests(unittest.TestCase):
                     root.removeHandler(h)
 
     def test_returns_default_when_none(self):
-        import app_logging
-        old_default = app_logging._DEFAULT_LOG_PATH
+        import music_fetch.app_logging
+        old_default = music_fetch.app_logging._DEFAULT_LOG_PATH
         with tempfile.TemporaryDirectory() as tmp:
             try:
-                app_logging._DEFAULT_LOG_PATH = Path(tmp) / "default.log"
+                music_fetch.app_logging._DEFAULT_LOG_PATH = Path(tmp) / "default.log"
                 result = setup_logging()
                 self.assertTrue(result.exists())
             finally:
-                app_logging._DEFAULT_LOG_PATH = old_default
+                music_fetch.app_logging._DEFAULT_LOG_PATH = old_default
                 root = logging.getLogger("music_fetch")
                 for h in root.handlers[:]:
                     if h not in self._saved_handlers:

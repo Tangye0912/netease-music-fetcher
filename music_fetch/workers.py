@@ -16,14 +16,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
-from _batch_models import (
+from music_fetch.batch_models import (
     BatchDetectRow,
     format_bytes,
     format_duration,
     probe_media_size_bytes,
 )
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.pipeline import run_download_pipeline
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     clamp_download_settings,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
@@ -34,9 +35,11 @@ from app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     clamp,
 )
-from batch_inputs import collect_batch_candidates, source_hint_map
-from error_texts import UNKNOWN_ERROR, user_error_message
+from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
+from music_fetch.error_texts import UNKNOWN_ERROR, user_error_message
 from music_fetch import (
+    DownloadCanceled,
+    DownloadPaused,
     MusicFetchError,
     SUPPORTED_GUI_AUDIO_FORMATS,
     convert_audio_file,
@@ -47,7 +50,7 @@ from music_fetch import (
     is_ffmpeg_available,
     parse_input_resource,
 )
-import ui_texts as T
+import music_fetch.ui_texts as T
 
 try:
     from PySide6.QtCore import QThread, Signal
@@ -58,8 +61,8 @@ except ImportError as err:
 
 logger = get_logger("music_fetch.gui")
 
-# Re-exported from _batch_models.py for backward compatibility.
-# New code should import directly from _batch_models.
+# Re-exported from music_fetch.batch_models.py for backward compatibility.
+# New code should import directly from music_fetch.batch_models.
 __all__ = [
     "BatchDetectRow",
     "BatchInspectWorker",
@@ -295,10 +298,7 @@ class DownloadWorker(QThread):
         started_at = time.time()
         logger.info(
             "DownloadWorker started. task_id=%s output=%s timeout=%ss retry_count=%s",
-            self.task_id,
-            self.output_path,
-            self.timeout,
-            self.retry_count,
+            self.task_id, self.output_path, self.timeout, self.retry_count,
         )
 
         def on_progress(downloaded: int, total: Optional[int]) -> None:
@@ -313,105 +313,32 @@ class DownloadWorker(QThread):
             return self._pause_event.is_set()
 
         try:
-            # Download to a temporary source file first, then convert/move to final path.
-            # This avoids exposing partial or half-converted output files to users.
-            temp_source_path = self.output_path.with_name(f"{self.output_path.name}.source")
-            if temp_source_path.exists():
-                temp_source_path.unlink(missing_ok=True)
-
-            selected = None
-            for attempt in range(1, self.retry_count + 2):
-                try:
-                    selected = download_song_with_fallback(
-                        song_id=self.song_id,
-                        cookie=self.cookie,
-                        output_path=temp_source_path,
-                        timeout=self.timeout,
-                        prefer_format=self.target_format,
-                        progress_callback=on_progress,
-                        cancel_checker=should_cancel,
-                        pause_checker=should_pause,
-                    )
-                    break
-                except MusicFetchError as err:
-                    if err.code in ("DOWNLOAD_CANCELED", "DOWNLOAD_PAUSED"):
-                        raise
-                    is_last_attempt = attempt >= self.retry_count + 1
-                    retriable = err.code in {"DOWNLOAD_FAILED", "NETWORK_ERROR"}
-                    if not retriable or is_last_attempt:
-                        raise
-                    logger.warning(
-                        "Download attempt failed and will retry. task_id=%s attempt=%s/%s code=%s",
-                        self.task_id,
-                        attempt,
-                        self.retry_count + 1,
-                        err.code,
-                    )
-            if selected is None:
-                raise MusicFetchError("DOWNLOAD_FAILED", "Retry loop ended without a playable candidate.")
-            source_format = infer_audio_format_from_url(selected.media_url) or "unknown"
-            logger.info(
-                "Download source completed. task_id=%s source_format=%s target_format=%s",
-                self.task_id,
-                source_format,
-                self.target_format,
+            result = run_download_pipeline(
+                song_id=self.song_id,
+                cookie=self.cookie,
+                output_path=self.output_path,
+                target_format=self.target_format,
+                timeout=self.timeout,
+                retry_count=self.retry_count,
+                progress_callback=on_progress,
+                cancel_checker=should_cancel,
+                pause_checker=should_pause,
             )
-            if self._finish_if_canceled(temp_source_path, self.output_path):
-                return
-            if source_format == self.target_format:
-                temp_source_path.replace(self.output_path)
-                if self._finish_if_canceled(self.output_path):
-                    return
-            else:
-                if not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
-                    fallback_output = self.output_path.with_suffix(f".{source_format}")
-                    if fallback_output.exists():
-                        fallback_output = fallback_output.with_name(
-                            f"{fallback_output.stem}_{int(time.time())}{fallback_output.suffix}"
-                        )
-                    if self._finish_if_canceled(temp_source_path, fallback_output):
-                        return
-                    temp_source_path.replace(fallback_output)
-                    if self._finish_if_canceled(fallback_output):
-                        return
-                    file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
-                    self.succeeded.emit(str(fallback_output.resolve()), file_size)
-                    logger.warning(
-                        "ffmpeg missing. task_id=%s saved source format directly. requested=%s source=%s output=%s",
-                        self.task_id,
-                        self.target_format,
-                        source_format,
-                        fallback_output,
-                    )
-                    return
-                # Conversion relies on ffmpeg and may take longer than plain download.
-                if self._finish_if_canceled(temp_source_path, self.output_path):
-                    return
-                convert_audio_file(
-                    temp_source_path,
-                    self.output_path,
-                    self.target_format,
-                    timeout=max(240, self.timeout * 8),
-                )
-                temp_source_path.unlink(missing_ok=True)
-                if self._finish_if_canceled(self.output_path):
-                    return
-            file_size = self.output_path.stat().st_size if self.output_path.exists() else 0
-            self.succeeded.emit(str(self.output_path.resolve()), file_size)
-            logger.info("DownloadWorker succeeded. task_id=%s output=%s size=%s", self.task_id, self.output_path, file_size)
+            self.succeeded.emit(str(result.output_path.resolve()), result.file_size)
+            logger.info(
+                "DownloadWorker succeeded. task_id=%s output=%s size=%s",
+                self.task_id, result.output_path, result.file_size,
+            )
+        except DownloadCanceled:
+            logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
+            self.canceled.emit()
+        except DownloadPaused:
+            logger.info("DownloadWorker paused by user. task_id=%s output=%s", self.task_id, self.output_path)
+            self.paused.emit()
+            stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
+            if stale_source.exists():
+                stale_source.unlink(missing_ok=True)
         except MusicFetchError as err:
-            if err.code == "DOWNLOAD_CANCELED":
-                logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
-                self.canceled.emit()
-                return
-            if err.code == "DOWNLOAD_PAUSED":
-                logger.info("DownloadWorker paused by user. task_id=%s output=%s", self.task_id, self.output_path)
-                self.paused.emit()
-                # Keep .part file for resume; clean up .source only
-                stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
-                if stale_source.exists():
-                    stale_source.unlink(missing_ok=True)
-                return
             logger.warning("DownloadWorker failed. task_id=%s code=%s message=%s", self.task_id, err.code, err.message)
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover

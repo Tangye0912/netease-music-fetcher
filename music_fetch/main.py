@@ -4,7 +4,7 @@ Application entry point.
 
 Contains MainWindow (main UI), ensure_session_with_login (login flow), and
 the top-level main() function.  Dialog classes and worker threads have been
-extracted into _dialogs.py and _workers.py respectively for maintainability.
+extracted into music_fetch.dialogs.py and music_fetch.workers.py respectively for maintainability.
 """
 
 from __future__ import annotations
@@ -35,19 +35,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app_logging import default_log_path, get_logger, setup_logging
-from app_settings import APP_VERSION, DEFAULT_DOWNLOAD_DIR, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API, SESSION_FILE
-from app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADING, TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS, DownloadTaskSnapshot, build_task_id, next_task_snapshot
+from music_fetch.app_logging import default_log_path, get_logger, setup_logging
+from music_fetch.app_settings import APP_VERSION, DEFAULT_DOWNLOAD_DIR, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API, SESSION_FILE
+from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
+from music_fetch.download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADING, TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS, DownloadTaskSnapshot, build_task_id, next_task_snapshot
 from music_fetch import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, is_ffmpeg_available, parse_input_resource
-from error_texts import user_error_message
-import ui_texts as T
+from music_fetch.error_texts import user_error_message
+import music_fetch.ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
-from _batch_models import BatchDetectRow
-from _workers import InspectWorker
-from _gui_styles import apply_app_style, clamp_ui_font_size, set_button_role, set_label_state
-from _dialogs import (
+from music_fetch.batch_models import BatchDetectRow
+from music_fetch.workers import InspectWorker
+from music_fetch.gui_styles import apply_app_style, clamp_ui_font_size, set_button_role, set_label_state
+from music_fetch.dialogs import (
     BATCH_ROUTE_MIN_COUNT,
     WEB_ENGINE_AVAILABLE,
     LoginDialog,
@@ -65,7 +65,7 @@ from _dialogs import (
 logger = get_logger("music_fetch.gui")
 
 
-from _version_check import version_key, fetch_latest_project_version
+from music_fetch.version_check import version_key, fetch_latest_project_version
 
 
 class MainWindow(QMainWindow):
@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         self._sync_detect_button_state()
 
     def _analyze_input_after_delay(self) -> None:
-        from batch_inputs import collect_batch_candidates
+        from music_fetch.batch_inputs import collect_batch_candidates
         raw = self.url_input.toPlainText().strip()
         if not raw:
             self._input_analysis_ready = False
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
         self._refresh_ffmpeg_status()
 
     def _open_batch_download(self, input_text: str = "", auto_detect_on_open: bool = False) -> None:
-        from _batch_dialogs import BatchDownloadDialog
+        from music_fetch.batch_dialogs import BatchDownloadDialog
         logger.info("Open batch download dialog.")
         normalized_input = input_text.strip()
         use_cached = bool(normalized_input and normalized_input == self._batch_cached_signature and self._batch_cached_rows)
@@ -457,7 +457,7 @@ class MainWindow(QMainWindow):
         self._on_url_input_changed()
 
     def _on_detect_clicked(self) -> None:
-        from batch_inputs import collect_batch_candidates
+        from music_fetch.batch_inputs import collect_batch_candidates
 
         if self._detect_busy:
             return

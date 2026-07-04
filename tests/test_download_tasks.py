@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from download_tasks import (
+from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
     TASK_STATE_DOWNLOADING,
     TASK_STATE_FAILED,

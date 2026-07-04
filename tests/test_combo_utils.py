@@ -6,7 +6,7 @@ try:
 except ImportError:
     _app = None
 
-from _combo_utils import build_value_combo, build_options_combo, set_combo_value, combo_int_value
+from music_fetch.combo_utils import build_value_combo, build_options_combo, set_combo_value, combo_int_value
 
 
 class ComboUtilsTests(unittest.TestCase):

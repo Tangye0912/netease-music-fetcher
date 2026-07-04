@@ -2,24 +2,24 @@
 """
 Login dialog — embedded web login with QR code scanning.
 
-Extracted from _dialogs.py to reduce module size.
+Extracted from music_fetch.dialogs.py to reduce module size.
 """
 
 from __future__ import annotations
 
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     NETEASE_LOGIN_URL,
 )
-from error_texts import user_error_message
+from music_fetch.error_texts import user_error_message
 from music_fetch import (
     MusicFetchError,
     build_cookie_string,
     check_login_status,
 )
-import ui_texts as T
+import music_fetch.ui_texts as T
 
-from _gui_styles import (
+from music_fetch.gui_styles import (
     set_back_button,
     set_button_role,
 )

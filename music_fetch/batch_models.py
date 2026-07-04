@@ -2,7 +2,7 @@
 """
 Pure data models and formatting helpers shared by batch workers, dialogs, and tests.
 
-Extracted from _workers.py to reduce module size and break import cycles.
+Extracted from music_fetch.workers.py to reduce module size and break import cycles.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib import error, request
 
-from app_logging import get_logger
-import ui_texts as T
+from music_fetch.app_logging import get_logger
+import music_fetch.ui_texts as T
 
 logger = get_logger("music_fetch.gui")
 

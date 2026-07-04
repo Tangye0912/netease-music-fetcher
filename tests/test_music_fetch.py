@@ -22,7 +22,7 @@ class ParseSongIdTests(unittest.TestCase):
         text = "分享歌曲《测试》https://music.163.com/song?id=24680 (@网易云音乐)"
         self.assertEqual(music_fetch.parse_song_id(text), "24680")
 
-    @mock.patch("_api.resolve_short_url")
+    @mock.patch("music_fetch.api.resolve_short_url")
     def test_parse_share_text_with_short_url(self, resolve_mock):
         resolve_mock.return_value = "https://music.163.com/#/song?id=33894312"
         text = "分享银河快递的单曲《另一个我》https://163cn.tv/2MxARR6 (@网易云音乐)"
@@ -44,7 +44,7 @@ class ParseSongIdTests(unittest.TestCase):
         self.assertEqual(resource_type, "playlist")
         self.assertEqual(resource_id, "9988")
 
-    @mock.patch("_api.resolve_short_url")
+    @mock.patch("music_fetch.api.resolve_short_url")
     def test_parse_playlist_id_from_short_url(self, resolve_mock):
         resolve_mock.return_value = "https://music.163.com/playlist?id=778899"
         playlist_id = music_fetch.parse_playlist_id("https://163cn.tv/xxxxxx")
@@ -62,21 +62,21 @@ class CookieTests(unittest.TestCase):
 
 
 class PlayerApiTests(unittest.TestCase):
-    @mock.patch("_api.perform_json_post")
+    @mock.patch("music_fetch.api.perform_json_post")
     def test_auth_expired_from_http_status(self, post_mock):
         post_mock.return_value = (401, {"code": 401})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
             music_fetch.fetch_playable_url("123", "MUSIC_U=abc; __csrf=def", timeout=5)
         self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
 
-    @mock.patch("_api.perform_json_post")
+    @mock.patch("music_fetch.api.perform_json_post")
     def test_song_unavailable_when_url_missing(self, post_mock):
         post_mock.return_value = (200, {"code": 200, "data": [{"url": None}]})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
             music_fetch.fetch_playable_url("123", "MUSIC_U=abc; __csrf=def", timeout=5)
         self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
 
-    @mock.patch("_api.perform_json_get")
+    @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_playlist_song_ids_success(self, get_mock):
         get_mock.return_value = (
             200,
@@ -90,7 +90,7 @@ class PlayerApiTests(unittest.TestCase):
         result = music_fetch.fetch_playlist_song_ids("123", "MUSIC_U=abc", timeout=5)
         self.assertEqual(result, ["1", "2"])
 
-    @mock.patch("_api.perform_json_get")
+    @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_playlist_song_ids_empty(self, get_mock):
         get_mock.return_value = (200, {"code": 200, "playlist": {"trackIds": []}})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
@@ -99,7 +99,7 @@ class PlayerApiTests(unittest.TestCase):
 
 
 class AccountProfileTests(unittest.TestCase):
-    @mock.patch("_api.perform_json_get")
+    @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_account_profile_success(self, get_mock):
         get_mock.return_value = (
             200,
@@ -118,7 +118,7 @@ class AccountProfileTests(unittest.TestCase):
         self.assertEqual(profile.nickname, "tester")
         self.assertTrue(profile.is_vip)
 
-    @mock.patch("_api.perform_json_get")
+    @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_account_profile_auth_expired(self, get_mock):
         get_mock.return_value = (401, {"code": 401})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
@@ -127,22 +127,28 @@ class AccountProfileTests(unittest.TestCase):
 
 
 class RunDownloadTests(unittest.TestCase):
-    @mock.patch("_cli.download_song_with_fallback")
-    @mock.patch("_cli.fetch_song_metadata")
-    def test_run_download_success(self, meta_mock, fallback_mock):
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    def test_run_download_success(self, meta_mock, pipeline_mock):
         meta_mock.return_value = ("Track Name", 130000)
 
-        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, progress_callback=None, cancel_checker=None, pause_checker=None):
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
+            from music_fetch.pipeline import DownloadPipelineResult
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"abc123")
-            return music_fetch.PlayableCandidate(
-                media_url="https://example.com/media.mp4",
-                duration_ms=120000,
-                level="standard",
-                encode_type="aac",
+            return DownloadPipelineResult(
+                output_path=output_path,
+                file_size=6,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/media.mp4",
+                    duration_ms=120000,
+                    level="standard",
+                    encode_type="aac",
+                ),
+                source_format="mp3",
             )
 
-        fallback_mock.side_effect = fake_fallback
+        pipeline_mock.side_effect = fake_pipeline
 
         with tempfile.TemporaryDirectory() as tmp:
             cookie_file = Path(tmp) / "cookies.txt"

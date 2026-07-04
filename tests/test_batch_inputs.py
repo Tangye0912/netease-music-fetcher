@@ -1,8 +1,8 @@
 import unittest
 
-from batch_inputs import collect_batch_candidates, dedupe_preserve_order, should_use_batch_mode, split_batch_input
-from batch_inputs import contains_playlist_hint, looks_like_playlist_candidate
-from batch_inputs import source_hint_map
+from music_fetch.batch_inputs import collect_batch_candidates, dedupe_preserve_order, should_use_batch_mode, split_batch_input
+from music_fetch.batch_inputs import contains_playlist_hint, looks_like_playlist_candidate
+from music_fetch.batch_inputs import source_hint_map
 
 
 class BatchInputTests(unittest.TestCase):

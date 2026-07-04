@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app_settings import DEFAULT_GUI_TARGET_FORMAT
-from download_tasks import TASK_STATE_FAILED
+from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
+from music_fetch.download_tasks import TASK_STATE_FAILED
 from music_fetch import SUPPORTED_GUI_AUDIO_FORMATS
 
 

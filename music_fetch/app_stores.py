@@ -7,8 +7,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app_logging import get_logger
-from app_settings import (
+from music_fetch.app_logging import get_logger
+from music_fetch.app_settings import (
     DEFAULT_UI_THEME,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
@@ -29,7 +29,7 @@ from app_settings import (
     UNKNOWN_SONG_NAME,
     clamp,
 )
-from download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
+from music_fetch.download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
 
 logger = get_logger("music_fetch.stores")
 
@@ -120,7 +120,7 @@ class SessionStore:
 
     @staticmethod
     def _safe_ui_theme(value: object) -> str:
-        from app_settings import UI_THEME_OPTIONS
+        from music_fetch.app_settings import UI_THEME_OPTIONS
         normalized = str(value or "").strip().lower()
         if normalized in UI_THEME_OPTIONS:
             return normalized

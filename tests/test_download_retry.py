@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
 
-from app_settings import DEFAULT_GUI_TARGET_FORMAT
-from download_retry import can_retry_status, retry_target_format
+from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
+from music_fetch.download_retry import can_retry_status, retry_target_format
 
 
 class DownloadRetryTests(unittest.TestCase):

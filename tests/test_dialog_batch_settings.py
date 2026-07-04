@@ -1,4 +1,4 @@
-"""Tests for _dialog_batch_settings.py — BatchRuntimeSettingsDialog."""
+"""Tests for music_fetch.dialog_batch_settings.py — BatchRuntimeSettingsDialog."""
 
 import unittest
 
@@ -9,7 +9,7 @@ if _app is None:
 
 from PySide6.QtWidgets import QDialog
 
-from _dialog_batch_settings import BatchRuntimeSettingsDialog
+from music_fetch.dialog_batch_settings import BatchRuntimeSettingsDialog
 
 
 class BatchRuntimeSettingsDialogTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class BatchRuntimeSettingsDialogTests(unittest.TestCase):
             download_retry_count=9999,
             download_concurrency=9999,
         )
-        from app_settings import (
+        from music_fetch.app_settings import (
             MAX_DETECT_TIMEOUT_SEC,
             MAX_DOWNLOAD_CONCURRENCY,
             MAX_DOWNLOAD_RETRY_COUNT,

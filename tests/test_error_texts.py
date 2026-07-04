@@ -1,6 +1,6 @@
 import unittest
 
-from error_texts import user_error_message
+from music_fetch.error_texts import user_error_message
 
 
 class ErrorTextTests(unittest.TestCase):
