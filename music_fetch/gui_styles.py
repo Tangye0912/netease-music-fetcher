@@ -117,6 +117,54 @@ def build_app_stylesheet(font_size: int) -> str:
     }}
     QProgressBar {{
         min-height: {field_height}px;
+        background: #f0f0f0;
+        border: 1px solid #d0d7de;
+        border-radius: {radius}px;
+    }}
+    QProgressBar::chunk {{
+        background: #0969da;
+        border-radius: {radius}px;
+    }}
+    QTableWidget {{
+        background: #ffffff;
+        color: #24292f;
+        border: 1px solid #d0d7de;
+        gridline-color: #e8eaed;
+    }}
+    QTableWidget::item:selected {{
+        background: #0969da;
+        color: #ffffff;
+    }}
+    QHeaderView::section {{
+        background: #f6f8fa;
+        color: #24292f;
+        border: 1px solid #d0d7de;
+        padding: 4px 8px;
+    }}
+    QGroupBox {{
+        background: #ffffff;
+        color: #24292f;
+        border: 1px solid #d0d7de;
+        border-radius: {radius}px;
+        margin-top: 8px;
+        padding-top: 12px;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 4px;
+    }}
+    QMenu {{
+        background: #ffffff;
+        color: #24292f;
+        border: 1px solid #d0d7de;
+    }}
+    QMenu::item:selected {{
+        background: #0969da;
+        color: #ffffff;
+    }}
+    QCheckBox {{
+        color: #24292f;
     }}
     """
 

@@ -67,7 +67,7 @@ class BatchRuntimeSettingsDialog(QDialog):
             detect_timeout_sec, download_timeout_sec, download_retry_count, download_concurrency,
         )
         self.setWindowTitle(T.BATCH_BTN_SETTINGS)
-        self.resize(420, 240)
+        self.resize(480, 260)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()

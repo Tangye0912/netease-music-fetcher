@@ -21,6 +21,7 @@ from music_fetch.app_settings import (
 )
 from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
 from music_fetch.download_retry import can_retry_status, retry_target_format
+from music_fetch.dialog_progress import DownloadProgressDialog
 from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
     TASK_STATE_FAILED,
@@ -269,6 +270,7 @@ class DownloadManagerDialog(QDialog):
         )
         if progress.exec() == QDialog.Accepted and progress.output_path:
             size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
+            self.history_store.remove_by_path(str(output_path))
             self.history_store.add(
                 DownloadRecord(
                     song_id=record.song_id,

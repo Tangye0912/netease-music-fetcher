@@ -27,6 +27,7 @@ from music_fetch.download_tasks import (
 )
 from music_fetch.error_texts import user_error_message
 from music_fetch.batch_models import format_bytes
+from music_fetch.gui_styles import set_secondary_button
 import music_fetch.workers
 import music_fetch.ui_texts as T
 
@@ -92,9 +93,11 @@ class DownloadProgressDialog(QDialog):
         button_row = QHBoxLayout()
         button_row.addStretch(1)
         self.pause_button = QPushButton(T.DOWNLOAD_PROGRESS_PAUSE)
+        set_secondary_button(self.pause_button)
         self.pause_button.clicked.connect(self._on_pause_resume)
         button_row.addWidget(self.pause_button)
         self.cancel_button = QPushButton(T.DOWNLOAD_PROGRESS_CANCEL)
+        set_secondary_button(self.cancel_button)
         self.cancel_button.clicked.connect(self._on_cancel)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)

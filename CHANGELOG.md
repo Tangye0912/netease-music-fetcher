@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.1 (2026-07-04)
+
+### Fixed
+
+- **主线程阻塞**：3 处网络 I/O（账号刷新、版本检查、登录校验）改为 `QThread` 异步执行，UI 不再冻结。
+- **暗色主题颜色**：`SongConfirmDialog` 硬编码 `setStyleSheet` 改为 `set_label_state`，暗色模式下正确显示。
+- **按钮样式**：`DownloadProgressDialog` 的暂停/取消按钮添加 `set_secondary_button` 样式，与其他对话框一致。
+- **响应式尺寸**：主窗口和输入框改为屏幕/字体比例自适应，高 DPI 和大字体不再截断。
+- **缺失导入**：`dialog_manager.py` 添加 `DownloadProgressDialog` 显式导入。
+- **Light 主题**：补全 `QTableWidget`、`QHeaderView`、`QGroupBox`、`QMenu`、`QCheckBox`、`QProgressBar` 样式。
+- **状态栏**：添加最小高度防止布局跳动。
+- **无障碍**：`main.py` 和 `dialog_login.py` 关键控件添加 `AccessibleName`。
+- **下载管理**：重试成功时移除旧记录避免重复。
+- **键盘快捷键**：`Ctrl+D` 触发检测。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（219 通过，1 跳过）。
+
 ## v1.0.0 (2026-07-04)
 
 ### Breaking

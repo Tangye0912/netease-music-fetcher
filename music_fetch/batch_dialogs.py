@@ -134,7 +134,8 @@ class BatchDownloadDialog(QDialog):
         root.addWidget(QLabel(T.BATCH_INPUT_LABEL))
         self.input_edit = QPlainTextEdit()
         self.input_edit.setPlaceholderText(T.BATCH_INPUT_PLACEHOLDER)
-        self.input_edit.setFixedHeight(84)
+        self.input_edit.setMinimumHeight(72)
+        self.input_edit.setMaximumHeight(160)
         self.input_edit.textChanged.connect(self._on_input_changed)
         if initial_input_text.strip():
             self.input_edit.setPlainText(initial_input_text.strip())
@@ -144,7 +145,7 @@ class BatchDownloadDialog(QDialog):
         form = QFormLayout()
         out_row = QHBoxLayout()
         self.out_dir_input = QLineEdit(last_download_dir or DEFAULT_DOWNLOAD_DIR)
-        self.out_dir_input.setMinimumWidth(620)
+        self.out_dir_input.setMinimumWidth(400)
         self.out_dir_input.setToolTip(self.out_dir_input.text())
         self.out_dir_input.textChanged.connect(self.out_dir_input.setToolTip)
         out_row.addWidget(self.out_dir_input, stretch=1)
@@ -196,7 +197,7 @@ class BatchDownloadDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.Fixed)
         header.setSectionResizeMode(3, QHeaderView.Fixed)
         header.setSectionResizeMode(4, QHeaderView.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.Stretch)
         self.table.itemChanged.connect(self._on_table_item_changed)
         root.addWidget(self.table, stretch=1)
 
@@ -268,6 +269,8 @@ class BatchDownloadDialog(QDialog):
         if self.auto_detect_on_open and not self._restored_from_cache and self.input_edit.toPlainText().strip():
             QTimer.singleShot(0, self._on_detect_clicked)
         QTimer.singleShot(0, self._adjust_table_columns)
+        self.setTabOrder(self.input_edit, self.detect_button)
+        self.setTabOrder(self.detect_button, self.out_dir_input)
         self._initialized = True
 
     def _current_input_signature(self) -> str:

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 from urllib import error
 
-from PySide6.QtCore import Qt, QSize, QTimer, QUrl
+from PySide6.QtCore import Qt, QSize, QThread, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -88,7 +88,12 @@ class MainWindow(QMainWindow):
         self._batch_cached_rows: list[BatchDetectRow] = []
         self.latest_download_task: Optional[DownloadTaskSnapshot] = None
         self.setWindowTitle(T.APP_TITLE)
-        self.resize(860, 340)
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            self.resize(max(700, int(geo.width() * 0.55)), max(300, int(geo.height() * 0.35)))
+        else:
+            self.resize(860, 340)
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -96,7 +101,7 @@ class MainWindow(QMainWindow):
 
         account_row = QHBoxLayout()
         self.avatar_button = QToolButton()
-        self.avatar_button.setFixedSize(52, 52)
+        self.avatar_button.setFixedSize(int(self.session.ui_font_size * 3.7), int(self.session.ui_font_size * 3.7))
         self.avatar_button.setIconSize(QSize(44, 44))
         self.avatar_button.setText(T.ACCOUNT_BTN_FALLBACK)
         self.avatar_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -142,9 +147,10 @@ class MainWindow(QMainWindow):
         self.url_input = QPlainTextEdit()
         self.url_input.setPlaceholderText(T.INPUT_PLACEHOLDER)
         self.url_input.textChanged.connect(self._on_url_input_changed)
-        self.url_input.setFixedHeight(72)
+        self.url_input.setMinimumHeight(max(48, int(self.session.ui_font_size * 3.6)))
         row.addWidget(self.url_input, stretch=1)
         self.detect_button = QPushButton(T.BTN_DETECT)
+        self.detect_button.setAccessibleName("检测按钮")
         self.detect_button.clicked.connect(self._on_detect_clicked)
         set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)
@@ -162,6 +168,7 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel("")
         set_label_state(self.status_label, "muted")
+        self.status_label.setMinimumHeight(24)
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
 
@@ -323,7 +330,7 @@ class MainWindow(QMainWindow):
             self.avatar_button.setText(T.ACCOUNT_BTN_FALLBACK)
             self.avatar_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
             return
-        self.nickname_label.setText(f"昵称：{profile.nickname}")
+        self.nickname_label.setText(T.nickname_text(profile.nickname))
         vip_text = T.ACCOUNT_LABEL_VIP if profile.is_vip else T.ACCOUNT_LABEL_NORMAL
         self.vip_label.setText(vip_text)
         set_label_state(self.vip_label, "warning" if profile.is_vip else "muted")
@@ -457,6 +464,9 @@ class MainWindow(QMainWindow):
         )
         self._on_url_input_changed()
 
+    def _on_inspect_finished(self) -> None:
+        self._set_detect_busy(False)
+
     def _on_detect_clicked(self) -> None:
         from music_fetch.batch_inputs import collect_batch_candidates
 
@@ -501,7 +511,7 @@ class MainWindow(QMainWindow):
         self.inspect_worker = InspectWorker(song_url=song_url, cookie=self.session.cookie, timeout=self.session.detect_timeout_sec)
         self.inspect_worker.failed.connect(self._on_detect_failed)
         self.inspect_worker.succeeded.connect(self._on_detect_succeeded)
-        self.inspect_worker.finished.connect(lambda: self._set_detect_busy(False))
+        self.inspect_worker.finished.connect(self._on_inspect_finished)
         self.inspect_worker.start()
 
     def _on_detect_failed(self, code: str, message: str) -> None:

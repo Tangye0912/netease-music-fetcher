@@ -202,7 +202,7 @@ class SongConfirmDialog(QDialog):
         grid.addWidget(QLabel(format_duration(result.duration_ms)), 2, 1)
         status = T.SONG_CONFIRM_CAN_DOWNLOAD if result.can_download else T.SONG_CONFIRM_CANT_DOWNLOAD
         status_label = QLabel(status)
-        status_label.setStyleSheet("color: #1f7a1f;" if result.can_download else "color: #a32929;")
+        set_label_state(status_label, "success" if result.can_download else "error")
         grid.addWidget(QLabel(T.SONG_CONFIRM_STATUS), 3, 0)
         grid.addWidget(status_label, 3, 1)
         if result.unavailable_reason:
@@ -240,7 +240,7 @@ class DownloadOptionsDialog(QDialog):
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.out_dir_input = QLineEdit(last_download_dir or DEFAULT_DOWNLOAD_DIR)
-        self.out_dir_input.setMinimumWidth(520)
+        self.out_dir_input.setMinimumWidth(400)
         self.out_dir_input.setToolTip(self.out_dir_input.text())
         self.out_dir_input.textChanged.connect(self.out_dir_input.setToolTip)
         browse_button = QPushButton(T.DOWNLOAD_DIR_PICKER_BTN)

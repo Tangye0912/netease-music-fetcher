@@ -21,7 +21,7 @@ from music_fetch.gui_styles import (
 )
 
 try:
-    from PySide6.QtCore import Qt, QUrl, Signal
+    from PySide6.QtCore import Qt, QThread, QUrl, Signal
     from PySide6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -89,6 +89,7 @@ class LoginDialog(QDialog):
         root_layout.addWidget(info)
 
         self.remember_checkbox = QCheckBox(T.LOGIN_REMEMBER)
+        self.remember_checkbox.setAccessibleName("记住登录状态")
         self.remember_checkbox.setChecked(True)
         root_layout.addWidget(self.remember_checkbox)
 
@@ -103,6 +104,7 @@ class LoginDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.confirm_button = QPushButton(T.LOGIN_BTN_CONFIRM)
+        self.confirm_button.setAccessibleName("确认登录按钮")
         self.confirm_button.clicked.connect(self._on_confirm)
         self.confirm_button.setEnabled(False)
         set_button_role(self.confirm_button, "primary")

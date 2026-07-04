@@ -261,6 +261,10 @@ ACC_BTN_DETECT = "检测按钮"
 ACC_BTN_DEP_MANAGER = "依赖管理按钮"
 ACC_BTN_DOWNLOAD_MANAGER = "下载管理按钮"
 ACC_BTN_UI_SETTINGS = "软件设置按钮"
+ACC_BTN_LOGIN_CONFIRM = "登录确认按钮"
+ACC_BTN_DOWNLOAD = "下载按钮"
+ACC_BTN_CANCEL = "取消按钮"
+ACC_INPUT_URL = "歌曲链接输入框"
 
 def code_message(code: str, message: str) -> str:
     return f"{code}: {message}"
