@@ -15,7 +15,6 @@ from typing import Callable, Optional
 
 from music_fetch.api import (
     DownloadCanceled,
-    DownloadPaused,
     ErrorCode,
     MusicFetchError,
     PlayableCandidate,
@@ -91,7 +90,7 @@ def run_download_pipeline(
                 pause_checker=pause_checker,
             )
             break
-        except (DownloadCanceled, DownloadPaused):
+        except DownloadCanceled:
             raise
         except MusicFetchError as err:
             is_last_attempt = attempt >= retry_count + 1

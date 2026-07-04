@@ -39,48 +39,6 @@ class DownloadWorkerCancellationTests(unittest.TestCase):
             self.assertEqual(succeeded, [])
 
 
-    def test_pause_emits_paused_signal(self):
-        from music_fetch import DownloadCanceled, DownloadPaused, MusicFetchError
-        with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "song.mp3"
-            worker = music_fetch.workers.DownloadWorker(
-                task_id="task-pause",
-                song_id="42",
-                output_path=output_path,
-                cookie="MUSIC_U=abc",
-                target_format="mp3",
-                timeout=3,
-                retry_count=0,
-            )
-            paused = []
-            canceled = []
-            worker.paused.connect(lambda: paused.append(True))
-            worker.canceled.connect(lambda: canceled.append(True))
-
-            def fake_download(*, song_id, cookie, output_path, target_format, timeout, retry_count, pause_checker=None, **kwargs):
-                from music_fetch.pipeline import DownloadPipelineResult
-                if pause_checker and pause_checker():
-                    raise DownloadPaused()
-                return DownloadPipelineResult(
-                    output_path=output_path,
-                    file_size=6,
-                    candidate=music_fetch.PlayableCandidate(
-                        media_url="https://m801.music.126.net/source.m4a",
-                        duration_ms=None,
-                        level="standard",
-                        encode_type="aac",
-                    ),
-                    source_format="m4a",
-                )
-
-            with mock.patch("music_fetch.workers.run_download_pipeline", side_effect=fake_download):
-                # Trigger pause before run
-                worker.request_pause()
-                worker.run()
-
-            self.assertEqual(paused, [True])
-            self.assertEqual(canceled, [])
-
     def test_resume_clears_pause_event(self):
         worker = music_fetch.workers.DownloadWorker(
             task_id="task-resume",

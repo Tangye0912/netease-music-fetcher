@@ -25,7 +25,6 @@ from urllib import error, parse, request
 
 from music_fetch.api import (
     DownloadCanceled,
-    DownloadPaused,
     ErrorCode,
     MusicFetchError,
     OUTER_MEDIA_URL_API,
@@ -139,7 +138,7 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         try:
             _download_audio_stream(candidate.media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)
             return candidate
-        except (DownloadCanceled, DownloadPaused):
+        except DownloadCanceled:
             raise
         except MusicFetchError as err:
             if err.code == "DOWNLOAD_FAILED" and "HTTP 403" in err.message:
@@ -306,7 +305,12 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                             if cancel_checker and cancel_checker():
                                 raise DownloadCanceled()
                             if pause_checker and pause_checker():
-                                raise DownloadPaused()
+                                # Block until resumed or canceled
+                                while pause_checker and pause_checker():
+                                    import time as _time
+                                    _time.sleep(0.1)
+                                    if cancel_checker and cancel_checker():
+                                        raise DownloadCanceled()
                             chunk = resp.read(64 * 1024)
                             if not chunk:
                                 break
@@ -338,9 +342,6 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 logger.warning("Download attempt network error. attempt=%s/%s reason=%s", attempt_no, total_attempts, url_err.reason)
                 last_network_error = url_err
                 continue
-            except DownloadPaused:
-                logger.info("Media download paused, partial file kept. output=%s offset=%s", output_path, downloaded)
-                raise
             except DownloadCanceled:
                 if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)

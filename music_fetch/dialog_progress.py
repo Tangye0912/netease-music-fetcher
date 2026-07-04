@@ -118,7 +118,6 @@ class DownloadProgressDialog(QDialog):
         self.worker.failed.connect(self._on_failed)
         self.worker.canceled.connect(self._on_canceled)
         self.worker.succeeded.connect(self._on_succeeded)
-        self.worker.paused.connect(self._on_paused)
         self.worker.start()
         self.result_state = TASK_STATE_DOWNLOADING
         logger.info(
@@ -143,13 +142,10 @@ class DownloadProgressDialog(QDialog):
             self._pause_button_is_pause = True
             logger.info("Download resume requested. task_id=%s", self.task_id)
 
-    def _on_paused(self) -> None:
-        self.result_state = TASK_STATE_CANCELED  # treated as non-success exit
-        logger.info("Download progress paused. task_id=%s", self.task_id)
-
     def _on_cancel(self) -> None:
         self.cancel_button.setEnabled(False)
         self.pause_button.setEnabled(False)
+        self.worker.request_cancel()
         self.status_label.setText(T.STATUS_CANCELING)
         self.result_state = TASK_STATE_CANCELED
         self.worker.request_cancel()

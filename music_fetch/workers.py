@@ -236,7 +236,6 @@ class DownloadWorker(QThread):
     succeeded = Signal(str, int)
     failed = Signal(str, str)
     canceled = Signal()
-    paused = Signal()
 
     def __init__(
         self,

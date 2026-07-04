@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.3 (2026-07-04)
+
+### Fixed (CRITICAL)
+
+- **暂停/恢复实际不可用**：暂停后 worker 线程立即退出导致恢复无效。改为阻塞等待（`_audio.py` 下载循环中 `sleep(0.1)` 直到 resume 或 cancel），移除 `DownloadPaused` 异常和 `paused` 信号。暂停/恢复现在真正可用。
+
+### Fixed (HIGH)
+
+- **SongConfirmDialog 高度不够**：封面图 + 7 行网格在 320px 高度下被裁剪 → 增至 400px。
+- **BatchDownloadDialog 按钮溢出**：10 个按钮在 980px 宽度下过于拥挤 → 窗口宽度增至 1020px。
+- **封面图暗色模式不可见**：`cover_label` 添加边框和浅色背景。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.0.2 (2026-07-04)
 
 ### Added

@@ -190,7 +190,7 @@ class SongConfirmDialog(QDialog):
         super().__init__()
         self.result = result
         self.setWindowTitle(T.SONG_CONFIRM_TITLE)
-        self.resize(540, 320)
+        self.resize(540, 400)
 
         layout = QVBoxLayout(self)
         top_row = QHBoxLayout()
@@ -199,6 +199,7 @@ class SongConfirmDialog(QDialog):
         cover_label = QLabel()
         cover_label.setFixedSize(120, 120)
         cover_label.setScaledContents(True)
+        cover_label.setStyleSheet("border: 1px solid #d0d7de; background: #f6f8fa;")
         if result.cover_url:
             cover_icon = load_avatar_icon(result.cover_url)
             if cover_icon:

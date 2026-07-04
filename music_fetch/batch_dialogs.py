@@ -124,7 +124,7 @@ class BatchDownloadDialog(QDialog):
         self._worker_output_paths: dict[int, Path] = {}
 
         self.setWindowTitle(T.BATCH_DIALOG_TITLE)
-        self.resize(980, 620)
+        self.resize(1020, 620)
 
         root = QVBoxLayout(self)
         desc = QLabel(T.BATCH_DIALOG_DESC)
@@ -711,7 +711,6 @@ class BatchDownloadDialog(QDialog):
             worker.succeeded.connect(functools.partial(self._on_download_succeeded, worker))
             worker.failed.connect(functools.partial(self._on_download_failed, worker))
             worker.canceled.connect(functools.partial(self._on_download_canceled, worker))
-            worker.paused.connect(functools.partial(self._on_download_paused, worker))
             worker.finished.connect(functools.partial(self._on_download_worker_finished, worker))
             worker.start()
             started = True
@@ -793,17 +792,6 @@ class BatchDownloadDialog(QDialog):
         )
         self._download_failed += 1
         self._finalize_download_worker(worker)
-
-    def _on_download_paused(self, worker: music_fetch.workers.DownloadWorker) -> None:
-        key = id(worker)
-        row = self._worker_rows.get(key)
-        if not row:
-            return
-        row.status = "download_paused"
-        row.message = T.DOWNLOAD_PROGRESS_PAUSED
-        self._render_rows()
-        self._refresh_download_status()
-        logger.info("Batch download worker paused. song_id=%s", row.song_id)
 
     def _on_download_canceled(self, worker: music_fetch.workers.DownloadWorker) -> None:
         key = id(worker)

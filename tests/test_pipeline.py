@@ -7,7 +7,6 @@ from unittest import mock
 
 from music_fetch.api import (
     DownloadCanceled,
-    DownloadPaused,
     MusicFetchError,
     PlayableCandidate,
 )
@@ -120,35 +119,6 @@ class RunDownloadPipelineTests(unittest.TestCase):
                 timeout=10,
                 retry_count=1,
                 cancel_checker=cancel_checker,
-            )
-
-    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
-    def test_pause_during_pipeline(self, fallback_mock):
-        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, pause_checker=None, **kwargs):
-            if pause_checker and pause_checker():
-                raise DownloadPaused()
-            output_path.write_bytes(b"data")
-            return PlayableCandidate(
-                media_url="https://example.com/song.mp3",
-                duration_ms=120000,
-                level="standard",
-                encode_type="mp3",
-            )
-
-        fallback_mock.side_effect = fake_fallback
-
-        def pause_checker():
-            return True
-
-        with self.assertRaises(DownloadPaused):
-            run_download_pipeline(
-                song_id="42",
-                cookie="MUSIC_U=test",
-                output_path=self.output_path,
-                target_format="mp3",
-                timeout=10,
-                retry_count=1,
-                pause_checker=pause_checker,
             )
 
     @mock.patch("music_fetch.pipeline.download_song_with_fallback")
