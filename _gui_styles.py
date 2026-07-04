@@ -257,6 +257,50 @@ def build_dark_stylesheet(font_size: int) -> str:
     QCheckBox {{
         color: #cdd6f4;
     }}
+    QScrollBar:vertical {{
+        background: #1e1e2e;
+        width: 10px;
+        margin: 0;
+    }}
+    QScrollBar::handle:vertical {{
+        background: #45475a;
+        min-height: 20px;
+        border-radius: 5px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: #585b70;
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0;
+    }}
+    QScrollBar:horizontal {{
+        background: #1e1e2e;
+        height: 10px;
+        margin: 0;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: #45475a;
+        min-width: 20px;
+        border-radius: 5px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: #585b70;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0;
+    }}
+    QToolTip {{
+        background: #313244;
+        color: #cdd6f4;
+        border: 1px solid #45475a;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }}
+    QStatusBar {{
+        background: #313244;
+        color: #cdd6f4;
+        border-top: 1px solid #45475a;
+    }}
     """
 
 

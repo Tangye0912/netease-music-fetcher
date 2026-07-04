@@ -10,15 +10,13 @@ extracted into _dialogs.py and _workers.py respectively for maintainability.
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import re
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib import error, parse, request
+from urllib import error
 
 from PySide6.QtCore import Qt, QSize, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap

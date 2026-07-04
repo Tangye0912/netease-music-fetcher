@@ -1,0 +1,133 @@
+"""Tests for _cli.py — run_download, build_parser, retry_count wiring."""
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import _cli
+import music_fetch
+
+
+class BuildParserTests(unittest.TestCase):
+    def test_parser_has_expected_arguments(self):
+        parser = _cli.build_parser()
+        # Parse minimal args to verify parser works
+        args = parser.parse_args(["--url", "https://music.163.com/song?id=42"])
+        self.assertEqual(args.url, "https://music.163.com/song?id=42")
+        self.assertEqual(args.out_format, "mp3")
+        self.assertEqual(args.retry_count, 1)
+        self.assertEqual(args.timeout, 30)
+
+    def test_format_choices(self):
+        parser = _cli.build_parser()
+        args = parser.parse_args(["--url", "42", "--format", "flac"])
+        self.assertEqual(args.out_format, "flac")
+
+    def test_retry_count_parsed(self):
+        parser = _cli.build_parser()
+        args = parser.parse_args(["--url", "42", "--retry", "3"])
+        self.assertEqual(args.retry_count, 3)
+
+
+class RunDownloadTests(unittest.TestCase):
+    @mock.patch("_cli.download_song_with_fallback")
+    @mock.patch("_cli.fetch_song_metadata")
+    def test_run_download_success(self, meta_mock, fallback_mock):
+        meta_mock.return_value = ("Test Song", 120000)
+
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"data")
+            return music_fetch.PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        fallback_mock.side_effect = fake_fallback
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            result = _cli.run_download(
+                song_url="https://music.163.com/song?id=42",
+                out_dir=out_dir,
+                cookie_file=cookie_file,
+                timeout=10,
+            )
+            self.assertTrue(result.output_path.exists())
+            self.assertEqual(result.size_bytes, 4)
+
+    @mock.patch("_cli.download_song_with_fallback")
+    @mock.patch("_cli.fetch_song_metadata")
+    def test_run_download_retries_on_failure(self, meta_mock, fallback_mock):
+        meta_mock.return_value = ("Test Song", 120000)
+
+        call_count = [0]
+
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise music_fetch.MusicFetchError("DOWNLOAD_FAILED", "test error")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"data")
+            return music_fetch.PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        fallback_mock.side_effect = fake_fallback
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            result = _cli.run_download(
+                song_url="https://music.163.com/song?id=42",
+                out_dir=out_dir,
+                cookie_file=cookie_file,
+                timeout=10,
+                retry_count=2,
+            )
+            self.assertTrue(result.output_path.exists())
+            self.assertEqual(call_count[0], 3)  # 1 initial + 2 retries
+
+    @mock.patch("_cli.download_song_with_fallback")
+    @mock.patch("_cli.fetch_song_metadata")
+    def test_run_download_exhausts_retries(self, meta_mock, fallback_mock):
+        meta_mock.return_value = ("Test Song", 120000)
+        fallback_mock.side_effect = music_fetch.MusicFetchError("DOWNLOAD_FAILED", "always fail")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            with self.assertRaises(music_fetch.MusicFetchError):
+                _cli.run_download(
+                    song_url="https://music.163.com/song?id=42",
+                    out_dir=out_dir,
+                    cookie_file=cookie_file,
+                    timeout=10,
+                    retry_count=1,
+                )
+
+
+class MainTests(unittest.TestCase):
+    def test_main_help_succeeds(self):
+        with self.assertRaises(SystemExit) as ctx:
+            _cli.main(["--help"])
+        self.assertEqual(ctx.exception.code, 0)
+
+    def test_main_missing_url_fails(self):
+        with self.assertRaises(SystemExit) as ctx:
+            _cli.main([])
+        self.assertNotEqual(ctx.exception.code, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

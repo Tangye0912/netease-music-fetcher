@@ -132,7 +132,7 @@ class DownloadProgressDialog(QDialog):
             logger.info("Download pause requested. task_id=%s", self.task_id)
         else:
             self.pause_button.setText(T.DOWNLOAD_PROGRESS_PAUSE)
-            self.status_label.setText(T.DOWNLOAD_PROGRESS_INIT)
+            self.status_label.setText(T.DOWNLOAD_PROGRESS_RESUMING)
             self.worker.request_resume()
             self._pause_button_is_pause = True
             logger.info("Download resume requested. task_id=%s", self.task_id)

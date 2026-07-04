@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.13.0 (2026-07-03)
+
+### Fixed
+
+- 修复 `_dialog_batch_settings.py` 两处遗漏导入：`set_label_state`（`NameError`）和 `clamp_download_settings`。
+- 修复 CLI `--retry` 参数死代码：`run_download`/`run_playlist_download` 现在接收 `retry_count` 并在 `download_song_with_fallback` 外层包装重试循环。
+
+### Added
+
+- 新增 `tests/test_cli.py`（8 个测试用例），覆盖 `build_parser`、`run_download`（含重试）、`main`。
+- 新增 `tests/test_version_check.py`（7 个测试用例），覆盖 `version_key`、`fetch_latest_project_version`。
+- 新增 `tests/test_dialog_batch_settings.py`（3 个测试用例），覆盖 `BatchRuntimeSettingsDialog`。
+- 暗色主题补全：`QScrollBar`（垂直/水平）、`QToolTip`、`QStatusBar` 样式。
+
+### Changed
+
+- `_dialog_progress.py`：恢复后状态标签从 `"准备下载..."` 改为 `"下载恢复中..."`。
+- `ui_texts.py`：`status_ui_settings_updated` 新增 `prefix` 参数（默认 `True`），消除 `_dialogs.py` 中 `.replace("状态：", "")` hack。
+- `main.py`：移除未使用导入 `json`、`time`、`parse`、`request`。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（208 通过，1 跳过）。
+
 ## v0.12.0 (2026-07-03)
 
 ### Fixed

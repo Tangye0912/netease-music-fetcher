@@ -612,6 +612,7 @@ class UiSettingsDialog(QDialog):
                 self.download_timeout_sec,
                 self.download_retry_count,
                 self.download_concurrency,
-            ).replace("状态：", "")
+                prefix=False,
+            )
         )
         set_label_state(self.preview_label, "muted")

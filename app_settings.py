@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "0.12.0"
+APP_VERSION = "0.13.0"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"

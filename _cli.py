@@ -42,8 +42,9 @@ def run_download(
     timeout: int = 30,
     out_format: str = "mp3",
     rename: Optional[str] = None,
+    retry_count: int = 1,
 ) -> DownloadResult:
-    logger.info("Run download started. out_dir=%s format=%s", out_dir, out_format)
+    logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
     cookie = load_cookie(cookie_file)
     song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
@@ -54,13 +55,28 @@ def run_download(
         rename=rename,
         out_format=out_format,
     )
-    candidate = download_song_with_fallback(
-        song_id=song_id,
-        cookie=cookie,
-        output_path=output_path,
-        timeout=timeout,
-        prefer_format=out_format,
-    )
+    last_err: Optional[MusicFetchError] = None
+    for attempt in range(retry_count + 1):
+        try:
+            candidate = download_song_with_fallback(
+                song_id=song_id,
+                cookie=cookie,
+                output_path=output_path,
+                timeout=timeout,
+                prefer_format=out_format,
+            )
+            break
+        except MusicFetchError as err:
+            last_err = err
+            if err.code in ("DOWNLOAD_FAILED", "NETWORK_ERROR") and attempt < retry_count:
+                logger.warning(
+                    "Download attempt failed, retrying. attempt=%s/%s code=%s",
+                    attempt + 1, retry_count + 1, err.code,
+                )
+                continue
+            raise
+    else:
+        raise last_err  # type: ignore[misc]
     size_bytes = output_path.stat().st_size
     duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
     logger.info(
@@ -84,15 +100,17 @@ def run_playlist_download(
     cookie_file: Path,
     timeout: int = 30,
     out_format: str = "mp3",
+    retry_count: int = 1,
 ) -> list[DownloadResult]:
     _, playlist_id = parse_input_resource(playlist_url)
     cookie = load_cookie(cookie_file)
     song_ids = fetch_playlist_song_ids(playlist_id, cookie, timeout=timeout)
     logger.info(
-        "Playlist download started. playlist_id=%s song_count=%s format=%s",
+        "Playlist download started. playlist_id=%s song_count=%s format=%s retry=%s",
         playlist_id,
         len(song_ids),
         out_format,
+        retry_count,
     )
     results: list[DownloadResult] = []
     for idx, song_id in enumerate(song_ids, start=1):
@@ -106,13 +124,28 @@ def run_playlist_download(
                 rename=None,
                 out_format=out_format,
             )
-            candidate = download_song_with_fallback(
-                song_id=song_id,
-                cookie=cookie,
-                output_path=output_path,
-                timeout=timeout,
-                prefer_format=out_format,
-            )
+            last_err: Optional[MusicFetchError] = None
+            for attempt in range(retry_count + 1):
+                try:
+                    candidate = download_song_with_fallback(
+                        song_id=song_id,
+                        cookie=cookie,
+                        output_path=output_path,
+                        timeout=timeout,
+                        prefer_format=out_format,
+                    )
+                    break
+                except MusicFetchError as err:
+                    last_err = err
+                    if err.code in ("DOWNLOAD_FAILED", "NETWORK_ERROR") and attempt < retry_count:
+                        logger.warning(
+                            "Playlist song download retry. song_id=%s attempt=%s/%s code=%s",
+                            song_id, attempt + 1, retry_count + 1, err.code,
+                        )
+                        continue
+                    raise
+            else:
+                raise last_err  # type: ignore[misc]
             size_bytes = output_path.stat().st_size
             duration_ms = meta_duration if meta_duration is not None else candidate.duration_ms
             result = DownloadResult(
@@ -198,6 +231,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 cookie_file=cookie_file,
                 timeout=args.timeout,
                 out_format=args.out_format,
+                retry_count=args.retry_count,
             )
             if results:
                 print(f"\nDownloaded {len(results)} songs.")
@@ -213,6 +247,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 timeout=args.timeout,
                 out_format=args.out_format,
                 rename=args.rename,
+                retry_count=args.retry_count,
             )
             duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
             print(

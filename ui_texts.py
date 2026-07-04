@@ -118,6 +118,7 @@ DOWNLOAD_PROGRESS_PATH = "输出路径："
 DOWNLOAD_PROGRESS_CANCEL = "取消下载"
 DOWNLOAD_PROGRESS_PAUSE = "暂停"
 DOWNLOAD_PROGRESS_RESUME = "继续"
+DOWNLOAD_PROGRESS_RESUMING = "下载恢复中..."
 DOWNLOAD_PROGRESS_PAUSED = "下载已暂停"
 DOWNLOAD_PROGRESS_DONE_BODY = "文件：{name}\n大小：{size}\n路径：{path}"
 DOWNLOAD_PROGRESS_DONE_FALLBACK_NOTE = "\n提示：未安装 ffmpeg，已按源格式保存。"
@@ -317,11 +318,13 @@ def status_ui_settings_updated(
     download_timeout: int,
     retry_count: int,
     concurrency: int,
+    prefix: bool = True,
 ) -> str:
-    return (
-        f"状态：设置已更新（字体 {font_size}px，检测超时 {detect_timeout}s，"
+    body = (
+        f"设置已更新（字体 {font_size}px，检测超时 {detect_timeout}s，"
         f"下载超时 {download_timeout}s，重试 {retry_count} 次，并发上限 {concurrency}）"
     )
+    return f"状态：{body}" if prefix else body
 
 
 def speed_text(speed: str) -> str:

@@ -9,6 +9,7 @@ Extracted from _batch_dialogs.py to reduce module size.
 from __future__ import annotations
 
 from app_settings import (
+    clamp_download_settings,
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
@@ -26,6 +27,7 @@ from app_settings import (
 from _gui_styles import (
     set_back_button,
     set_button_role,
+    set_label_state,
 )
 import _combo_utils
 import ui_texts as T
@@ -61,10 +63,9 @@ class BatchRuntimeSettingsDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.detect_timeout_sec = int(detect_timeout_sec)
-        self.download_timeout_sec = int(download_timeout_sec)
-        self.download_retry_count = int(download_retry_count)
-        self.download_concurrency = int(download_concurrency)
+        self.detect_timeout_sec, self.download_timeout_sec, self.download_retry_count, self.download_concurrency = clamp_download_settings(
+            detect_timeout_sec, download_timeout_sec, download_retry_count, download_concurrency,
+        )
         self.setWindowTitle(T.BATCH_BTN_SETTINGS)
         self.resize(420, 240)
 
