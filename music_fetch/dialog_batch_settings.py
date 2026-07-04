@@ -24,6 +24,8 @@ from music_fetch.app_settings import (
     MIN_DOWNLOAD_TIMEOUT_SEC,
     clamp,
 )
+from typing import Optional
+
 from music_fetch.gui_styles import (
     set_back_button,
     set_button_role,

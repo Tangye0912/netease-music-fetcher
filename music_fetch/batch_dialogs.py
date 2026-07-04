@@ -615,7 +615,12 @@ class BatchDownloadDialog(QDialog):
             QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.MSG_BATCH_DOWNLOAD_NO_OUTPUT)
             return
         out_dir = Path(out_dir_raw).expanduser()
-        out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as err:
+            QMessageBox.warning(self, T.TITLE_PARAM_ERROR, f"Cannot write to output directory: {out_dir}")
+            logger.warning("Batch download output directory not writable. dir=%s", out_dir)
+            return
         self._downloading = True
         self._download_cancel_requested = False
         self._download_paused = False
