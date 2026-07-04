@@ -258,7 +258,11 @@ def load_cookie(cookie_file: Path) -> str:
     logger.info("Loading cookie file from %s", cookie_file)
     if not cookie_file.exists():
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file not found: {cookie_file}. Please export a valid MUSIC_U cookie.")
-    cookie = normalize_cookie(cookie_file.read_text(encoding="utf-8"))
+    try:
+        raw = cookie_file.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file is corrupted (invalid encoding): {cookie_file}.")
+    cookie = normalize_cookie(raw)
     if not cookie:
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file is empty. Please refresh your cookie.")
     if "MUSIC_U=" not in cookie:
@@ -567,9 +571,9 @@ def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionR
     except MusicFetchError as err:
         if err.code != "SONG_UNAVAILABLE":
             raise
-        return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=meta_duration, media_url=None, can_download=False, unavailable_reason=err.message)
+        return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=meta_duration, media_url=None, can_download=False, unavailable_reason=err.message, cover_url=cover_url, artist=artist, album_name=album_name)
     duration = meta_duration if meta_duration is not None else media_duration
-    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=media_url, can_download=True, unavailable_reason=None)
+    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name)
 
 
 # ── Media URL utils ──────────────────────────────────────────────

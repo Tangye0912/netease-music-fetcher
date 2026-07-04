@@ -290,8 +290,10 @@ class BatchDownloadDialog(QDialog):
         idx = self.format_combo.findText(normalized)
         if idx >= 0:
             self.format_combo.blockSignals(True)
-            self.format_combo.setCurrentIndex(idx)
-            self.format_combo.blockSignals(False)
+            try:
+                self.format_combo.setCurrentIndex(idx)
+            finally:
+                self.format_combo.blockSignals(False)
 
     def _on_format_changed(self, value: str) -> None:
         if self.ffmpeg_available:
