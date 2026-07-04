@@ -62,6 +62,7 @@ class DownloadProgressDialog(QDialog):
         timeout: int,
         retry_count: int,
         notify_each_result: bool = True,
+        tags: Optional[dict[str, Optional[str]]] = None,
     ) -> None:
         super().__init__()
         self.task_id = task_id
@@ -76,6 +77,7 @@ class DownloadProgressDialog(QDialog):
         self.result_state = TASK_STATE_PENDING
         self.error_code = ""
         self._pause_button_is_pause = True
+        self._maybe_tags = tags
 
         layout = QVBoxLayout(self)
         self.progress_bar = QProgressBar()
@@ -110,6 +112,7 @@ class DownloadProgressDialog(QDialog):
             target_format=target_format,
             timeout=self.timeout,
             retry_count=self.retry_count,
+            tags=self._maybe_tags,
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.failed.connect(self._on_failed)

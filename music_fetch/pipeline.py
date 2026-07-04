@@ -56,6 +56,7 @@ def run_download_pipeline(
     progress_callback: Optional[ProgressCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
     pause_checker: Optional[PauseChecker] = None,
+    tags: Optional[dict[str, Optional[str]]] = None,
 ) -> DownloadPipelineResult:
     """Execute the full download pipeline: retry loop, fallback, conversion.
 
@@ -159,6 +160,14 @@ def run_download_pipeline(
             raise DownloadCanceled()
 
     file_size = output_path.stat().st_size if output_path.exists() else 0
+    if tags:
+        write_audio_tags(
+            output_path,
+            title=tags.get("title") or "",
+            artist=tags.get("artist"),
+            album=tags.get("album"),
+            cover_url=tags.get("cover_url"),
+        )
     logger.info(
         "Download pipeline completed. song_id=%s output=%s size=%s",
         song_id, output_path, file_size,
@@ -167,6 +176,73 @@ def run_download_pipeline(
         output_path=output_path, file_size=file_size,
         candidate=selected, source_format=source_format,
     )
+
+
+def write_audio_tags(
+    output_path: Path,
+    title: str,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    cover_url: Optional[str] = None,
+) -> None:
+    """Write ID3/Vorbis tags to the downloaded audio file using mutagen."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB
+        from mutagen.mp3 import MP3
+        from mutagen.mp4 import MP4
+        from mutagen.flac import FLAC
+    except ImportError:
+        logger.debug("mutagen not installed, skipping tag writing.")
+        return
+
+    try:
+        audio = MutagenFile(str(output_path))
+        if audio is None:
+            logger.debug("Unsupported audio format for tagging: %s", output_path.suffix)
+            return
+
+        # Set basic tags
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if title:
+                audio.tags['\xa9nam'] = title  # MP4
+                audio.tags['TIT2'] = title      # ID3
+                audio.tags['title'] = title     # FLAC/Vorbis
+            if artist:
+                audio.tags['\xa9ART'] = artist
+                audio.tags['TPE1'] = artist
+                audio.tags['artist'] = artist
+            if album:
+                audio.tags['\xa9alb'] = album
+                audio.tags['TALB'] = album
+                audio.tags['album'] = album
+            audio.save()
+
+        # Embed cover art for MP3 files
+        if cover_url and output_path.suffix.lower() == '.mp3':
+            try:
+                from urllib import request
+                req = request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"})
+                with request.urlopen(req, timeout=10) as resp:
+                    cover_data = resp.read()
+                if cover_data:
+                    audio = MP3(str(output_path), ID3=ID3)
+                    audio.tags.add(
+                        APIC(
+                            encoding=3,
+                            mime='image/jpeg',
+                            type=3,  # front cover
+                            desc='Cover',
+                            data=cover_data,
+                        )
+                    )
+                    audio.save()
+                    logger.info("Cover art embedded. output=%s", output_path)
+            except Exception:
+                logger.debug("Failed to embed cover art. output=%s", output_path, exc_info=True)
+
+    except Exception:
+        logger.debug("Failed to write audio tags. output=%s", output_path, exc_info=True)
 
 
 def _cleanup_paths(*paths: Path) -> None:

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.2 (2026-07-04)
+
+### Added
+
+- **封面图**：`SongConfirmDialog` 显示 120×120 专辑封面、艺人名称、专辑名称。`fetch_song_metadata` 扩展返回 `cover_url`、`artist`、`album_name`。
+- **ID3 标签**：下载文件自动嵌入歌曲名、艺人、专辑、封面图（MP3/MP4/FLAC）。依赖 `mutagen` 库。
+- **Cookie 过期处理**：检测到 `AUTH_EXPIRED` 时弹出 Ok/Cancel 对话框，点击 Ok 自动触发重新登录。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（219 通过，1 跳过）。
+
 ## v1.0.1 (2026-07-04)
 
 ### Fixed

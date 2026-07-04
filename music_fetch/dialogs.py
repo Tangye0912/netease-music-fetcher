@@ -190,27 +190,47 @@ class SongConfirmDialog(QDialog):
         super().__init__()
         self.result = result
         self.setWindowTitle(T.SONG_CONFIRM_TITLE)
-        self.resize(540, 280)
+        self.resize(540, 320)
 
         layout = QVBoxLayout(self)
+        top_row = QHBoxLayout()
+
+        # Cover art on the left
+        cover_label = QLabel()
+        cover_label.setFixedSize(120, 120)
+        cover_label.setScaledContents(True)
+        if result.cover_url:
+            cover_icon = load_avatar_icon(result.cover_url)
+            if cover_icon:
+                cover_label.setPixmap(cover_icon.pixmap(120, 120))
+        top_row.addWidget(cover_label)
+
+        # Info grid on the right
         grid = QGridLayout()
         grid.addWidget(QLabel(T.SONG_CONFIRM_ID), 0, 0)
         grid.addWidget(QLabel(result.song_id), 0, 1)
         grid.addWidget(QLabel(T.SONG_CONFIRM_NAME), 1, 0)
         grid.addWidget(QLabel(result.song_name or T.MSG_UNKNOWN), 1, 1)
-        grid.addWidget(QLabel(T.SONG_CONFIRM_DURATION), 2, 0)
-        grid.addWidget(QLabel(format_duration(result.duration_ms)), 2, 1)
+        if result.artist:
+            grid.addWidget(QLabel("艺人"), 2, 0)
+            grid.addWidget(QLabel(result.artist), 2, 1)
+        if result.album_name:
+            grid.addWidget(QLabel("专辑"), 3, 0)
+            grid.addWidget(QLabel(result.album_name), 3, 1)
+        grid.addWidget(QLabel(T.SONG_CONFIRM_DURATION), 4, 0)
+        grid.addWidget(QLabel(format_duration(result.duration_ms)), 4, 1)
         status = T.SONG_CONFIRM_CAN_DOWNLOAD if result.can_download else T.SONG_CONFIRM_CANT_DOWNLOAD
         status_label = QLabel(status)
         set_label_state(status_label, "success" if result.can_download else "error")
-        grid.addWidget(QLabel(T.SONG_CONFIRM_STATUS), 3, 0)
-        grid.addWidget(status_label, 3, 1)
+        grid.addWidget(QLabel(T.SONG_CONFIRM_STATUS), 5, 0)
+        grid.addWidget(status_label, 5, 1)
         if result.unavailable_reason:
             reason = QLabel(result.unavailable_reason)
             reason.setWordWrap(True)
-            grid.addWidget(QLabel(T.SONG_CONFIRM_REASON), 4, 0)
-            grid.addWidget(reason, 4, 1)
-        layout.addLayout(grid)
+            grid.addWidget(QLabel(T.SONG_CONFIRM_REASON), 6, 0)
+            grid.addWidget(reason, 6, 1)
+        top_row.addLayout(grid, stretch=1)
+        layout.addLayout(top_row)
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)

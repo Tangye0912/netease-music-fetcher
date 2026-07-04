@@ -45,7 +45,7 @@ def run_download(
     logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
     cookie = load_cookie(cookie_file)
-    song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
+    song_name, meta_duration, _cover, _artist, _album = fetch_song_metadata(song_id, cookie, timeout=timeout)
     output_path = resolve_output_path(
         out_dir=out_dir,
         song_id=song_id,
@@ -95,7 +95,7 @@ def run_playlist_download(
     for idx, song_id in enumerate(song_ids, start=1):
         print(f"[{idx}/{len(song_ids)}] Downloading song {song_id} ...")
         try:
-            song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
+            song_name, meta_duration, _cover, _artist, _album = fetch_song_metadata(song_id, cookie, timeout=timeout)
             output_path = resolve_output_path(
                 out_dir=out_dir,
                 song_id=song_id,

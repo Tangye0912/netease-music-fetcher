@@ -105,6 +105,9 @@ class SongDetectionResult:
     media_url: Optional[str]
     can_download: bool
     unavailable_reason: Optional[str]
+    cover_url: Optional[str] = None
+    artist: Optional[str] = None
+    album_name: Optional[str] = None
 
 
 @dataclass
@@ -454,7 +457,7 @@ def fetch_playable_url(song_id: str, cookie: str, timeout: int) -> Tuple[str, Op
     return first.media_url, first.duration_ms
 
 
-def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Optional[str], Optional[int]]:
+def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str]]:
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     query = parse.urlencode({"ids": f"[{song_id}]"})
     url = f"{SONG_DETAIL_API}?{query}"
@@ -472,13 +475,32 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
     song = songs[0]
     name = song.get("name")
     duration_ms = song.get("dt")
+    # Extract cover art URL from album info
+    cover_url = None
+    album = song.get("al")
+    if isinstance(album, dict):
+        cover_url = album.get("picUrl") or None
+    # Extract artist names
+    artist_names: list[str] = []
+    artists = song.get("ar")
+    if isinstance(artists, list):
+        for ar in artists:
+            if isinstance(ar, dict):
+                ar_name = ar.get("name")
+                if isinstance(ar_name, str) and ar_name.strip():
+                    artist_names.append(ar_name.strip())
+    artist_str = " / ".join(artist_names) if artist_names else None
+    # Extract album name
+    album_name = album.get("name") if isinstance(album, dict) else None
+    if isinstance(album_name, str):
+        album_name = album_name.strip() or None
     if isinstance(name, str):
         name = name.strip() or None
     else:
         name = None
     if not isinstance(duration_ms, int):
         duration_ms = None
-    return name, duration_ms
+    return name, duration_ms, cover_url, artist_str, album_name
 
 
 def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) -> list[str]:
@@ -540,7 +562,7 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
 def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
     song_id = parse_song_id(song_url)
     logger.info("Detecting song by url. song_id=%s", song_id)
-    song_name, meta_duration = fetch_song_metadata(song_id, cookie, timeout=timeout)
+    song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
     try:
         media_url, media_duration = fetch_playable_url(song_id, cookie, timeout=timeout)
     except MusicFetchError as err:

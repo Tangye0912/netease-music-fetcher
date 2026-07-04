@@ -35,7 +35,7 @@ class RunDownloadTests(unittest.TestCase):
     @mock.patch("music_fetch.cli.fetch_song_metadata")
     def test_run_download_success(self, meta_mock, pipeline_mock):
         from music_fetch.pipeline import DownloadPipelineResult
-        meta_mock.return_value = ("Test Song", 120000)
+        meta_mock.return_value = ("Test Song", 120000, None, None, None)
 
         def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
             output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -247,6 +247,7 @@ class DownloadWorker(QThread):
         target_format: str = DEFAULT_GUI_TARGET_FORMAT,
         timeout: int = 30,
         retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT,
+        tags: Optional[dict[str, Optional[str]]] = None,
     ) -> None:
         super().__init__()
         self.task_id = task_id
@@ -260,6 +261,7 @@ class DownloadWorker(QThread):
         )
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
+        self._tags = tags
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -312,6 +314,7 @@ class DownloadWorker(QThread):
                 progress_callback=on_progress,
                 cancel_checker=should_cancel,
                 pause_checker=should_pause,
+                tags=self._tags,
             )
             self.succeeded.emit(str(result.output_path.resolve()), result.file_size)
             logger.info(

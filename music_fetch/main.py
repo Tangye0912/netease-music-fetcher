@@ -518,7 +518,14 @@ class MainWindow(QMainWindow):
         logger.warning("Detection failed. code=%s message=%s", code, message)
         mapped = user_error_message(code, message)
         if code == "AUTH_EXPIRED":
-            QMessageBox.warning(self, T.TITLE_LOGIN_EXPIRED, T.detect_auth_expired(code, mapped))
+            answer = QMessageBox.warning(
+                self, T.TITLE_LOGIN_EXPIRED,
+                T.detect_auth_expired(code, mapped),
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Ok,
+            )
+            if answer == QMessageBox.Ok:
+                self._on_switch_account()
         else:
             QMessageBox.warning(self, T.TITLE_DETECT_FAIL, T.code_message(code, mapped))
         self._set_status(T.STATUS_DETECT_FAILED, "error")
@@ -556,6 +563,7 @@ class MainWindow(QMainWindow):
             task_id=task_id, song_id=result.song_id, output_path=options.output_path,
             cookie=self.session.cookie, target_format=options.selected_format,
             timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+            tags={"title": result.song_name or "", "artist": getattr(result, "artist", None), "album": getattr(result, "album_name", None), "cover_url": getattr(result, "cover_url", None)},
         )
         if progress.exec() == QDialog.Accepted and progress.output_path:
             size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
