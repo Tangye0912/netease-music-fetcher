@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.4 (2026-07-04)
+
+### Fixed (CRASH)
+
+- `fetch_song_metadata` 错误路径返回 2 个值但调用方解包 5 个 → `ValueError` crash。修复为返回 5 个 `None`。
+- `detect_song` 丢弃 `cover_url`/`artist`/`album_name`，导致单曲下载封面图和标签写入失效。
+
+### Removed
+
+- `DownloadPaused` 异常类（v1.0.3 暂停改为阻塞等待后已成死代码）。
+- `workers.py` 中 `DownloadPaused` 死代码 handler。
+- `audio.py` 中 `urlopen` 死代码 `status >= 400` 检查（`HTTPError` 在进入 `with` 前抛出）。
+- `dialog_progress.py` 中重复 `request_cancel()` 调用。
+- `audio.py` 循环内 `import time` 局部导入 → 模块级导入。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.0.3 (2026-07-04)
 
 ### Fixed (CRITICAL)

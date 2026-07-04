@@ -18,6 +18,7 @@ __all__ = [
 
 import re
 import shutil
+import time
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -293,9 +294,6 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
             logger.info("Download attempt started. attempt=%s/%s scheme=%s referer=%s cookie=%s offset=%s", attempt_no, total_attempts, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no", resume_offset)
             try:
                 with request.urlopen(req, timeout=timeout) as resp:
-                    status = getattr(resp, "status", resp.getcode())
-                    if status >= 400:
-                        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Media request failed: HTTP {status}.")
                     content_length = getattr(resp, "headers", {}).get("Content-Length")
                     if content_length and content_length.isdigit():
                         total_bytes = int(content_length) + resume_offset
@@ -307,8 +305,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                             if pause_checker and pause_checker():
                                 # Block until resumed or canceled
                                 while pause_checker and pause_checker():
-                                    import time as _time
-                                    _time.sleep(0.1)
+                                    time.sleep(0.1)
                                     if cancel_checker and cancel_checker():
                                         raise DownloadCanceled()
                             chunk = resp.read(64 * 1024)

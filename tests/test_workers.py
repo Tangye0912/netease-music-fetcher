@@ -5,7 +5,7 @@ from unittest import mock
 
 import music_fetch.workers
 import music_fetch
-from music_fetch import DownloadCanceled, DownloadPaused
+from music_fetch import DownloadCanceled
 
 
 class DownloadWorkerCancellationTests(unittest.TestCase):

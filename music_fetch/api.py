@@ -8,7 +8,7 @@ Depended on by music_fetch.audio.py (download) and music_fetch.cli.py (CLI entry
 from __future__ import annotations
 
 __all__ = [
-    "MusicFetchError", "ErrorCode", "DownloadCanceled", "DownloadPaused", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
+    "MusicFetchError", "ErrorCode", "DownloadCanceled", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
     "ProgressCallback", "CancelChecker", "PauseChecker",
     "parse_song_id", "parse_playlist_id", "parse_input_resource",
     "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
@@ -83,10 +83,6 @@ class ErrorCode(Enum):
 
 class DownloadCanceled(Exception):
     """Control-flow signal: download was canceled by user. Not a subprocess error."""
-
-
-class DownloadPaused(Exception):
-    """Control-flow signal: download was paused by user. Not a subprocess error."""
 
 
 @dataclass
@@ -465,13 +461,13 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
         status, body = perform_json_get(url, headers, timeout=timeout)
     except MusicFetchError as err:
         logger.warning("Failed to fetch song metadata. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-        return None, None
+        return None, None, None, None, None
     if status != 200 or body.get("code") != 200:
-        return None, None
+        return None, None, None, None, None
     songs = body.get("songs") or []
     if not songs:
         logger.warning("Song metadata not found. song_id=%s", song_id)
-        return None, None
+        return None, None, None, None, None
     song = songs[0]
     name = song.get("name")
     duration_ms = song.get("dt")

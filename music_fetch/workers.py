@@ -37,7 +37,7 @@ from music_fetch.app_settings import (
 )
 from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
 from music_fetch.error_texts import UNKNOWN_ERROR, user_error_message
-from music_fetch.api import DownloadCanceled, DownloadPaused, MusicFetchError, SUPPORTED_GUI_AUDIO_FORMATS, detect_song, fetch_playlist_song_ids, parse_input_resource
+from music_fetch.api import DownloadCanceled, MusicFetchError, SUPPORTED_GUI_AUDIO_FORMATS, detect_song, fetch_playlist_song_ids, parse_input_resource
 from music_fetch.audio import convert_audio_file, download_song_with_fallback, infer_audio_format_from_url, is_ffmpeg_available
 import music_fetch.ui_texts as T
 

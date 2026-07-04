@@ -9,7 +9,6 @@ from music_fetch.api import (
     MusicFetchError,
     ErrorCode,
     DownloadCanceled,
-    DownloadPaused,
     # Data classes
     DownloadResult,
     SongDetectionResult,
