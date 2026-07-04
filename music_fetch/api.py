@@ -459,8 +459,6 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
     url = f"{SONG_DETAIL_API}?{query}"
     try:
         status, body = perform_json_get(url, headers, timeout=timeout)
-        if first_page_body is None:
-            first_page_body = body
     except MusicFetchError as err:
         logger.warning("Failed to fetch song metadata. song_id=%s code=%s message=%s", song_id, err.code, err.message)
         return None, None, None, None, None
@@ -522,7 +520,7 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
         if status != 200 or code != 200:
             message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
             raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
-        playlist = (first_page_body or {}).get("playlist") or {}
+        playlist = (body or {}).get("playlist") or {}
         raw_track_ids = playlist.get("trackIds") or []
         page_ids: list[str] = []
         for row in raw_track_ids if isinstance(raw_track_ids, list) else []:
@@ -541,7 +539,7 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
         offset += page_size
     if not all_ids:
         # Fallback: try the legacy tracks field (only on first page when trackIds returned nothing)
-        playlist = (first_page_body or {}).get("playlist") or {}
+        playlist = (body or {}).get("playlist") or {}
         raw_tracks = playlist.get("tracks") or []
         for row in raw_tracks if isinstance(raw_tracks, list) else []:
             if isinstance(row, dict):
