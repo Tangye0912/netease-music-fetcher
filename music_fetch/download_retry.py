@@ -7,7 +7,7 @@ from pathlib import Path
 
 from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
 from music_fetch.download_tasks import TASK_STATE_FAILED
-from music_fetch import SUPPORTED_GUI_AUDIO_FORMATS
+from music_fetch.api import SUPPORTED_GUI_AUDIO_FORMATS
 
 
 def can_retry_status(status: str) -> bool:

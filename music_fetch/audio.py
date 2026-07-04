@@ -26,6 +26,7 @@ from urllib import error, parse, request
 from music_fetch.api import (
     DownloadCanceled,
     DownloadPaused,
+    ErrorCode,
     MusicFetchError,
     OUTER_MEDIA_URL_API,
     USER_AGENT,
@@ -61,7 +62,7 @@ def dedupe_path(path: Path) -> Path:
         candidate = parent / f"{stem}_{idx}{suffix}"
         if not candidate.exists():
             return candidate
-    raise MusicFetchError("DOWNLOAD_FAILED", "Could not allocate an output filename.")
+    raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Could not allocate an output filename.")
 
 
 def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = None, rename: Optional[str] = None, out_format: str = "mp3") -> Path:
@@ -88,10 +89,10 @@ def is_ffmpeg_available() -> bool:
 def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:
     fmt = target_format.lower().strip()
     if fmt not in SUPPORTED_GUI_AUDIO_FORMATS:
-        raise MusicFetchError("UNSUPPORTED_FORMAT", f"Unsupported output format: {fmt}")
+        raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
-        raise MusicFetchError("CONVERT_TOOL_MISSING", "ffmpeg is not installed. Please install ffmpeg first.")
+        raise MusicFetchError(ErrorCode.CONVERT_TOOL_MISSING, "ffmpeg is not installed. Please install ffmpeg first.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     base_cmd = [ffmpeg_bin, "-y", "-i", str(input_path), "-vn"]
     if fmt == "mp3":
@@ -105,7 +106,7 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
     elif fmt == "flac":
         cmd = base_cmd + ["-codec:a", "flac", str(output_path)]
     else:
-        raise MusicFetchError("UNSUPPORTED_FORMAT", f"Unsupported output format: {fmt}")
+        raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
     logger.info("Start audio conversion. input=%s output=%s format=%s", input_path, output_path, fmt)
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
@@ -113,7 +114,7 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
         preview = stderr_preview[-1] if stderr_preview else "unknown conversion error"
         if output_path.exists():
             output_path.unlink(missing_ok=True)
-        raise MusicFetchError("CONVERT_FAILED", f"Failed to convert audio to {fmt}: {preview}")
+        raise MusicFetchError(ErrorCode.CONVERT_FAILED, f"Failed to convert audio to {fmt}: {preview}")
     logger.info("Audio conversion completed. output=%s format=%s", output_path, fmt)
 
 
@@ -164,9 +165,9 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         logger.warning("Outer-url fallback is unavailable for song. song_id=%s", song_id)
     if last_403:
         if not outer_available:
-            raise MusicFetchError("SONG_UNAVAILABLE", "Playable resources are blocked by CDN, and outer-url fallback is unavailable.") from last_403
-        raise MusicFetchError("DOWNLOAD_FAILED", "All playable candidates were rejected with HTTP 403 (including outer-url fallback).") from last_403
-    raise MusicFetchError("DOWNLOAD_FAILED", "Failed to download all playable candidates.")
+            raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Playable resources are blocked by CDN, and outer-url fallback is unavailable.") from last_403
+        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "All playable candidates were rejected with HTTP 403 (including outer-url fallback).") from last_403
+    raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Failed to download all playable candidates.")
 
 
 def prioritize_candidates_by_format(candidates: list[PlayableCandidate], prefer_format: str) -> list[PlayableCandidate]:
@@ -295,7 +296,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 with request.urlopen(req, timeout=timeout) as resp:
                     status = getattr(resp, "status", resp.getcode())
                     if status >= 400:
-                        raise MusicFetchError("DOWNLOAD_FAILED", f"Media request failed: HTTP {status}.")
+                        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Media request failed: HTTP {status}.")
                     content_length = getattr(resp, "headers", {}).get("Content-Length")
                     if content_length and content_length.isdigit():
                         total_bytes = int(content_length) + resume_offset
@@ -330,7 +331,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 if http_err.code == 403:
                     last_403_error = http_err
                     continue
-                raise MusicFetchError("DOWNLOAD_FAILED", f"Media request failed: HTTP {http_err.code}.") from http_err
+                raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Media request failed: HTTP {http_err.code}.") from http_err
             except error.URLError as url_err:
                 if resume_offset == 0 and tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
@@ -356,8 +357,8 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 raise
     if last_403_error is not None:
         logger.error("All download attempts failed with 403. output=%s media_host=%s", output_path, media_host)
-        raise MusicFetchError("DOWNLOAD_FAILED", "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
+        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
     if last_network_error is not None:
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
-        raise MusicFetchError("NETWORK_ERROR", f"Network error: {last_network_error.reason}") from last_network_error
-    raise MusicFetchError("DOWNLOAD_FAILED", "Media download failed after retries.")
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {last_network_error.reason}") from last_network_error
+    raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")

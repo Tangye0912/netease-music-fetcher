@@ -16,6 +16,7 @@ from typing import Callable, Optional
 from music_fetch.api import (
     DownloadCanceled,
     DownloadPaused,
+    ErrorCode,
     MusicFetchError,
     PlayableCandidate,
     CancelChecker,
@@ -65,6 +66,11 @@ def run_download_pipeline(
         song_id, output_path, target_format, timeout, retry_count,
     )
 
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as err:
+        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Cannot write to output directory: {output_path.parent}") from err
+
     temp_source_path = output_path.with_name(f"{output_path.name}.source")
     if temp_source_path.exists():
         temp_source_path.unlink(missing_ok=True)
@@ -97,7 +103,7 @@ def run_download_pipeline(
             )
 
     if selected is None:
-        raise MusicFetchError("DOWNLOAD_FAILED", "Retry loop ended without a playable candidate.")
+        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Retry loop ended without a playable candidate.")
 
     source_format = infer_audio_format_from_url(selected.media_url) or "unknown"
     logger.info(

@@ -39,7 +39,8 @@ from music_fetch.app_logging import default_log_path, get_logger, setup_logging
 from music_fetch.app_settings import APP_VERSION, DEFAULT_DOWNLOAD_DIR, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API, SESSION_FILE
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADING, TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS, DownloadTaskSnapshot, build_task_id, next_task_snapshot
-from music_fetch import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, is_ffmpeg_available, parse_input_resource
+from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, parse_input_resource
+from music_fetch.audio import is_ffmpeg_available
 from music_fetch.error_texts import user_error_message
 import music_fetch.ui_texts as T
 

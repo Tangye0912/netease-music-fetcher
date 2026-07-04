@@ -115,6 +115,34 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
+## v1.0.0 (Target)
+
+### Goal
+
+- 1.0.0 就绪：修复阻塞性 bug、收紧公开 API、补文档和测试、清理代码质量。
+
+### Must-fix
+
+- [ ] 修复 music-fetch shell wrapper 引用 -m _cli 改为 -m music_fetch.cli。
+- [ ] 收紧 music_fetch/__init__.py 公开 API，移除 perform_json_post 等内部实现。
+- [ ] README 添加 pre-package 到 package 迁移指南。
+
+### Should-fix
+
+- [ ] MusicFetchError 构造改用 ErrorCode 枚举成员。
+- [ ] from music_fetch import X 间接导入改为直接子模块导入。
+- [ ] load_cookie 添加 UnicodeDecodeError 捕获。
+- [ ] 下载目录不可写映射为友好错误码。
+- [ ] 补 main.py / dialog_manager.py / gui_styles.py / pipeline.py 测试。
+- [ ] PySide6 版本约束加 <7.0 上限。
+
+### Nice-to-have
+
+- [ ] 删除根目录空 __init__.py。
+- [ ] batch_dialogs.py 的 type: ignore[override] 迁移到全局配置。
+- [ ] playlist 下载中途网络断开时保留已获取 ID。
+- [ ] CLI ffmpeg 缺失时提示输出格式已降级。
+
 ## v0.14.0 (Completed - 2026-07-04)
 
 ### Goal
@@ -127,7 +155,7 @@
 - [x] 错误处理重构：ErrorCode 枚举 + DownloadCanceled/DownloadPaused 专用异常。
 - [x] 下载管道抽象：DownloadPipeline 纯逻辑类，GUI/CLI 统一下载逻辑。
 
-## v0.13.0 (Next)
+## v0.13.0 (Completed - 2026-07-03)
 
 ### Goal
 

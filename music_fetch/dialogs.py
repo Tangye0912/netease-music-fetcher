@@ -65,27 +65,8 @@ from music_fetch.download_tasks import (
     next_task_snapshot,
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from music_fetch import (
-    AccountProfile,
-    MusicFetchError,
-    SongDetectionResult,
-    SUPPORTED_GUI_AUDIO_FORMATS,
-    build_cookie_string,
-    check_login_status,
-    convert_audio_file,
-    detect_song,
-    download_song_with_fallback,
-    fetch_account_profile,
-    fetch_playlist_song_ids,
-    extract_url_from_input,
-    is_netease_music_host,
-    infer_audio_format_from_url,
-    is_ffmpeg_available,
-    parse_input_resource,
-    resolve_output_path,
-    sanitize_filename,
-    SHORT_LINK_HOSTS,
-)
+from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, build_cookie_string, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, extract_url_from_input, is_netease_music_host, parse_input_resource, SHORT_LINK_HOSTS
+from music_fetch.audio import convert_audio_file, download_song_with_fallback, infer_audio_format_from_url, is_ffmpeg_available, resolve_output_path, sanitize_filename
 import music_fetch.ui_texts as T
 import music_fetch.combo_utils
 import music_fetch.workers

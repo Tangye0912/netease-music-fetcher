@@ -134,14 +134,14 @@ PauseChecker = Callable[[], bool]
 def parse_song_id(value: str) -> str:
     resource_type, resource_id = parse_input_resource(value)
     if resource_type == "playlist":
-        raise MusicFetchError("INVALID_URL", "Detected playlist link. Please use batch mode.")
+        raise MusicFetchError(ErrorCode.INVALID_URL, "Detected playlist link. Please use batch mode.")
     return resource_id
 
 
 def parse_playlist_id(value: str) -> str:
     resource_type, resource_id = parse_input_resource(value)
     if resource_type != "playlist":
-        raise MusicFetchError("INVALID_URL", "Input is not a playlist link.")
+        raise MusicFetchError(ErrorCode.INVALID_URL, "Input is not a playlist link.")
     return resource_id
 
 
@@ -156,7 +156,7 @@ def parse_input_resource(value: str) -> tuple[str, str]:
     parsed = parse.urlparse(url if url else raw)
     host = parsed.netloc.lower()
     if host and not is_netease_music_host(host) and host not in SHORT_LINK_HOSTS:
-        raise MusicFetchError("INVALID_URL", "Only music.163.com or 163cn.tv links are supported.")
+        raise MusicFetchError(ErrorCode.INVALID_URL, "Only music.163.com or 163cn.tv links are supported.")
 
     target_url = url if url else raw
     if host in SHORT_LINK_HOSTS:
@@ -165,12 +165,12 @@ def parse_input_resource(value: str) -> tuple[str, str]:
         parsed = parse.urlparse(target_url)
         host = parsed.netloc.lower()
         if host and not is_netease_music_host(host):
-            raise MusicFetchError("INVALID_URL", "Could not resolve short link to a music.163.com resource URL.")
+            raise MusicFetchError(ErrorCode.INVALID_URL, "Could not resolve short link to a music.163.com resource URL.")
 
     resource_type = _detect_resource_type(parsed, target_url)
     resource_id = _extract_resource_id(parsed, target_url)
     if not resource_id:
-        raise MusicFetchError("INVALID_URL", "Could not parse resource id from the provided URL.")
+        raise MusicFetchError(ErrorCode.INVALID_URL, "Could not parse resource id from the provided URL.")
     return resource_type, resource_id
 
 
@@ -238,10 +238,10 @@ def resolve_short_url(url: str, timeout: int = 15) -> str:
             logger.warning("Short link returned HTTP error but redirected. from=%s to=%s", url, redirected)
             return redirected
         logger.error("Failed to resolve short link. url=%s status=%s", url, http_err.code)
-        raise MusicFetchError("NETWORK_ERROR", f"Failed to resolve short link: HTTP {http_err.code}") from http_err
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Failed to resolve short link: HTTP {http_err.code}") from http_err
     except error.URLError as url_err:
         logger.error("Short link resolve network error. url=%s reason=%s", url, url_err.reason)
-        raise MusicFetchError("NETWORK_ERROR", f"Network error: {url_err.reason}") from url_err
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {url_err.reason}") from url_err
 
 
 def _pick_first_digit(values: Optional[list[str]]) -> Optional[str]:
@@ -258,12 +258,12 @@ def _pick_first_digit(values: Optional[list[str]]) -> Optional[str]:
 def load_cookie(cookie_file: Path) -> str:
     logger.info("Loading cookie file from %s", cookie_file)
     if not cookie_file.exists():
-        raise MusicFetchError("AUTH_EXPIRED", f"Cookie file not found: {cookie_file}. Please export a valid MUSIC_U cookie.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file not found: {cookie_file}. Please export a valid MUSIC_U cookie.")
     cookie = normalize_cookie(cookie_file.read_text(encoding="utf-8"))
     if not cookie:
-        raise MusicFetchError("AUTH_EXPIRED", "Cookie file is empty. Please refresh your cookie.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file is empty. Please refresh your cookie.")
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError("AUTH_EXPIRED", "Cookie file does not include MUSIC_U. Please re-export from browser.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file does not include MUSIC_U. Please re-export from browser.")
     fields = parse_cookie_fields(cookie)
     logger.info("Cookie loaded. has_music_u=%s has_csrf=%s music_u_mask=%s", "MUSIC_U" in fields, "__csrf" in fields, mask_value(fields.get("MUSIC_U", "")))
     return cookie
@@ -333,7 +333,7 @@ def _perform_request(req: request.Request, timeout: int) -> Tuple[int, bytes]:
         return http_err.code, body
     except error.URLError as url_err:
         logger.error("URL error. url=%s reason=%s", req.full_url, url_err.reason)
-        raise MusicFetchError("NETWORK_ERROR", f"Network error: {url_err.reason}") from url_err
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {url_err.reason}") from url_err
 
 
 def _decode_json(body: bytes) -> dict[str, object]:
@@ -341,7 +341,7 @@ def _decode_json(body: bytes) -> dict[str, object]:
         decoded = body.decode("utf-8")
         return json.loads(decoded) if decoded else {}
     except (UnicodeDecodeError, json.JSONDecodeError) as err:
-        raise MusicFetchError("NETWORK_ERROR", "Unexpected API response (invalid JSON).") from err
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Unexpected API response (invalid JSON).") from err
 
 
 # ── Account / Auth ───────────────────────────────────────────────
@@ -365,14 +365,14 @@ def check_login_status(cookie: str, timeout: int = 10) -> bool:
 
 def fetch_account_profile(cookie: str, timeout: int = 10) -> AccountProfile:
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError("AUTH_EXPIRED", "Login cookie missing MUSIC_U.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login cookie missing MUSIC_U.")
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
     code = body.get("code")
     if status in (401, 403) or code in (301, 302, 401, 403):
-        raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please login again.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please login again.")
     if status != 200 or code != 200:
-        raise MusicFetchError("NETWORK_ERROR", f"Unexpected account API response: status={status}, code={code}")
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Unexpected account API response: status={status}, code={code}")
     profile = body.get("profile") or {}
     account = body.get("account") or {}
     nickname = str(profile.get("nickname") or account.get("userName") or "未命名用户")
@@ -411,13 +411,13 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
         status, body = perform_json_post(PLAYER_URL_API, payload, headers, timeout=timeout)
         logger.info("Requested playable url. song_id=%s level=%s encode=%s status=%s api_code=%s", song_id, level, encode_type, status, body.get("code"))
         if status in (401, 403):
-            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
         if status >= 500:
             last_network_message = f"Server error from NetEase: HTTP {status}."
             continue
         code = body.get("code")
         if code in (301, 302, 401, 403):
-            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
         if code != 200:
             last_network_message = str(body.get("message") or f"Unexpected API code={code}")
             continue
@@ -442,10 +442,10 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
     if candidates:
         return candidates
     if saw_song_unavailable:
-        raise MusicFetchError("SONG_UNAVAILABLE", "Song is unavailable (copyright/region/VIP restriction).")
+        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Song is unavailable (copyright/region/VIP restriction).")
     if last_network_message:
-        raise MusicFetchError("NETWORK_ERROR", last_network_message)
-    raise MusicFetchError("NETWORK_ERROR", "Could not resolve playable media url.")
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, last_network_message)
+    raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Could not resolve playable media url.")
 
 
 def fetch_playable_url(song_id: str, cookie: str, timeout: int) -> Tuple[str, Optional[int]]:
@@ -492,13 +492,13 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
         url = f"{PLAYLIST_DETAIL_API}?{query}"
         status, body = perform_json_get(url, headers, timeout=timeout)
         if status in (401, 403):
-            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
         code = body.get("code")
         if code in (301, 302, 401, 403):
-            raise MusicFetchError("AUTH_EXPIRED", "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
         if status != 200 or code != 200:
             message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
-            raise MusicFetchError("NETWORK_ERROR", message)
+            raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
         playlist = body.get("playlist") or {}
         raw_track_ids = playlist.get("trackIds") or []
         page_ids: list[str] = []
@@ -529,7 +529,7 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
                         seen.add(sid)
                         all_ids.append(sid)
     if not all_ids:
-        raise MusicFetchError("SONG_UNAVAILABLE", "Playlist is empty or unavailable.")
+        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Playlist is empty or unavailable.")
     if len(all_ids) >= page_size:
         logger.info("Fetched playlist songs. playlist_id=%s count=%s (may have more)", playlist_id, len(all_ids))
     else:

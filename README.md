@@ -41,6 +41,8 @@
 
 ## 2. 环境准备
 
+> **从 v0.13 及更早版本升级？** v0.14.0 将模块迁移到了 `music_fetch/` 包目录。如果你有自定义脚本使用了 `import _api` 或 `from _workers import DownloadWorker`，请改为 `from music_fetch.api import ...` 或 `from music_fetch.workers import DownloadWorker`。`import music_fetch` 顶层导入保持不变。
+
 建议开发环境：`Python 3.13`（运行时按依赖实际兼容为准）
 
 ```bash

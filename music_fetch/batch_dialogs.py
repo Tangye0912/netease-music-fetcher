@@ -37,12 +37,8 @@ from music_fetch.download_tasks import (
     build_task_id,
 )
 from music_fetch.error_texts import UNKNOWN_ERROR, user_error_message
-from music_fetch import (
-    MusicFetchError,
-    SUPPORTED_GUI_AUDIO_FORMATS,
-    is_ffmpeg_available,
-    resolve_output_path,
-)
+from music_fetch.api import MusicFetchError, SUPPORTED_GUI_AUDIO_FORMATS
+from music_fetch.audio import is_ffmpeg_available, resolve_output_path
 from music_fetch.batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
 from music_fetch.gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
 from music_fetch.batch_models import BatchDetectRow, format_bytes

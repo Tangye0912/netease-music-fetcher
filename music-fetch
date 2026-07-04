@@ -15,4 +15,4 @@ if [[ -z "${PYTHON_BIN}" ]]; then
 fi
 
 cd "$SCRIPT_DIR"
-exec "$PYTHON_BIN" -m _cli "$@"
+exec "$PYTHON_BIN" -m music_fetch.cli "$@"
