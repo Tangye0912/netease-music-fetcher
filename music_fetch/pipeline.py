@@ -59,7 +59,7 @@ def run_download_pipeline(
 ) -> DownloadPipelineResult:
     """Execute the full download pipeline: retry loop, fallback, conversion.
 
-    Raises DownloadCanceled, DownloadPaused, or MusicFetchError.
+    Raises DownloadCanceled or MusicFetchError.
     """
     logger.info(
         "Download pipeline started. song_id=%s output=%s format=%s timeout=%s retry=%s",

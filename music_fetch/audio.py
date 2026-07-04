@@ -162,10 +162,7 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
             return PlayableCandidate(media_url=outer_url, duration_ms=None, level="outer", encode_type=(infer_audio_format_from_url(outer_url) or "unknown"))
         except MusicFetchError as err:
             logger.warning("Outer-url fallback failed. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-            if isinstance(err, MusicFetchError):
-                last_403 = err
-            else:
-                raise
+            last_403 = err
     else:
         logger.warning("Outer-url fallback is unavailable for song. song_id=%s", song_id)
     if last_403:
