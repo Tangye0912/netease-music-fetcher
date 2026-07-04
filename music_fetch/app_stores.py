@@ -69,7 +69,7 @@ class SessionStore:
             return AppSession()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             logger.warning("Failed to parse session file, fallback to empty. path=%s", self.path)
             return AppSession()
 
@@ -140,7 +140,7 @@ class DownloadHistoryStore:
             return []
         try:
             rows = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
             return []
 

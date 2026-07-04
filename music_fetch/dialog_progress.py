@@ -148,7 +148,6 @@ class DownloadProgressDialog(QDialog):
         self.worker.request_cancel()
         self.status_label.setText(T.STATUS_CANCELING)
         self.result_state = TASK_STATE_CANCELED
-        self.worker.request_cancel()
         logger.info("Download cancel requested. task_id=%s", self.task_id)
 
     def _on_progress(self, downloaded: int, total: int, speed: float) -> None:

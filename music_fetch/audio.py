@@ -108,7 +108,12 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
     else:
         raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
     logger.info("Start audio conversion. input=%s output=%s format=%s", input_path, output_path, fmt)
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if output_path.exists():
+            output_path.unlink(missing_ok=True)
+        raise MusicFetchError(ErrorCode.CONVERT_FAILED, f"Audio conversion timed out after {timeout}s.")
     if proc.returncode != 0:
         stderr_preview = (proc.stderr or "").strip().splitlines()
         preview = stderr_preview[-1] if stderr_preview else "unknown conversion error"

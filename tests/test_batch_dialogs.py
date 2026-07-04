@@ -36,13 +36,13 @@ class BatchDialogSelectionTests(unittest.TestCase):
     module-level _app)."""
 
     def setUp(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.history_path = Path(tmp) / "test_history.json"
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.history_path = Path(self._tmp_dir.name) / "test_history.json"
         self.history_store = DownloadHistoryStore(self.history_path)
         self.dialog = BatchDownloadDialog(
             cookie="MUSIC_U=test",
             history_store=self.history_store,
-            last_download_dir=str(Path(tmp).resolve()),
+            last_download_dir=str(Path(self._tmp_dir.name).resolve()),
             detect_timeout_sec=5,
             download_timeout_sec=10,
             download_retry_count=1,
@@ -113,13 +113,13 @@ class BatchDialogDownloadSchedulingTests(unittest.TestCase):
     """Tests for download scheduling logic using mock workers."""
 
     def setUp(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.history_path = Path(tmp) / "test_history.json"
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.history_path = Path(self._tmp_dir.name) / "test_history.json"
         self.history_store = DownloadHistoryStore(self.history_path)
         self.dialog = BatchDownloadDialog(
             cookie="MUSIC_U=test",
             history_store=self.history_store,
-            last_download_dir=str(Path(tmp).resolve()),
+            last_download_dir=str(Path(self._tmp_dir.name).resolve()),
             detect_timeout_sec=5,
             download_timeout_sec=10,
             download_retry_count=1,
