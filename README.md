@@ -3,16 +3,17 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v0.13.0）
+## 1. 版本概览（v0.14.0）
 
-### 1.1 近期更新（v0.10.0 → v0.13.0）
+### 1.1 近期更新（v0.10.0 → v0.14.0）
 
 - **模块拆分**：新增 `_batch_models.py`、`_gui_styles.py`、`_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`、`_dialog_batch_settings.py`、`_version_check.py`，`_dialogs.py` 和 `_batch_dialogs.py` 体积大幅缩减。
 - **暂停/恢复**：`DownloadWorker` 支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
 - **暗色主题**：软件设置中可切换浅色/深色主题（Catppuccin 风格），持久化到 `ui_theme`。
 - **CLI 补全**：新增 `--format`（mp3/m4a/wav/flac/aac）、`--rename`、`--retry` 参数，支持播放列表批量下载，改用 `download_song_with_fallback`。
-- **测试**：从 115 → 188 个测试用例，覆盖 `_dialogs.py`、`_batch_models.py`、`app_logging.py` 等。
+- **测试**：从 115 → 206 个测试用例，覆盖 `_dialogs.py`、`_batch_models.py`、`app_logging.py` 等。
 - **代码质量**：消除硬编码中文、统一 `__all__` 定义、消除重复钳位模式、类型精确化。
+- **架构升级（v0.14.0）**：迁移到 `music_fetch/` 包目录，`ErrorCode` 错误码枚举，`DownloadPipeline` 统一下载管道，`DownloadCanceled`/`DownloadPaused` 专用控制流异常。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
 迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
@@ -36,7 +37,7 @@
 
 - 下载队列可视化进度条优化
 - 批量下载暂停/恢复 UI 交互完善（按钮状态切换、暂停行高亮等）
-- 进一步拆分 `main.py` 和 `_batch_dialogs.py`
+- 为 1.0.0 做准备：API 稳定性、文档完善、打包分发
 
 ## 2. 环境准备
 
@@ -59,7 +60,7 @@ python3 -m pip install PySide6
 
 ```bash
 cd /path/to/music-fetch
-python3 main.py
+python3 -m music_fetch.main
 ```
 
 ### Windows（推荐双击）
@@ -69,7 +70,7 @@ python3 main.py
 
 ```bat
 cd /d D:\path\to\music-fetch
-py -3 main.py
+py -3 -m music_fetch.main
 ```
 
 ## 4. GUI 使用流程
@@ -136,37 +137,37 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 
 | 路径 | 职责 |
 | --- | --- |
-| `main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
-| `_dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验、头像加载。 |
-| `_batch_dialogs.py` | 批量识别与批量下载界面，包含批量设置、失败项重试、CSV 导出和并发下载调度。 |
-| `_batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
-| `_workers.py` | 后台线程：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
-| `_api.py` | 网易云接口层：链接解析、短链解析、cookie 处理、登录校验、歌曲/歌单/账号 API。 |
-| `_audio.py` | 音频下载与处理：候选资源下载、403 fallback、断点清理、格式推断、ffmpeg 转码。 |
-| `_cli.py` | CLI 命令行入口和脚本化下载流程。 |
-| `music_fetch.py` | 向后兼容外观层，重新导出 `_api.py`、`_audio.py`、`_cli.py` 的公共能力。 |
-| `_batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具（`format_bytes`、`format_duration`、`probe_media_size_bytes`）。 |
-| `_gui_styles.py` | QSS 样式表构建（浅色/深色主题）、按钮角色和标签状态辅助函数。 |
-| `_dialog_login.py` | 登录对话框：内嵌网页扫码登录，cookie 提取与校验。 |
-| `_dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
-| `_dialog_manager.py` | 下载管理对话框：历史记录浏览、状态筛选、文件操作、失败重试。 |
-| `_dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
-| `_version_check.py` | GitHub API 版本检查：获取最新 release/tag。 |
-| `_combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助，供设置类对话框复用。 |
-| `app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则、项目链接。 |
-| `app_stores.py` | 本地持久化：登录会话、下载历史、状态字段兼容和边界值夹紧。 |
-| `app_logging.py` | 日志路径、日志初始化和敏感值脱敏。 |
-| `batch_inputs.py` | 批量输入解析：多行链接、分享文案、歌单/歌曲来源提示和去重。 |
-| `download_tasks.py` | 下载任务状态模型与最新任务快照。 |
-| `download_retry.py` | 下载管理中失败任务重试的状态判断和目标格式推断。 |
-| `error_texts.py` | 错误码到用户友好提示的映射。 |
-| `ui_texts.py` | GUI 用户可见文案集中管理。 |
-| `music-fetch` | macOS/Linux CLI 包装脚本，调用 `_cli.py`。 |
+| `music_fetch/main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
+| `music_fetch/dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验。 |
+| `music_fetch/batch_dialogs.py` | 批量识别与批量下载界面，包含失败项重试、CSV 导出和并发下载调度。 |
+| `music_fetch/batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
+| `music_fetch/workers.py` | 后台 QThread：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
+| `music_fetch/api.py` | 网易云接口层：链接解析、cookie 处理、登录校验、歌曲/歌单/账号 API。 |
+| `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码。 |
+| `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，GUI 和 CLI 共享。 |
+| `music_fetch/cli.py` | CLI 命令行入口，支持单曲/播放列表下载。 |
+| `music_fetch/__init__.py` | 包外观层，重新导出 `api`/`audio`/`cli` 的公共 API。 |
+| `music_fetch/batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具。 |
+| `music_fetch/gui_styles.py` | QSS 样式表构建（浅色/深色主题）、按钮角色和标签状态辅助。 |
+| `music_fetch/dialog_login.py` | 登录对话框：内嵌网页扫码登录，cookie 提取与校验。 |
+| `music_fetch/dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
+| `music_fetch/dialog_manager.py` | 下载管理对话框：历史记录浏览、状态筛选、文件操作、失败重试。 |
+| `music_fetch/dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
+| `music_fetch/version_check.py` | GitHub API 版本检查：获取最新 release/tag。 |
+| `music_fetch/combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助。 |
+| `music_fetch/app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则。 |
+| `music_fetch/app_stores.py` | 本地持久化：登录会话、下载历史、状态字段兼容和边界值夹紧。 |
+| `music_fetch/app_logging.py` | 日志路径、日志初始化和敏感值脱敏。 |
+| `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、歌单/歌曲来源提示和去重。 |
+| `music_fetch/download_tasks.py` | 下载任务状态模型与最新任务快照。 |
+| `music_fetch/download_retry.py` | 下载管理中失败任务重试的状态判断和目标格式推断。 |
+| `music_fetch/error_texts.py` | 错误码到用户友好提示的映射。 |
+| `music_fetch/ui_texts.py` | GUI 用户可见文案集中管理。 |
+| `music-fetch` | macOS/Linux CLI 包装脚本。 |
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
-| `pyproject.toml` | Python 项目元数据、依赖声明、console script 和平铺模块打包清单。 |
-| `__init__.py` | 兼容平铺模块项目的包标记文件。 |
-| `tests/` | 188 个单元/回归测试，覆盖 API、解析、存储、批量结果、批量对话框、对话框、下载流、入口脚本和下载 worker。 |
+| `pyproject.toml` | Python 项目元数据、依赖声明、console script 和包声明。 |
+| `tests/` | 206 个单元/回归测试。 |
 | `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
@@ -176,8 +177,8 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 依赖方向（自底向上）：
 ```
 app_settings → app_logging → app_stores / batch_inputs / download_tasks / error_texts / ui_texts
-  → [ _api → _audio → _cli ] → music_fetch (facade)
-  → _workers / _batch_results → _dialogs / _batch_dialogs → main
+  → [ api → audio → pipeline → cli ]
+  → workers / batch_results → dialogs / batch_dialogs → main
 ```
 
 新增功能优先复用已有模块，避免业务代码继续写硬编码。
