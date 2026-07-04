@@ -3,7 +3,7 @@
 Batch runtime settings dialog — lightweight in-workflow settings for
 detect/download timeout, retry count, and concurrency.
 
-Extracted from _batchmusic_fetch.dialogs.py to reduce module size.
+Extracted from music_fetch.batch_dialogs.py to reduce module size.
 """
 
 from __future__ import annotations

@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.5 (2026-07-04)
+
+### Fixed (CRASH)
+
+- `workers.py` 中 `DownloadPaused` 死代码 handler 残留（v1.0.4 清理不完整），引用未定义的异常类和 `paused` 信号，触发即 `NameError`/`AttributeError` 崩溃。
+
+### Fixed
+
+- **批量下载 ID3 标签缺失**：`BatchDownloadDialog` 创建 `DownloadWorker` 时未传 `tags`，批量下载文件无歌曲名/艺人/专辑标签。
+- **播放列表分页可能无限循环**：当所有歌曲 ID 都被去重时，`raw_track_ids` 仍有值但 `page_ids` 为空，循环永不退出。
+- **播放列表回退逻辑错误**：`tracks` 回退只检查最后一页的 `body`，应使用第一页。
+- **双击检测导致重复 worker**：`_on_detect_clicked` 未断开旧 `InspectWorker` 信号，快速双击触发两个并行检测。
+- `batch_dialogs.py` `__all__` 错误列出 `BatchRuntimeSettingsDialog`（不在本模块）。
+- `dialog_batch_settings.py` 文档字符串拼写错误。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.0.4 (2026-07-04)
 
 ### Fixed (CRASH)

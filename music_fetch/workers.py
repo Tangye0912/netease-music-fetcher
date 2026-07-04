@@ -323,12 +323,6 @@ class DownloadWorker(QThread):
         except DownloadCanceled:
             logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
             self.canceled.emit()
-        except DownloadPaused:
-            logger.info("DownloadWorker paused by user. task_id=%s output=%s", self.task_id, self.output_path)
-            self.paused.emit()
-            stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
-            if stale_source.exists():
-                stale_source.unlink(missing_ok=True)
         except MusicFetchError as err:
             logger.warning("DownloadWorker failed. task_id=%s code=%s message=%s", self.task_id, err.code, err.message)
             self.failed.emit(err.code, err.message)

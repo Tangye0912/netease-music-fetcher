@@ -76,7 +76,7 @@ except ImportError as err:
 logger = get_logger("music_fetch.gui")
 
 
-__all__ = ['BatchRuntimeSettingsDialog', 'BatchDownloadDialog']
+__all__ = ['BatchDownloadDialog']
 class BatchDownloadDialog(QDialog):
     # v0.5.0: batch detect + batch download workflow entry.
     def __init__(
@@ -702,6 +702,7 @@ class BatchDownloadDialog(QDialog):
                 target_format=selected_format,
                 timeout=self.download_timeout_sec,
                 retry_count=self.download_retry_count,
+                tags={"title": row.song_name or "", "artist": None, "album": None, "cover_url": None},
             )
             key = id(worker)
             self._download_workers[key] = worker
