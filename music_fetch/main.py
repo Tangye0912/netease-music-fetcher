@@ -65,7 +65,6 @@ from music_fetch.dialogs import (
 
 logger = get_logger("music_fetch.gui")
 
-
 from music_fetch.version_check import version_key, fetch_latest_project_version
 
 
@@ -216,26 +215,33 @@ class MainWindow(QMainWindow):
 
     def _on_version_link_activated(self, _link: str) -> None:
         self._set_status(T.STATUS_CHECKING_UPDATE, "muted")
-        try:
-            latest_version, release_url = fetch_latest_project_version(timeout=6)
-        except RuntimeError as err:
-            self._set_status("", "muted")
-            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
-            return
-        except (error.URLError, error.HTTPError, OSError) as err:
-            self._set_status("", "muted")
-            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
-            return
-        current_key = version_key(APP_VERSION)
-        latest_key = version_key(latest_version)
-        if latest_key > current_key:
-            self._set_status(T.status_update_available(latest_version), "warning")
-            answer = QMessageBox.question(self, T.TITLE_WARNING, T.MSG_UPDATE_AVAILABLE.format(latest=latest_version, current=APP_VERSION), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-            if answer == QMessageBox.Yes:
-                QDesktopServices.openUrl(QUrl(release_url or PROJECT_GITHUB_URL))
-            return
-        self._set_status(T.status_update_latest(APP_VERSION), "success")
-        QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_LATEST.format(current=APP_VERSION))
+
+        def check_and_notify() -> None:
+            try:
+                latest_version, release_url = fetch_latest_project_version(timeout=6)
+            except RuntimeError as err:
+                self._set_status("", "muted")
+                QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
+                return
+            except (error.URLError, error.HTTPError, OSError) as err:
+                self._set_status("", "muted")
+                QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
+                return
+            current_key = version_key(APP_VERSION)
+            latest_key = version_key(latest_version)
+            if latest_key > current_key:
+                self._set_status(T.status_update_available(latest_version), "warning")
+                answer = QMessageBox.question(self, T.TITLE_WARNING, T.MSG_UPDATE_AVAILABLE.format(latest=latest_version, current=APP_VERSION), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if answer == QMessageBox.Yes:
+                    QDesktopServices.openUrl(QUrl(release_url or PROJECT_GITHUB_URL))
+                return
+            self._set_status(T.status_update_latest(APP_VERSION), "success")
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_LATEST.format(current=APP_VERSION))
+
+        thread = QThread()
+        thread.run = check_and_notify
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
 
     def _set_detect_busy(self, busy: bool) -> None:
         self._detect_busy = busy
@@ -354,13 +360,20 @@ class MainWindow(QMainWindow):
             self._apply_account_profile(None)
             self._sync_detect_button_state()
             return
-        try:
-            profile = fetch_account_profile(self.session.cookie, timeout=10)
-            self._apply_account_profile(profile)
-        except MusicFetchError as err:
-            logger.warning("Failed to refresh account profile. code=%s message=%s", err.code, err.message)
-            self._apply_account_profile(None)
-        self._sync_detect_button_state()
+
+        def fetch_and_update() -> None:
+            try:
+                profile = fetch_account_profile(self.session.cookie, timeout=10)
+                self._apply_account_profile(profile)
+            except MusicFetchError as err:
+                logger.warning("Failed to refresh account profile. code=%s message=%s", err.code, err.message)
+                self._apply_account_profile(None)
+            self._sync_detect_button_state()
+
+        thread = QThread()
+        thread.run = fetch_and_update
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
 
     def _on_switch_account(self) -> None:
         logger.info("User requested switch account.")
