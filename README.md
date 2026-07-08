@@ -3,9 +3,9 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v1.0.0）
+## 1. 版本概览（v1.0.11）
 
-### 1.1 近期更新（v0.10.0 → v1.0.0）
+### 1.1 近期更新（v0.10.0 → v1.0.11）
 
 - **模块拆分**：新增 `_batch_models.py`、`_gui_styles.py`、`_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`、`_dialog_batch_settings.py`、`_version_check.py`，`_dialogs.py` 和 `_batch_dialogs.py` 体积大幅缩减。
 - **暂停/恢复**：`DownloadWorker` 支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
@@ -37,7 +37,9 @@
 
 - 下载队列可视化进度条优化
 - 批量下载暂停/恢复 UI 交互完善（按钮状态切换、暂停行高亮等）
-- 为 1.0.0 做准备：API 稳定性、文档完善、打包分发
+- 下载队列可视化进度条优化
+- 系统托盘通知
+- PyInstaller 打包独立 exe/app
 
 ## 2. 环境准备
 

@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-All GUI dialog classes extracted from the original main.py.
+GUI dialog classes: SongConfirmDialog, DownloadOptionsDialog,
+DependencyManagerDialog, UiSettingsDialog.
 
-Includes LoginDialog, SongConfirmDialog, DownloadOptionsDialog,
-DownloadProgressDialog, DependencyManagerDialog, DownloadManagerDialog,
-and UiSettingsDialog.
-
-Also contains shared helper functions (set_button_role, set_label_state, …)
-and the WEB_ENGINE_AVAILABLE constant.
+Also contains shared helper functions (load_avatar_icon,
+clear_embedded_login_state, validate_song_input) and the
+WEB_ENGINE_AVAILABLE constant.
 """
 
 from __future__ import annotations
@@ -147,6 +145,7 @@ def clear_embedded_login_state() -> None:
     if not WEB_ENGINE_AVAILABLE:
         return
     try:
+        from PySide6.QtWebEngineCore import QWebEngineProfile
         # Ensure the next login dialog always starts from a logged-out web context.
         profile = QWebEngineProfile.defaultProfile()
         profile.cookieStore().deleteAllCookies()
@@ -213,10 +212,10 @@ class SongConfirmDialog(QDialog):
         grid.addWidget(QLabel(T.SONG_CONFIRM_NAME), 1, 0)
         grid.addWidget(QLabel(result.song_name or T.MSG_UNKNOWN), 1, 1)
         if result.artist:
-            grid.addWidget(QLabel("艺人"), 2, 0)
+            grid.addWidget(QLabel(T.SONG_CONFIRM_ARTIST), 2, 0)
             grid.addWidget(QLabel(result.artist), 2, 1)
         if result.album_name:
-            grid.addWidget(QLabel("专辑"), 3, 0)
+            grid.addWidget(QLabel(T.SONG_CONFIRM_ALBUM), 3, 0)
             grid.addWidget(QLabel(result.album_name), 3, 1)
         grid.addWidget(QLabel(T.SONG_CONFIRM_DURATION), 4, 0)
         grid.addWidget(QLabel(format_duration(result.duration_ms)), 4, 1)

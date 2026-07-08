@@ -283,6 +283,7 @@ class DownloadManagerDialog(QDialog):
             )
             logger.info("Retry task finished with success. task_id=%s", task_id)
         elif progress.result_state == TASK_STATE_FAILED:
+            self.history_store.remove_by_path(str(output_path))
             self.history_store.add(
                 DownloadRecord(
                     song_id=record.song_id,
@@ -296,6 +297,7 @@ class DownloadManagerDialog(QDialog):
             )
             logger.warning("Retry task finished with failure. task_id=%s code=%s", task_id, progress.error_code)
         else:
+            self.history_store.remove_by_path(str(output_path))
             self.history_store.add(
                 DownloadRecord(
                     song_id=record.song_id,
