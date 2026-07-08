@@ -275,14 +275,6 @@ class DownloadWorker(QThread):
             if path.exists():
                 path.unlink(missing_ok=True)
 
-    def _finish_if_canceled(self, *paths: Path) -> bool:
-        if not self._cancel_event.is_set():
-            return False
-        self._cleanup_paths(*paths)
-        logger.info("DownloadWorker canceled by user. task_id=%s output=%s", self.task_id, self.output_path)
-        self.canceled.emit()
-        return True
-
     def run(self) -> None:
         started_at = time.time()
         logger.info(
@@ -335,3 +327,8 @@ class DownloadWorker(QThread):
             stale_part = self.output_path.with_name(f"{self.output_path.name}.part")
             if stale_part.exists():
                 stale_part.unlink(missing_ok=True)
+            # pipeline uses temp_source_path (<name>.source) as output_path,
+            # so audio.py creates <name>.source.part — clean that up too.
+            stale_source_part = self.output_path.with_name(f"{self.output_path.name}.source.part")
+            if stale_source_part.exists():
+                stale_source_part.unlink(missing_ok=True)

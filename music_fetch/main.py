@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
         self._batch_cached_signature = ""
         self._batch_cached_rows: list[BatchDetectRow] = []
         self.latest_download_task: Optional[DownloadTaskSnapshot] = None
+        self._version_thread: Optional[QThread] = None
+        self._profile_thread: Optional[QThread] = None
         self._version_check_done.connect(self._on_version_check_done)
         self._profile_refresh_done.connect(self._on_profile_refresh_done)
         self.setWindowTitle(T.APP_TITLE)
@@ -349,7 +351,10 @@ class MainWindow(QMainWindow):
         thread = QThread()
         thread.run = check_and_notify
         thread.finished.connect(thread.deleteLater)
-        self._version_thread = thread  # prevent GC while running
+        if self._version_thread is not None and self._version_thread is not thread:
+            self._version_thread = thread  # replace ref; old thread self-cleans via deleteLater
+        else:
+            self._version_thread = thread
         thread.start()
 
     def _on_version_check_done(self, result: object) -> None:
@@ -638,6 +643,7 @@ class MainWindow(QMainWindow):
 
     def _on_inspect_finished(self) -> None:
         self._set_detect_busy(False)
+        self.inspect_worker = None
 
     def _on_detect_clicked(self) -> None:
         from music_fetch.batch_inputs import collect_batch_candidates
@@ -684,6 +690,7 @@ class MainWindow(QMainWindow):
         self.inspect_worker.failed.connect(self._on_detect_failed)
         self.inspect_worker.succeeded.connect(self._on_detect_succeeded)
         self.inspect_worker.finished.connect(self._on_inspect_finished)
+        self.inspect_worker.finished.connect(self.inspect_worker.deleteLater)
         self.inspect_worker.start()
 
     def _on_detect_failed(self, code: str, message: str) -> None:

@@ -87,6 +87,7 @@ class LoginDialog(QDialog):
         self._pending_cookie = ""
         self._pending_remember = True
         self._login_check_thread: Optional[QThread] = None
+        self._login_checking = False
         self._configure_window_size()
 
         root_layout = QVBoxLayout(self)
@@ -183,7 +184,8 @@ class LoginDialog(QDialog):
         if not name or not value:
             return
         self.cookie_fields[name] = value
-        self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
+        if not self._login_checking:
+            self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
         if name in {"MUSIC_U", "__csrf", "NMTID", "MUSIC_A"}:
             logger.info("Captured login cookie field from web page. name=%s", name)
 
@@ -207,6 +209,7 @@ class LoginDialog(QDialog):
         # Run check_login_status in a background thread to avoid blocking GUI.
         self._pending_cookie = cookie
         self._pending_remember = self.remember_checkbox.isChecked()
+        self._login_checking = True
         self.confirm_button.setEnabled(False)
 
         def check_status() -> None:
@@ -224,6 +227,7 @@ class LoginDialog(QDialog):
 
     def _on_login_check_done(self, result: object) -> None:
         """Handle login check result on the main thread."""
+        self._login_checking = False
         self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
 
         if isinstance(result, MusicFetchError):

@@ -177,19 +177,19 @@ class DownloadHistoryStore:
         with self._lock:
             self._cache = list(records)
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [
-            {
-                "song_id": r.song_id,
-                "song_name": r.song_name,
-                "output_path": r.output_path,
-                "size_bytes": r.size_bytes,
-                "downloaded_at": r.downloaded_at,
-                "status": self._safe_status(r.status),
-                "error_code": r.error_code,
-            }
-            for r in records
-        ]
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            payload = [
+                {
+                    "song_id": r.song_id,
+                    "song_name": r.song_name,
+                    "output_path": r.output_path,
+                    "size_bytes": r.size_bytes,
+                    "downloaded_at": r.downloaded_at,
+                    "status": self._safe_status(r.status),
+                    "error_code": r.error_code,
+                }
+                for r in records
+            ]
+            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, record: DownloadRecord) -> None:
         with self._lock:
@@ -207,11 +207,12 @@ class DownloadHistoryStore:
         )
 
     def remove_by_path(self, output_path: str) -> None:
-        records = self.load()
-        new_records = [row for row in records if row.output_path != output_path]
-        if len(new_records) != len(records):
-            self.save(new_records)
-            logger.info("Download history removed. path=%s", output_path)
+        with self._lock:
+            records = self.load()
+            new_records = [row for row in records if row.output_path != output_path]
+            if len(new_records) != len(records):
+                self.save(new_records)
+                logger.info("Download history removed. path=%s", output_path)
 
     @staticmethod
     def _safe_int(value: object) -> int:

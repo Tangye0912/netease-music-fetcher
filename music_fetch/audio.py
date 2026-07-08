@@ -296,6 +296,13 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
             logger.info("Download attempt started. attempt=%s/%s scheme=%s referer=%s cookie=%s offset=%s", attempt_no, total_attempts, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no", resume_offset)
             try:
                 with request.urlopen(req, timeout=timeout) as resp:
+                    # If we requested a Range but server returns 200 (full content),
+                    # don't append — overwrite from the beginning.
+                    status_code = getattr(resp, "status", None) or getattr(resp, "code", 0)
+                    if resume_offset > 0 and status_code != 206:
+                        logger.warning("Server ignored Range request (status=%s), restarting from scratch. output=%s", status_code, output_path)
+                        resume_offset = 0
+                        downloaded = 0
                     content_length = getattr(resp, "headers", {}).get("Content-Length")
                     if content_length and content_length.isdigit():
                         total_bytes = int(content_length) + resume_offset
@@ -364,6 +371,8 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
         logger.error("All download attempts failed with 403. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
     if last_network_error is not None:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {last_network_error.reason}") from last_network_error
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")
