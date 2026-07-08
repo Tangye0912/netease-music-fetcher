@@ -89,7 +89,7 @@ class LoginDialog(QDialog):
         root_layout.addWidget(info)
 
         self.remember_checkbox = QCheckBox(T.LOGIN_REMEMBER)
-        self.remember_checkbox.setAccessibleName("记住登录状态")
+        self.remember_checkbox.setAccessibleName(T.ACC_BTN_REMEMBER)
         self.remember_checkbox.setChecked(True)
         root_layout.addWidget(self.remember_checkbox)
 

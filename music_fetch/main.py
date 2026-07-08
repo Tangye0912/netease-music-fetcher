@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
         self.url_input.setMinimumHeight(max(48, int(self.session.ui_font_size * 3.6)))
         row.addWidget(self.url_input, stretch=1)
         self.detect_button = QPushButton(T.BTN_DETECT)
-        self.detect_button.setAccessibleName("检测按钮")
+        self.detect_button.setAccessibleName(T.ACC_BTN_DETECT_SHORT)
         self.detect_button.clicked.connect(self._on_detect_clicked)
         set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)

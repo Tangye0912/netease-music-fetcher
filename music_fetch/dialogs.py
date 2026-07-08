@@ -432,7 +432,7 @@ class DependencyManagerDialog(QDialog):
 
     def refresh(self) -> None:
         # Keep this dialog runtime-driven so users can install dependency
-        # and click "刷新" to verify immediately without restarting app.
+        # and click refresh to verify immediately without restarting app.
         ffmpeg_ok = is_ffmpeg_available()
         self.table.setItem(0, 0, QTableWidgetItem(T.DEP_MANAGER_ITEM_FFMPEG))
         self.table.setItem(

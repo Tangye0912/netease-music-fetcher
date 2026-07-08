@@ -267,6 +267,9 @@ ACC_BTN_LOGIN_CONFIRM = "登录确认按钮"
 ACC_BTN_DOWNLOAD = "下载按钮"
 ACC_BTN_CANCEL = "取消按钮"
 ACC_INPUT_URL = "歌曲链接输入框"
+ACC_BTN_REMEMBER = "记住登录状态"
+ACC_BTN_LOGIN_CONFIRM = "登录确认按钮"
+ACC_BTN_DETECT_SHORT = "检测按钮"
 
 def code_message(code: str, message: str) -> str:
     return f"{code}: {message}"

@@ -237,10 +237,10 @@ def write_audio_tags(
                     )
                     audio.save()
                     logger.info("Cover art embedded. output=%s", output_path)
-            except Exception:
+            except (OSError, ValueError, KeyError, TypeError):
                 logger.debug("Failed to embed cover art. output=%s", output_path, exc_info=True)
 
-    except Exception:
+    except (OSError, ValueError, KeyError, TypeError):
         logger.debug("Failed to write audio tags. output=%s", output_path, exc_info=True)
 
 
