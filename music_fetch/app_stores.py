@@ -153,7 +153,7 @@ class DownloadHistoryStore:
                     song_id=str(row.get("song_id") or ""),
                     song_name=str(row.get("song_name") or UNKNOWN_SONG_NAME),
                     output_path=str(row.get("output_path") or ""),
-                    size_bytes=int(row.get("size_bytes") or 0),
+                    size_bytes=self._safe_int(row.get("size_bytes")),
                     downloaded_at=str(row.get("downloaded_at") or ""),
                     status=self._safe_status(row.get("status")),
                     error_code=str(row.get("error_code") or ""),
@@ -197,6 +197,13 @@ class DownloadHistoryStore:
         if len(new_records) != len(records):
             self.save(new_records)
             logger.info("Download history removed. path=%s", output_path)
+
+    @staticmethod
+    def _safe_int(value: object) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _safe_status(value: object) -> str:

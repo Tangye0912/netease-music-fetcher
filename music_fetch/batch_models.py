@@ -38,7 +38,6 @@ def format_bytes(value: int) -> str:
         if size < 1024 or unit == units[-1]:
             return f"{size:.1f}{unit}"
         size /= 1024
-    return f"{value}B"
 
 
 def probe_media_size_bytes(media_url: str, timeout: int = 8) -> int:

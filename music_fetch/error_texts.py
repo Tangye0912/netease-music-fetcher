@@ -12,7 +12,6 @@ ERROR_MESSAGE_MAP = {
     "NETWORK_ERROR": "网络请求失败，请检查网络后重试。",
     "DOWNLOAD_FAILED": "下载失败，请稍后重试或更换歌曲。",
     "DOWNLOAD_CANCELED": "下载已取消。",
-    "DOWNLOAD_PAUSED": "下载已暂停。",
     "UNSUPPORTED_FORMAT": "当前选择的格式不受支持。",
     "CONVERT_TOOL_MISSING": "未检测到 ffmpeg，无法执行格式转换。",
     "CONVERT_FAILED": "音频转换失败，请尝试其他格式或稍后重试。",

@@ -2,8 +2,7 @@
 Command-line interface for music-fetch.
 
 Provides run_download() (script-friendly API), run_playlist_download(),
-build_parser() (argparse), and main() (CLI entry).  Depends on _api
-(fetching) and _audio (saving).
+build_parser() (argparse), and main() (CLI entry).  Depends on music_fetch.api (fetching) and music_fetch.audio (saving).
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ def run_download(
     logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
     cookie = load_cookie(cookie_file)
-    song_name, meta_duration, _cover, _artist, _album = fetch_song_metadata(song_id, cookie, timeout=timeout)
+    song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
     output_path = resolve_output_path(
         out_dir=out_dir,
         song_id=song_id,
@@ -60,6 +59,7 @@ def run_download(
         target_format=out_format,
         timeout=timeout,
         retry_count=retry_count,
+        tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
     )
     logger.info(
         "Run download completed. song_id=%s output=%s size_bytes=%s duration_ms=%s",

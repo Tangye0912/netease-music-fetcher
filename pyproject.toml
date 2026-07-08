@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "1.0.12"
+version = "1.0.13"
 description = "网易云音乐单曲下载工具"
 requires-python = ">=3.9"
 dependencies = [

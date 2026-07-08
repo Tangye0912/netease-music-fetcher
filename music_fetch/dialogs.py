@@ -18,8 +18,7 @@ from pathlib import Path
 from typing import Optional
 from urllib import error, parse, request
 
-from music_fetch.app_logging import default_log_path, get_logger, setup_logging
-from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
+from music_fetch.app_logging import get_logger
 from music_fetch.error_texts import user_error_message
 from music_fetch.app_settings import (
     APP_VERSION,
@@ -33,41 +32,20 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
     DEFAULT_GUI_TARGET_FORMAT,
     DEFAULT_UI_FONT_SIZE,
-    DOWNLOAD_HISTORY_FILE,
-    MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
     MAX_UI_FONT_SIZE,
-    MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
     MIN_UI_FONT_SIZE,
-    NETEASE_LOGIN_URL,
-    PROJECT_GITHUB_URL,
-    PROJECT_RELEASE_API,
-    PROJECT_TAGS_API,
-    SESSION_FILE,
     clamp,
 )
-from music_fetch.download_retry import can_retry_status, retry_target_format
-from music_fetch.download_tasks import (
-    build_task_id,
-    DownloadTaskSnapshot,
-    TASK_STATE_CANCELED,
-    TASK_STATE_DOWNLOADING,
-    TASK_STATE_FAILED,
-    TASK_STATE_PENDING,
-    TASK_STATE_SUCCESS,
-    next_task_snapshot,
-)
-from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, build_cookie_string, check_login_status, detect_song, fetch_account_profile, fetch_playlist_song_ids, extract_url_from_input, is_netease_music_host, parse_input_resource, SHORT_LINK_HOSTS
-from music_fetch.audio import convert_audio_file, download_song_with_fallback, infer_audio_format_from_url, is_ffmpeg_available, resolve_output_path, sanitize_filename
+from music_fetch.api import MusicFetchError, SongDetectionResult, SUPPORTED_GUI_AUDIO_FORMATS, extract_url_from_input, is_netease_music_host, SHORT_LINK_HOSTS
+from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
 import music_fetch.ui_texts as T
 import music_fetch.combo_utils
-import music_fetch.workers
 from music_fetch.batch_models import format_bytes, format_duration
 from music_fetch.gui_styles import (
     apply_app_style,
@@ -83,32 +61,24 @@ from music_fetch.dialog_progress import DownloadProgressDialog
 from music_fetch.dialog_manager import DownloadManagerDialog
 
 try:
-    from PySide6.QtCore import QSize, QThread, Qt, QTimer, QUrl, Signal
-    from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QIcon, QPixmap
     from PySide6.QtWidgets import (
         QAbstractItemView,
-        QApplication,
-        QCheckBox,
         QComboBox,
         QDialog,
+        QHeaderView,
         QFileDialog,
         QFormLayout,
         QGridLayout,
-        QGroupBox,
         QHBoxLayout,
-        QHeaderView,
         QLabel,
         QLineEdit,
-        QMainWindow,
-        QMenu,
         QMessageBox,
-        QPlainTextEdit,
         QPushButton,
-        QProgressBar,
         QSizePolicy,
         QTableWidget,
         QTableWidgetItem,
-        QToolButton,
         QVBoxLayout,
         QWidget,
     )
@@ -122,7 +92,7 @@ BATCH_ROUTE_MIN_COUNT = 2
 
 
 
-__all__ = ['BATCH_ROUTE_MIN_COUNT', 'WEB_ENGINE_AVAILABLE', 'LoginDialog', 'SongConfirmDialog', 'DownloadOptionsDialog', 'DownloadProgressDialog', 'DependencyManagerDialog', 'DownloadManagerDialog', 'UiSettingsDialog', 'apply_app_style', 'clamp_ui_font_size', 'clear_embedded_login_state', 'load_avatar_icon', 'set_button_role', 'set_label_state', 'validate_song_input']
+__all__ = ['BATCH_ROUTE_MIN_COUNT', 'WEB_ENGINE_AVAILABLE', 'LoginDialog', 'SongConfirmDialog', 'DownloadOptionsDialog', 'DownloadProgressDialog', 'DependencyManagerDialog', 'DownloadManagerDialog', 'UiSettingsDialog', 'apply_app_style', 'clamp_ui_font_size', 'clear_embedded_login_state', 'build_cookie_from_fields', 'load_avatar_icon', 'validate_song_input']
 def load_avatar_icon(url: str) -> Optional[QIcon]:
     if not url:
         return None

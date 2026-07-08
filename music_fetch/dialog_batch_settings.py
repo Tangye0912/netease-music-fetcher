@@ -22,7 +22,6 @@ from music_fetch.app_settings import (
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
-    clamp,
 )
 from typing import Optional
 
