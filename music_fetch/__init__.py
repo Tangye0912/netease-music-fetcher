@@ -41,6 +41,10 @@ from music_fetch.api import (
     fetch_playlist_song_ids,
     detect_song,
     normalize_media_url,
+    search_songs,
+    SearchResult,
+    fetch_user_playlists,
+    UserPlaylist,
     # Constants
     SUPPORTED_GUI_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,

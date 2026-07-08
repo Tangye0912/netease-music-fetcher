@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Optional
 from urllib import error, request
 
 from music_fetch.app_settings import PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
 
 
 
-__all__ = ['version_key', 'fetch_latest_project_version']
+__all__ = ['version_key', 'fetch_latest_project_version', 'fetch_release_download_url']
+
+
 def version_key(version: str) -> tuple[int, ...]:
     parts = [int(part) for part in re.findall(r"\d+", version or "")]
     return tuple(parts) if parts else (0,)
@@ -47,5 +50,32 @@ def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
             if tag_name:
                 return tag_name, PROJECT_GITHUB_URL
     raise RuntimeError("GitHub API unavailable")
+
+
+def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
+    """Fetch the download URL for the latest release asset (exe/dmg/zip)."""
+    headers = {"User-Agent": "music-fetch-gui", "Accept": "application/vnd.github+json"}
+    req = request.Request(PROJECT_RELEASE_API, headers=headers, method="GET")
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:
+            body_raw = resp.read().decode("utf-8")
+    except (error.URLError, error.HTTPError, OSError):
+        return None
+    try:
+        payload = json.loads(body_raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    assets = payload.get("assets") or []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "").lower()
+        if name.endswith(".exe") or name.endswith(".dmg") or name.endswith(".zip"):
+            url = str(asset.get("browser_download_url") or "").strip()
+            if url:
+                return url
+    return None
 
 

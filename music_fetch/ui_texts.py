@@ -271,6 +271,29 @@ ACC_BTN_REMEMBER = "记住登录状态"
 ACC_BTN_LOGIN_CONFIRM = "登录确认按钮"
 ACC_BTN_DETECT_SHORT = "检测按钮"
 
+# Search
+SEARCH_TITLE = "搜索歌曲"
+SEARCH_PLACEHOLDER = "输入歌曲名或歌手名..."
+SEARCH_BTN = "搜索"
+SEARCH_BTN_SEARCHING = "搜索中..."
+SEARCH_EMPTY = "未找到相关歌曲"
+SEARCH_COL_SONG = "歌曲"
+SEARCH_COL_ARTIST = "歌手"
+SEARCH_COL_ALBUM = "专辑"
+SEARCH_COL_DURATION = "时长"
+SEARCH_COL_ACTION = "操作"
+SEARCH_DOWNLOAD_BTN = "下载"
+SEARCH_HINT = "输入关键词后按回车或点击搜索"
+
+# User playlists
+PLAYLIST_TITLE = "我的歌单"
+PLAYLIST_COL_NAME = "歌单名称"
+PLAYLIST_COL_COUNT = "歌曲数"
+PLAYLIST_COL_CREATOR = "创建者"
+PLAYLIST_BTN_OPEN = "打开歌单"
+PLAYLIST_EMPTY = "暂无歌单"
+PLAYLIST_BTN_MY = "我的歌单"
+
 # Tray / notification
 TRAY_TOOLTIP = "网易云音乐下载助手"
 TRAY_SHOW = "显示主窗口"

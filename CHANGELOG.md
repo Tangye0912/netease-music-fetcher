@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.2.0 (2026-07-05)
+
+### Added
+
+- **搜索下载**：主界面新增"搜索"按钮，输入歌曲名/歌手名直接搜索网易云曲库，点击结果即可下载。新增 `search_dialog.py` 和 `search_songs` API。
+- **用户歌单**：主界面新增"我的歌单"按钮，登录后展示用户创建/收藏的歌单列表，点击歌单一键进入批量下载。新增 `playlist_dialog.py` 和 `fetch_user_playlists` API。
+- **自动更新下载**：`version_check.py` 新增 `fetch_release_download_url`，检测到新版本时获取安装包下载链接。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.1.0 (2026-07-05)
 
 ### Added

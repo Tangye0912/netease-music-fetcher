@@ -16,6 +16,8 @@ __all__ = [
     "check_login_status", "fetch_account_profile",
     "fetch_playable_candidates", "fetch_playable_url", "fetch_song_metadata", "fetch_playlist_song_ids",
     "detect_song", "normalize_media_url",
+    "search_songs", "SearchResult",
+    "fetch_user_playlists", "UserPlaylist",
     "SUPPORTED_GUI_AUDIO_FORMATS",
     "USER_AGENT", "OUTER_MEDIA_URL_API", "DEFAULT_OUT_DIR", "DEFAULT_COOKIE_FILE",
     "PLAYABLE_REQUEST_PROFILES",
@@ -585,3 +587,114 @@ def normalize_media_url(url: str) -> str:
         logger.info("Upgraded media url scheme to https. host=%s", host)
         return secure_url
     return url
+
+
+# ── Search ──────────────────────────────────────────────────────
+
+SEARCH_API = "https://music.163.com/api/search/get"
+
+
+@dataclass
+class SearchResult:
+    song_id: str
+    song_name: str
+    artist: str
+    album: str
+    duration_ms: int
+
+
+def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) -> list[SearchResult]:
+    """Search songs by keyword on NetEase Cloud Music."""
+    if not keyword.strip():
+        return []
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    payload = {"s": keyword, "type": "1", "limit": str(limit), "offset": "0"}
+    try:
+        status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
+    except MusicFetchError:
+        logger.warning("Search request failed. keyword=%s", keyword)
+        return []
+    if status != 200 or body.get("code") != 200:
+        logger.warning("Search API returned non-200. status=%s code=%s", status, body.get("code"))
+        return []
+    raw_songs = body.get("result", {}).get("songs") or []
+    results: list[SearchResult] = []
+    for song in raw_songs:
+        if not isinstance(song, dict):
+            continue
+        song_id = str(song.get("id") or "")
+        if not song_id:
+            continue
+        name = str(song.get("name") or "")
+        artists = song.get("artists") or song.get("ar") or []
+        artist_names: list[str] = []
+        if isinstance(artists, list):
+            for ar in artists:
+                if isinstance(ar, dict):
+                    ar_name = ar.get("name")
+                    if isinstance(ar_name, str) and ar_name.strip():
+                        artist_names.append(ar_name.strip())
+        album_info = song.get("album") or song.get("al") or {}
+        album_name = album_info.get("name") if isinstance(album_info, dict) else None
+        duration = song.get("duration") or song.get("dt") or 0
+        results.append(SearchResult(
+            song_id=song_id,
+            song_name=name,
+            artist=" / ".join(artist_names) if artist_names else "",
+            album=str(album_name or ""),
+            duration_ms=int(duration) if duration else 0,
+        ))
+    logger.info("Search completed. keyword=%s results=%s", keyword, len(results))
+    return results
+
+
+# ── User playlists ──────────────────────────────────────────────
+
+USER_PLAYLIST_API = "https://music.163.com/api/user/playlist"
+
+
+@dataclass
+class UserPlaylist:
+    playlist_id: str
+    name: str
+    song_count: int
+    cover_url: str
+    creator: str
+
+
+def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
+    """Fetch the logged-in user's playlists."""
+    if "MUSIC_U=" not in cookie:
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login cookie missing MUSIC_U.")
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    # First get user ID from account status
+    status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
+    if status != 200 or body.get("code") != 200:
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Failed to fetch account info for playlists.")
+    account = body.get("account") or {}
+    user_id = account.get("id")
+    if not user_id:
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Could not determine user ID from account.")
+    query = parse.urlencode({"uid": str(user_id), "limit": "100", "offset": "0"})
+    url = f"{USER_PLAYLIST_API}?{query}"
+    status, body = perform_json_get(url, headers, timeout=timeout)
+    if status != 200 or body.get("code") != 200:
+        logger.warning("User playlist API returned non-200. status=%s", status)
+        return []
+    raw_playlists = body.get("playlist") or []
+    results: list[UserPlaylist] = []
+    for pl in raw_playlists:
+        if not isinstance(pl, dict):
+            continue
+        pid = str(pl.get("id") or "")
+        if not pid:
+            continue
+        results.append(UserPlaylist(
+            playlist_id=pid,
+            name=str(pl.get("name") or ""),
+            song_count=int(pl.get("trackCount") or 0),
+            cover_url=str(pl.get("coverImgUrl") or ""),
+            creator=str((pl.get("creator") or {}).get("nickname") or ""),
+        ))
+    logger.info("User playlists fetched. count=%s", len(results))
+    return results

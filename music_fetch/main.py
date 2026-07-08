@@ -131,6 +131,12 @@ class MainWindow(QMainWindow):
         self.dependency_button = QPushButton(T.BTN_DEPENDENCY_MANAGER)
         self.dependency_button.clicked.connect(self._open_dependency_manager)
         account_row.addWidget(self.dependency_button)
+        self.search_button = QPushButton(T.SEARCH_BTN)
+        self.search_button.clicked.connect(self._open_search)
+        account_row.addWidget(self.search_button)
+        self.playlist_button = QPushButton(T.PLAYLIST_BTN_MY)
+        self.playlist_button.clicked.connect(self._open_playlists)
+        account_row.addWidget(self.playlist_button)
         self.manager_button = QPushButton(T.BTN_DOWNLOAD_MANAGER)
         self.manager_button.clicked.connect(self._open_download_manager)
         account_row.addWidget(self.manager_button)
@@ -527,6 +533,33 @@ class MainWindow(QMainWindow):
         dialog = DependencyManagerDialog(parent=self)
         dialog.exec()
         self._refresh_ffmpeg_status()
+
+    def _open_search(self) -> None:
+        from music_fetch.search_dialog import SearchDialog
+        logger.info("Open search dialog.")
+        if not self.session.cookie:
+            QMessageBox.warning(self, T.TITLE_NOT_LOGIN, T.MSG_NEED_LOGIN_ANY)
+            return
+        dialog = SearchDialog(cookie=self.session.cookie, timeout=self.session.detect_timeout_sec, parent=self)
+        if dialog.exec() == QDialog.Accepted and dialog.selected_result:
+            result = dialog.selected_result
+            logger.info("Search selected song_id=%s name=%s", result.song_id, result.song_name)
+            self.url_input.setPlainText(result.song_id)
+            self._on_detect_clicked()
+
+    def _open_playlists(self) -> None:
+        from music_fetch.playlist_dialog import PlaylistDialog
+        logger.info("Open playlists dialog.")
+        if not self.session.cookie:
+            QMessageBox.warning(self, T.TITLE_NOT_LOGIN, T.MSG_NEED_LOGIN_ANY)
+            return
+        dialog = PlaylistDialog(cookie=self.session.cookie, timeout=self.session.detect_timeout_sec, parent=self)
+        if dialog.exec() == QDialog.Accepted and dialog.selected_playlist:
+            pl = dialog.selected_playlist
+            logger.info("Playlist selected. id=%s name=%s", pl.playlist_id, pl.name)
+            playlist_url = f"https://music.163.com/#/playlist?id={pl.playlist_id}"
+            self.url_input.setPlainText(playlist_url)
+            self._on_detect_clicked()
 
     def _open_batch_download(self, input_text: str = "", auto_detect_on_open: bool = False) -> None:
         from music_fetch.batch_dialogs import BatchDownloadDialog
