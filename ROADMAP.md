@@ -115,6 +115,29 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
+## v1.3.0 (Completed - 2026-07-05)
+
+### Goal
+
+- 打包分发：PyInstaller 打包 + GitHub Actions CI。
+
+### Scope
+
+- [x] PyInstaller spec 文件，支持一键打包。
+- [x] GitHub Actions CI，推送 tag 自动构建 Windows + macOS Release。
+
+## v1.2.0 (Completed - 2026-07-05)
+
+### Goal
+
+- 功能扩展：搜索下载、用户歌单、自动更新链接。
+
+### Scope
+
+- [x] 搜索下载：search_songs API + SearchDialog。
+- [x] 用户歌单：fetch_user_playlists API + PlaylistDialog。
+- [x] 自动更新：fetch_release_download_url。
+
 ## v1.1.0 (Completed - 2026-07-05)
 
 ### Goal

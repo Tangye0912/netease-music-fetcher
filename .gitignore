@@ -27,3 +27,8 @@ env/
 logs/
 *.log
 .reasonix/
+
+# PyInstaller
+*.spec.bak
+build/
+dist/

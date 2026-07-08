@@ -3,16 +3,16 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v1.2.0）
+## 1. 版本概览（v1.3.0）
 
-### 1.1 近期更新（v1.0.0 → v1.2.0）
+### 1.1 近期更新（v1.0.0 → v1.3.0）
 
 - **架构升级**：迁移到 `music_fetch/` 包目录，`ErrorCode` 错误码枚举，`DownloadPipeline` 统一下载管道。
 - **暂停/恢复**：下载支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
 - **暗色主题**：软件设置中可切换浅色/深色主题（Catppuccin 风格），持久化到 `ui_theme`。
 - **CLI 补全**：`--format`、`--rename`、`--retry` 参数，播放列表批量下载，`download_song_with_fallback` fallback 链。
 - **封面图 + ID3 标签**：`SongConfirmDialog` 显示专辑封面/艺人/专辑，下载文件自动嵌入 ID3 标签（mutagen）。
-- **系统托盘**（v1.2.0）：最小化到托盘，下载完成通知，剪贴板自动检测，窗口位置记忆。
+- **系统托盘**（v1.1.0）：最小化到托盘，下载完成通知，剪贴板自动检测，窗口位置记忆。
 - **测试**：217 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
@@ -42,10 +42,8 @@
 
 - 下载队列可视化进度条优化
 - 批量下载暂停/恢复 UI 交互完善（按钮状态切换、暂停行高亮等）
-- PyInstaller 打包独立 exe/app
 - 歌词获取与保存
-- 用户歌单列表
-- 搜索功能
+- macOS/Linux 打包支持
 
 ## 2. 环境准备
 
@@ -61,7 +59,27 @@ python3 -m pip install PySide6 mutagen
 未安装时，开始下载前会弹出确认框（继续则保持 `mp3`，取消则终止本次下载），并在下载设置里自动只保留 `mp3` 可选。
 若歌曲源格式与目标格式不一致且未安装 `ffmpeg`，程序会自动按源格式保存并给出提示。
 
-## 3. 启动方式（跨平台）
+## 3. 打包分发
+
+### 本地打包
+
+```bash
+pip install -e ".[dev]"
+python build.py --clean
+```
+
+打包产物在 `dist/music-fetch/` 目录下，可直接运行 `music-fetch.exe`（Windows），无需安装 Python。
+
+### CI 自动构建
+
+推送 `v*` 格式的 git 标签（如 `git tag v1.3.0 && git push origin v1.3.0`）会触发 GitHub Actions 自动构建 Windows 版本并上传到 GitHub Release（草稿状态）：
+
+```bash
+git tag v1.3.0
+git push origin v1.3.0
+```
+
+## 4. 启动方式（跨平台）
 
 ### macOS（推荐双击）
 
@@ -83,7 +101,7 @@ cd /d D:\path\to\music-fetch
 py -3 -m music_fetch.main
 ```
 
-## 4. GUI 使用流程
+## 5. GUI 使用流程
 
 ### 单曲下载
 
@@ -109,7 +127,7 @@ py -3 -m music_fetch.main
 
 输入区支持直接粘贴分享文案，程序会自动提取其中链接并识别资源类型。
 
-## 5. CLI 使用（保留）
+## 6. CLI 使用（保留）
 
 ```bash
 ./music-fetch --url "https://music.163.com/#/song?id=33894312"
@@ -127,7 +145,7 @@ py -3 -m music_fetch.main
 
 说明：CLI 和 GUI 均支持 `mp3/m4a/wav/flac/aac` 多种格式，CLI 默认 `mp3`。播放列表链接会自动展开并逐首下载。
 
-## 6. 错误码
+## 7. 错误码
 
 - `INVALID_URL`：链接无效或无法解析歌曲 ID
 - `AUTH_EXPIRED`：登录态缺失或过期
@@ -141,7 +159,7 @@ py -3 -m music_fetch.main
 - `DOWNLOAD_PAUSED`：下载已暂停
 - `UNKNOWN_ERROR`：未预期异常
 
-## 7. 项目架构
+## 8. 项目架构
 
 GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”，不是文件职责说明；文件职责以本节为准。
 
@@ -177,7 +195,7 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明、console script 和包声明。 |
-| `tests/` | 206 个单元/回归测试。 |
+| `tests/` | 217 个单元/回归测试。 |
 | `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
@@ -193,15 +211,14 @@ app_settings → app_logging → app_stores / batch_inputs / download_tasks / er
 
 新增功能优先复用已有模块，避免业务代码继续写硬编码。
 
-## 8. 文档与维护约定
+## 9. 文档与维护约定
 
 - `README.md`：用户入口、功能概览、启动方式、项目结构与测试命令。
 - `CHANGELOG.md`：唯一版本历史来源；历史 release notes 已合并到这里。
 - `ROADMAP.md`：后续规划与仍需推进的技术债。
 - `CONTRIBUTING.md`：提交信息模板与提交前检查命令。
-- `tests/`：回归测试目录，不属于可清理文档；新增行为变更时优先补这里。
 
-## 9. 提交规范（建议）
+## 10. 提交规范（建议）
 
 后续提交建议使用“标题 + 文件级变更说明”：
 
@@ -216,13 +233,13 @@ feat: 简要说明这次迭代目标
 这样新同学能快速理解“每个文件改了什么、为什么改”。
 完整模板见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
-## 10. 测试
+## 11. 测试
 
 ```bash
 python3 -m pytest tests/ -q
 ```
 
-## 11. 日志与排障
+## 12. 日志与排障
 
 - 默认日志：`~/.config/music-fetch/logs/music-fetch.log`
 - GUI 和 CLI 共用日志体系
@@ -230,7 +247,7 @@ python3 -m pytest tests/ -q
 - 直链被 CDN 403 拒绝时，会自动尝试 `outer/url` 兜底
 - 日志不会打印完整 `MUSIC_U` 值（已脱敏）
 
-## 12. 合规说明
+## 13. 合规说明
 
 仅用于你已获得合法授权的音频素材。  
 本工具不提供 DRM/版权绕过能力。

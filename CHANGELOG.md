@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.0 (2026-07-05)
+
+### Added
+
+- **PyInstaller 打包**：新增 `music-fetch.spec` 和 `build.py`，支持一键打包独立应用（`python build.py --clean`），无需安装 Python。
+- **GitHub Actions CI**：新增 `.github/workflows/build.yml`，推送 `v*` 标签时自动构建 Windows 安装包并上传到 GitHub Release（草稿状态）。
+- **开发依赖**：`pyproject.toml` 新增 `[dev]` 可选依赖（pyinstaller + pytest）。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.2.0 (2026-07-05)
 
 ### Added

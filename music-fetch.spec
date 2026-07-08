@@ -1,0 +1,54 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for music-fetch standalone executable."""
+
+import sys
+from pathlib import Path
+
+block_cipher = None
+
+a = Analysis(
+    ['music_fetch/main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'mutagen',
+        'mutagen.id3',
+        'mutagen.mp3',
+        'mutagen.mp4',
+        'mutagen.flac',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=['tkinter', 'unittest', 'test', 'pydoc'],
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='music-fetch',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    icon=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='music-fetch',
+)
