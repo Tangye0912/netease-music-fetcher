@@ -9,7 +9,7 @@ from typing import Optional
 
 from music_fetch.app_logging import get_logger
 from music_fetch.api import UserPlaylist, fetch_user_playlists
-from music_fetch.gui_styles import set_back_button, set_button_role, set_label_state, set_secondary_button
+from music_fetch.gui_styles import set_back_button, set_label_state, set_secondary_button
 import music_fetch.ui_texts as T
 
 try:
@@ -49,7 +49,7 @@ class PlaylistFetchWorker(QThread):
         try:
             playlists = fetch_user_playlists(self.cookie, timeout=self.timeout)
             self.succeeded.emit(playlists)
-        except Exception as err:
+        except (OSError, ValueError, TypeError) as err:
             logger.exception("PlaylistFetchWorker unexpected error.")
             self.failed.emit("UNKNOWN_ERROR", str(err))
 
@@ -109,10 +109,6 @@ class PlaylistDialog(QDialog):
             self.table.setItem(row, 0, QTableWidgetItem(pl.name))
             self.table.setItem(row, 1, QTableWidgetItem(str(pl.song_count)))
             self.table.setItem(row, 2, QTableWidgetItem(pl.creator))
-            open_btn = QPushButton(T.PLAYLIST_BTN_OPEN)
-            set_secondary_button(open_btn)
-            open_btn.clicked.connect(lambda _, r=row: self._on_open_clicked(r))
-            # Use a 4th column for the button
         # Add button column
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderItem(3, QTableWidgetItem(""))

@@ -16,7 +16,7 @@ from music_fetch.gui_styles import set_back_button, set_button_role, set_label_s
 import music_fetch.ui_texts as T
 
 try:
-    from PySide6.QtCore import Qt, QThread, Signal
+    from PySide6.QtCore import QThread, Signal
     from PySide6.QtWidgets import (
         QDialog,
         QHBoxLayout,
@@ -54,7 +54,7 @@ class SearchWorker(QThread):
         try:
             results = search_songs(self.keyword, self.cookie, timeout=self.timeout)
             self.succeeded.emit(results)
-        except Exception as err:
+        except (OSError, ValueError, TypeError) as err:
             logger.exception("SearchWorker unexpected error.")
             self.failed.emit("UNKNOWN_ERROR", str(err))
 
