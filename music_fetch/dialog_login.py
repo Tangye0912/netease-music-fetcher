@@ -14,7 +14,7 @@ from music_fetch.app_settings import (
     NETEASE_LOGIN_URL,
 )
 from music_fetch.error_texts import user_error_message
-from music_fetch.api import MusicFetchError, build_cookie_string, check_login_status
+from music_fetch.api import ErrorCode, MusicFetchError, build_cookie_string, check_login_status
 import music_fetch.ui_texts as T
 
 from music_fetch.gui_styles import (
@@ -218,6 +218,11 @@ class LoginDialog(QDialog):
                 self._login_check_done.emit(result)
             except MusicFetchError as err:
                 self._login_check_done.emit(err)
+            except Exception as err:
+                logger.exception("Login check unexpected error.")
+                self._login_check_done.emit(
+                    MusicFetchError(ErrorCode.NETWORK_ERROR, f"Unexpected error: {err}")
+                )
 
         thread = QThread()
         thread.run = check_status

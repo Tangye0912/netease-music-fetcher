@@ -740,6 +740,14 @@ class BatchDownloadDialog(QDialog):
         row = self._worker_rows.get(id(worker))
         if not row:
             return
+        # Cache partial progress for this worker (0.0–1.0).
+        if total > 0:
+            row._progress = min(downloaded / total, 1.0)
+        else:
+            row._progress = 0.0
+        # Skip status label updates while paused to avoid visual contradiction.
+        if self._download_paused:
+            return
         active_count = len(self._download_workers)
         finished = self._download_cursor
         if total > 0:
@@ -761,10 +769,12 @@ class BatchDownloadDialog(QDialog):
                 )
             )
         set_label_state(self.status_label, "warning")
-        # Update progress bar with partial progress from active workers.
-        if total > 0:
-            partial = downloaded / total
-            self.batch_progress.setValue(self._download_cursor + int(partial))
+        # Update progress bar: cursor + sum of all active workers' partial progress.
+        partial_sum = sum(
+            r._progress
+            for r in self._worker_rows.values()
+        )
+        self.batch_progress.setValue(self._download_cursor + int(partial_sum + 0.5))
 
     def _on_download_succeeded(self, worker: music_fetch.workers.DownloadWorker, output_path: str, file_size: int) -> None:
         row = self._worker_rows.get(id(worker))

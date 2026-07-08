@@ -408,8 +408,8 @@ class BatchDialogPauseResumeTests(unittest.TestCase):
 
         self.dialog._on_download_progress(worker, 50, 100, 1024.0)
 
-        # cursor(1) + partial(50/100=0.5→int=0) = 1
-        self.assertEqual(self.dialog.batch_progress.value(), 1)
+        # cursor(1) + round(0.5) = 2
+        self.assertEqual(self.dialog.batch_progress.value(), 2)
 
     def test_progress_with_full_download_updates_bar(self):
         row = _make_row("1", status="downloading")
@@ -425,7 +425,46 @@ class BatchDialogPauseResumeTests(unittest.TestCase):
 
         self.dialog._on_download_progress(worker, 80, 100, 2048.0)
 
-        # cursor(0) + partial(80/100=0.8→int=0) = 0
+        # cursor(0) + round(0.8) = 1
+        self.assertEqual(self.dialog.batch_progress.value(), 1)
+
+    def test_progress_aggregates_multiple_workers(self):
+        row_a = _make_row("1", status="downloading")
+        row_b = _make_row("2", status="downloading")
+        worker_a = mock.MagicMock(spec=DownloadWorker)
+        worker_b = mock.MagicMock(spec=DownloadWorker)
+        key_a = id(worker_a)
+        key_b = id(worker_b)
+        self.dialog._downloading = True
+        self.dialog._download_total = 4
+        self.dialog._download_cursor = 0
+        self.dialog._download_workers = {key_a: worker_a, key_b: worker_b}
+        self.dialog._worker_rows = {key_a: row_a, key_b: row_b}
+        self.dialog.batch_progress.setRange(0, 4)
+
+        # Worker A: 60% done, Worker B: 40% done
+        self.dialog._on_download_progress(worker_a, 60, 100, 1024.0)
+        self.dialog._on_download_progress(worker_b, 40, 100, 2048.0)
+
+        # cursor(0) + round(0.6 + 0.4) = round(1.0) = 1
+        self.assertEqual(self.dialog.batch_progress.value(), 1)
+
+    def test_progress_skipped_when_paused(self):
+        row = _make_row("1", status="downloading")
+        worker = mock.MagicMock(spec=DownloadWorker)
+        key = id(worker)
+        self.dialog._downloading = True
+        self.dialog._download_paused = True
+        self.dialog._download_total = 2
+        self.dialog._download_cursor = 0
+        self.dialog._download_workers = {key: worker}
+        self.dialog._worker_rows = {key: row}
+        self.dialog.batch_progress.setRange(0, 2)
+        self.dialog.batch_progress.setValue(0)
+
+        self.dialog._on_download_progress(worker, 50, 100, 1024.0)
+
+        # Progress bar should not change when paused
         self.assertEqual(self.dialog.batch_progress.value(), 0)
 
 
