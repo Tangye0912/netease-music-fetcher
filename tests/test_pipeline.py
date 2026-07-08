@@ -10,7 +10,89 @@ from music_fetch.api import (
     MusicFetchError,
     PlayableCandidate,
 )
-from music_fetch.pipeline import DownloadPipelineResult, run_download_pipeline
+from music_fetch.pipeline import DownloadPipelineResult, run_download_pipeline, write_audio_tags
+
+
+class WriteAudioTagsTests(unittest.TestCase):
+    """Tests for format-specific tag writing (MP4/MP3/Vorbis branches)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_mock_audio(self, tags_dict, audio_type):
+        """Create a mock mutagen audio object with given tags dict and type."""
+        audio = mock.MagicMock()
+        audio.tags = tags_dict
+        # Make isinstance checks work by setting __class__
+        audio.__class__ = audio_type
+        return audio
+
+    @mock.patch("mutagen.File")
+    def test_mp3_tags_use_id3_frames(self, mock_file):
+        from mutagen.mp3 import MP3
+        tags = mock.MagicMock()
+        audio = self._make_mock_audio(tags, MP3)
+        mock_file.return_value = audio
+        output_path = Path(self.tmp.name) / "test.mp3"
+        output_path.write_bytes(b"fake")
+
+        write_audio_tags(output_path, title="My Song", artist="Artist", album="Album")
+
+        # MP3 should use TIT2/TPE1/TALB frame classes
+        tags.add.assert_any_call(mock.ANY)
+        audio.save.assert_called_once()
+
+    @mock.patch("mutagen.File")
+    def test_mp4_tags_use_atom_codes(self, mock_file):
+        from mutagen.mp4 import MP4
+        tags = {}
+        audio = self._make_mock_audio(tags, MP4)
+        mock_file.return_value = audio
+        output_path = Path(self.tmp.name) / "test.m4a"
+        output_path.write_bytes(b"fake")
+
+        write_audio_tags(output_path, title="My Song", artist="Artist", album="Album")
+
+        self.assertEqual(tags.get('\xa9nam'), "My Song")
+        self.assertEqual(tags.get('\xa9ART'), "Artist")
+        self.assertEqual(tags.get('\xa9alb'), "Album")
+        audio.save.assert_called_once()
+
+    @mock.patch("mutagen.File")
+    def test_vorbis_tags_use_string_keys(self, mock_file):
+        from mutagen.flac import FLAC
+        tags = {}
+        audio = self._make_mock_audio(tags, FLAC)
+        mock_file.return_value = audio
+        output_path = Path(self.tmp.name) / "test.flac"
+        output_path.write_bytes(b"fake")
+
+        write_audio_tags(output_path, title="My Song", artist="Artist", album="Album")
+
+        self.assertEqual(tags.get('title'), "My Song")
+        self.assertEqual(tags.get('artist'), "Artist")
+        self.assertEqual(tags.get('album'), "Album")
+        audio.save.assert_called_once()
+
+    @mock.patch("mutagen.File")
+    def test_none_audio_returns_silently(self, mock_file):
+        mock_file.return_value = None
+        output_path = Path(self.tmp.name) / "test.unknown"
+        # Should not raise
+        write_audio_tags(output_path, title="Test")
+
+    @mock.patch("mutagen.File")
+    def test_no_tags_does_not_crash(self, mock_file):
+        audio = mock.MagicMock()
+        audio.tags = None
+        mock_file.return_value = audio
+        output_path = Path(self.tmp.name) / "test.mp3"
+        output_path.write_bytes(b"fake")
+        # Should not raise
+        write_audio_tags(output_path, title="Test")
 
 
 class RunDownloadPipelineTests(unittest.TestCase):
@@ -135,6 +217,49 @@ class RunDownloadPipelineTests(unittest.TestCase):
                 retry_count=1,
             )
         self.assertIn("Cannot write", ctx.exception.message)
+
+
+class ConvertAudioFileCleanupTests(unittest.TestCase):
+    """Tests for convert_audio_file exception cleanup in run_download_pipeline."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.output_path = Path(self.tmp.name) / "test.mp3"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @mock.patch("music_fetch.pipeline.convert_audio_file")
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_convert_failure_cleans_temp_files(self, fallback_mock, convert_mock):
+        from music_fetch.api import PlayableCandidate
+
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.write_bytes(b"source_data")
+            return PlayableCandidate(
+                media_url="https://example.com/song.m4a",
+                duration_ms=120000,
+                level="standard",
+                encode_type="m4a",
+            )
+
+        fallback_mock.side_effect = fake_fallback
+        convert_mock.side_effect = OSError("ffmpeg failed")
+
+        with self.assertRaises(OSError):
+            run_download_pipeline(
+                song_id="42",
+                cookie="MUSIC_U=test",
+                output_path=self.output_path,
+                target_format="mp3",
+                timeout=10,
+                retry_count=0,
+            )
+        # output_path should be cleaned up on convert failure
+        self.assertFalse(self.output_path.exists())
+        # temp source should also be cleaned up
+        source = self.output_path.with_name(f"{self.output_path.name}.source")
+        self.assertFalse(source.exists())
 
 
 if __name__ == "__main__":
