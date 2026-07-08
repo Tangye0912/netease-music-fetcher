@@ -104,7 +104,7 @@ class LoginDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.confirm_button = QPushButton(T.LOGIN_BTN_CONFIRM)
-        self.confirm_button.setAccessibleName("确认登录按钮")
+        self.confirm_button.setAccessibleName(T.ACC_BTN_LOGIN_CONFIRM)
         self.confirm_button.clicked.connect(self._on_confirm)
         self.confirm_button.setEnabled(False)
         set_button_role(self.confirm_button, "primary")

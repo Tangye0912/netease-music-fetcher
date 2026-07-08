@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSystemTrayIcon,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -190,10 +191,16 @@ class MainWindow(QMainWindow):
         self.input_analyze_timer.setSingleShot(True)
         self.input_analyze_timer.timeout.connect(self._analyze_input_after_delay)
 
+        self._tray_icon: Optional[QSystemTrayIcon] = None
+        self._clipboard_timer: Optional[QTimer] = None
+        self._last_clipboard_text = ""
         self._refresh_ffmpeg_status()
         self._refresh_account_profile()
         self._on_url_input_changed()
         self._setup_accessibility()
+        self._restore_window_geometry()
+        self._setup_tray_icon()
+        self._setup_clipboard_timer()
 
     def _setup_accessibility(self) -> None:
         self.url_input.setAccessibleName(T.ACC_INPUT_SONG_LINK)
@@ -205,6 +212,107 @@ class MainWindow(QMainWindow):
         self.setTabOrder(self.detect_button, self.dependency_button)
         self.setTabOrder(self.dependency_button, self.manager_button)
         self.setTabOrder(self.manager_button, self.settings_button)
+
+
+    def _restore_window_geometry(self) -> None:
+        geo_str = self.session.window_geometry
+        if geo_str:
+            parts = geo_str.split(",")
+            if len(parts) == 4:
+                try:
+                    x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                    self.move(x, y)
+                    self.resize(w, h)
+                    logger.info("Window geometry restored. x=%s y=%s w=%s h=%s", x, y, w, h)
+                except (ValueError, TypeError):
+                    pass
+
+    def _save_window_geometry(self) -> None:
+        geo = self.geometry()
+        self.session.window_geometry = f"{geo.x()},{geo.y()},{geo.width()},{geo.height()}"
+        self.session_store.save(self.session)
+
+    def _setup_tray_icon(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("System tray not available.")
+            return
+        self._tray_icon = QSystemTrayIcon(self)
+        self._tray_icon.setToolTip(T.TRAY_TOOLTIP)
+        tray_menu = QMenu(self)
+        show_action = QAction(T.TRAY_SHOW, self)
+        show_action.triggered.connect(self._show_from_tray)
+        quit_action = QAction(T.TRAY_QUIT, self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(quit_action)
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+        logger.info("System tray icon initialized.")
+
+    def _show_from_tray(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        self._save_window_geometry()
+        if self._tray_icon:
+            self._tray_icon.hide()
+        QApplication.quit()
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._show_from_tray()
+
+    def _show_tray_notification(self, title: str, message: str) -> None:
+        if self._tray_icon and self._tray_icon.isVisible():
+            self._tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 5000)
+
+    def _setup_clipboard_timer(self) -> None:
+        self._clipboard_timer = QTimer(self)
+        self._clipboard_timer.setSingleShot(False)
+        self._clipboard_timer.timeout.connect(self._check_clipboard)
+        self._clipboard_timer.start(2000)
+        self._last_clipboard_text = ""
+
+    def _check_clipboard(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        text = clipboard.text().strip()
+        if not text or text == self._last_clipboard_text:
+            return
+        self._last_clipboard_text = text
+        # Only auto-fill if input is empty and text looks like a netease URL
+        if self.url_input.toPlainText().strip():
+            return
+        from music_fetch.app_settings import SHORT_LINK_HOSTS
+        from urllib import parse as url_parse
+        try:
+            parsed = url_parse.urlparse(text)
+            host = parsed.netloc.lower()
+            if "music.163.com" in host or host in SHORT_LINK_HOSTS:
+                self.url_input.setPlainText(text)
+                self._set_status(T.TRAY_CLIPBOARD_DETECTED, "muted")
+                logger.info("Clipboard URL detected and auto-filled.")
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        if self._tray_icon and self._tray_icon.isVisible():
+            event.ignore()
+            self.hide()
+            self._tray_icon.showMessage(
+                T.APP_TITLE,
+                T.TRAY_TOOLTIP,
+                QSystemTrayIcon.Information,
+                2000,
+            )
+        else:
+            self._save_window_geometry()
+            event.accept()
 
     def _set_status(self, text: str, state: str) -> None:
         normalized = (text or "").strip()
@@ -584,11 +692,13 @@ class MainWindow(QMainWindow):
             self._set_latest_task_state(result.song_id, progress.output_path, TASK_STATE_SUCCESS)
             status_text = T.status_download_done(progress.output_path.name)
             self._set_status(status_text, "success")
+            self._show_tray_notification(T.TRAY_DOWNLOAD_DONE, T.TRAY_DOWNLOAD_DONE_BODY.format(name=progress.output_path.name))
             logger.info("GUI flow finished successfully. task_id=%s output=%s", task_id, progress.output_path)
         else:
             if progress.result_state == TASK_STATE_FAILED:
                 self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_FAILED, error_code=progress.error_code)
                 self._record_download_result(song_id=result.song_id, song_name=result.song_name or "", output_path=options.output_path, size_bytes=0, status=TASK_STATE_FAILED, error_code=progress.error_code)
+                self._show_tray_notification(T.TRAY_DOWNLOAD_FAILED, progress.error_code)
                 logger.warning("GUI flow finished with failed task. task_id=%s code=%s", task_id, progress.error_code)
             else:
                 self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_CANCELED)
@@ -633,7 +743,7 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
     loaded.cookie = cookie if remember else ""
     loaded.remember_login = remember
     session_store.save(loaded)
-    return AppSession(cookie=cookie, remember_login=remember, last_download_dir=loaded.last_download_dir, ui_font_size=loaded.ui_font_size, detect_timeout_sec=loaded.detect_timeout_sec, download_timeout_sec=loaded.download_timeout_sec, download_retry_count=loaded.download_retry_count, download_concurrency=loaded.download_concurrency)
+    return AppSession(cookie=cookie, remember_login=remember, last_download_dir=loaded.last_download_dir, ui_font_size=loaded.ui_font_size, detect_timeout_sec=loaded.detect_timeout_sec, download_timeout_sec=loaded.download_timeout_sec, download_retry_count=loaded.download_retry_count, download_concurrency=loaded.download_concurrency, ui_theme=loaded.ui_theme, window_geometry=loaded.window_geometry)
 
 
 def main() -> int:

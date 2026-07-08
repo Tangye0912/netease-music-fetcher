@@ -271,6 +271,16 @@ ACC_BTN_REMEMBER = "记住登录状态"
 ACC_BTN_LOGIN_CONFIRM = "登录确认按钮"
 ACC_BTN_DETECT_SHORT = "检测按钮"
 
+# Tray / notification
+TRAY_TOOLTIP = "网易云音乐下载助手"
+TRAY_SHOW = "显示主窗口"
+TRAY_QUIT = "退出"
+TRAY_DOWNLOAD_DONE = "下载完成"
+TRAY_DOWNLOAD_DONE_BODY = "{name} 已下载完成。"
+TRAY_DOWNLOAD_FAILED = "下载失败"
+TRAY_CLIPBOARD_DETECTED = "检测到剪贴板中的链接，已自动填入。"
+MSG_TRAY_UNSUPPORTED = "当前系统不支持系统托盘，最小化功能将不可用。"
+
 def code_message(code: str, message: str) -> str:
     return f"{code}: {message}"
 

@@ -46,6 +46,7 @@ class AppSession:
     download_retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT
     download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
     ui_theme: str = DEFAULT_UI_THEME
+    window_geometry: str = ""  # "x,y,w,h" serialized
 
 
 @dataclass
@@ -83,6 +84,7 @@ class SessionStore:
             download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
             ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
+            window_geometry=str(raw.get("window_geometry") or ""),
         )
 
     def save(self, session: AppSession) -> None:
@@ -98,6 +100,7 @@ class SessionStore:
             "download_retry_count": self._safe_download_retry_count(session.download_retry_count),
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
             "ui_theme": self._safe_ui_theme(session.ui_theme),
+            "window_geometry": session.window_geometry,
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
