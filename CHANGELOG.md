@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.1 (2026-07-08)
+
+### Fixed
+
+- **playlist 断网保留**：`fetch_playlist_song_ids` 分页拉取中途网络断开时，返回已获取的歌曲 ID 而非直接抛异常，避免已获取列表丢失。
+- **CLI ffmpeg 降级提示**：`run_download` / `run_playlist_download` 在 ffmpeg 缺失导致输出格式降级时，向 stderr 输出 WARNING 提示实际保存格式。
+- **删除空 `__init__.py`**：根目录残留的空文件已删除。
+- **type: ignore 迁移**：`batch_dialogs.py` 中 2 处 `type: ignore[override]` 行内注释迁移到 `pyproject.toml` 的 `[tool.mypy] disable_error_code` 全局配置。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（217 通过，1 跳过）。
+
 ## v1.3.0 (2026-07-05)
 
 ### Added

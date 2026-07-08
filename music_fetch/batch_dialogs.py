@@ -533,11 +533,11 @@ class BatchDownloadDialog(QDialog):
         self.table.setColumnWidth(4, col_size)
         self.table.setColumnWidth(5, col_status)
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._adjust_table_columns()
 
-    def showEvent(self, event) -> None:  # type: ignore[override]
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         QTimer.singleShot(0, self._adjust_table_columns)
 

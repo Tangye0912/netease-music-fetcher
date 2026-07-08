@@ -61,6 +61,13 @@ def run_download(
         retry_count=retry_count,
         tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
     )
+    actual_format = result.output_path.suffix.lstrip(".").lower()
+    if actual_format and actual_format != out_format.lower():
+        print(
+            f"WARNING: ffmpeg not available, output saved as {actual_format} "
+            f"instead of requested {out_format}.",
+            file=sys.stderr,
+        )
     logger.info(
         "Run download completed. song_id=%s output=%s size_bytes=%s duration_ms=%s",
         song_id, result.output_path, result.file_size, meta_duration,
@@ -111,6 +118,13 @@ def run_playlist_download(
                 timeout=timeout,
                 retry_count=retry_count,
             )
+            actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
+            if actual_format and actual_format != out_format.lower():
+                print(
+                    f"  WARNING: ffmpeg not available, saved as {actual_format} "
+                    f"instead of {out_format}.",
+                    file=sys.stderr,
+                )
             result = DownloadResult(
                 song_id=song_id,
                 output_path=pipeline_result.output_path.resolve(),

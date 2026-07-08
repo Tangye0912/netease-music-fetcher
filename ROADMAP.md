@@ -173,10 +173,10 @@
 
 ### Nice-to-have
 
-- [ ] 删除根目录空 __init__.py。
-- [ ] batch_dialogs.py 的 type: ignore[override] 迁移到全局配置。
-- [ ] playlist 下载中途网络断开时保留已获取 ID。
-- [ ] CLI ffmpeg 缺失时提示输出格式已降级。
+- [x] 删除根目录空 __init__.py。（v1.3.1 已完成）
+- [x] batch_dialogs.py 的 type: ignore[override] 迁移到全局配置。（v1.3.1 已完成）
+- [x] playlist 下载中途网络断开时保留已获取 ID。（v1.3.1 已完成）
+- [x] CLI ffmpeg 缺失时提示输出格式已降级。（v1.3.1 已完成）
 
 ## v0.14.0 (Completed - 2026-07-04)
 

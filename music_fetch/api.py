@@ -517,7 +517,16 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
     while True:
         query = parse.urlencode({"id": playlist_id, "n": str(page_size), "s": str(offset)})
         url = f"{PLAYLIST_DETAIL_API}?{query}"
-        status, body = perform_json_get(url, headers, timeout=timeout)
+        try:
+            status, body = perform_json_get(url, headers, timeout=timeout)
+        except MusicFetchError as err:
+            if all_ids:
+                logger.warning(
+                    "Playlist fetch interrupted, returning partial results. playlist_id=%s fetched=%s error=%s",
+                    playlist_id, len(all_ids), err.message,
+                )
+                return all_ids
+            raise
         if first_page_body is None:
             first_page_body = body
         if status in (401, 403):

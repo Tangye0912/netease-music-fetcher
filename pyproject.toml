@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "1.3.0"
+version = "1.3.1"
 description = "网易云音乐单曲下载工具"
 requires-python = ">=3.9"
 dependencies = [
@@ -24,3 +24,8 @@ Homepage = "https://github.com/Tangye0912/netease-music-fetcher"
 
 [tool.setuptools]
 packages = ["music_fetch"]
+
+[tool.mypy]
+# PySide6 stubs don't perfectly match Qt override signatures (e.g. resizeEvent,
+# showEvent).  Silence the [override] error globally instead of per-line.
+disable_error_code = ["override"]
