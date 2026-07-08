@@ -17,6 +17,15 @@ a = Analysis(
         'mutagen.mp3',
         'mutagen.mp4',
         'mutagen.flac',
+        # Project modules imported lazily inside functions (PyInstaller can't
+        # detect them via static analysis).
+        'music_fetch.search_dialog',
+        'music_fetch.playlist_dialog',
+        'music_fetch.batch_inputs',
+        'music_fetch.batch_dialogs',
+        # PySide6 WebEngine — imported in try/except blocks, may be skipped.
+        'PySide6.QtWebEngineCore',
+        'PySide6.QtWebEngineWidgets',
     ],
     hookspath=[],
     hooksconfig={},

@@ -323,7 +323,9 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 logger.info("Media download finished. output=%s downloaded_bytes=%s total_bytes=%s attempt=%s", output_path, downloaded, total_bytes if total_bytes is not None else "unknown", attempt_no)
                 return
             except error.HTTPError as http_err:
-                if resume_offset == 0 and tmp_path.exists():
+                # Clean up .part on any HTTP error — a stale partial file
+                # with an outdated offset would corrupt the next download.
+                if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
                 body_preview = ""
                 try:

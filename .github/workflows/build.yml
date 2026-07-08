@@ -18,8 +18,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install PySide6 mutagen pyinstaller
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Run tests
         run: python -m pytest tests/ -q

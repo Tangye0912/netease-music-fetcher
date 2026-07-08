@@ -233,8 +233,11 @@ def resolve_short_url(url: str, timeout: int = 15) -> str:
             logger.info("Resolved short link. from=%s to=%s", url, resolved)
             return resolved
     except error.HTTPError as http_err:
+        # HTTPError.geturl() returns the final URL after redirects, but only
+        # trust it if it actually differs from the original (i.e. a redirect
+        # happened). Otherwise the error page URL == original short link.
         redirected = http_err.geturl() if hasattr(http_err, "geturl") else ""
-        if redirected:
+        if redirected and redirected != url:
             logger.warning("Short link returned HTTP error but redirected. from=%s to=%s", url, redirected)
             return redirected
         logger.error("Failed to resolve short link. url=%s status=%s", url, http_err.code)

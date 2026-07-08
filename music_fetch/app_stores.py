@@ -137,14 +137,19 @@ class SessionStore:
 class DownloadHistoryStore:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._cache: Optional[list[DownloadRecord]] = None
 
     def load(self) -> list[DownloadRecord]:
+        if self._cache is not None:
+            return list(self._cache)
         if not self.path.exists():
+            self._cache = []
             return []
         try:
             rows = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
+            self._cache = []
             return []
 
         records: list[DownloadRecord] = []
@@ -162,9 +167,11 @@ class DownloadHistoryStore:
                     error_code=str(row.get("error_code") or ""),
                 )
             )
+        self._cache = records
         return records
 
     def save(self, records: list[DownloadRecord]) -> None:
+        self._cache = list(records)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = [
             {

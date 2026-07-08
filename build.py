@@ -50,9 +50,10 @@ def build() -> int:
 
     output_dir = DIST_DIR / "music-fetch"
     if output_dir.exists():
+        exe_name = "music-fetch.exe" if sys.platform == "win32" else "music-fetch"
         print(f"\nBuild successful!")
         print(f"Output: {output_dir}")
-        print(f"Executable: {output_dir / 'music-fetch.exe'}")
+        print(f"Executable: {output_dir / exe_name}")
     return 0
 
 

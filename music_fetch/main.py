@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 from urllib import error
 
-from PySide6.QtCore import Qt, QSize, QThread, QTimer, QUrl
+from PySide6.QtCore import Qt, QSize, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -70,6 +70,11 @@ from music_fetch.version_check import version_key, fetch_latest_project_version
 
 
 class MainWindow(QMainWindow):
+    # Signals for thread-safe UI updates (emitted from worker threads,
+    # connected to slots that run on the main thread).
+    _version_check_done = Signal(object)   # (latest_version, release_url) or Exception
+    _profile_refresh_done = Signal(object)  # AccountProfile or None
+
     def __init__(self, session_store: SessionStore, history_store: DownloadHistoryStore, session: AppSession) -> None:
         super().__init__()
         self.session_store = session_store
@@ -87,6 +92,8 @@ class MainWindow(QMainWindow):
         self._batch_cached_signature = ""
         self._batch_cached_rows: list[BatchDetectRow] = []
         self.latest_download_task: Optional[DownloadTaskSnapshot] = None
+        self._version_check_done.connect(self._on_version_check_done)
+        self._profile_refresh_done.connect(self._on_profile_refresh_done)
         self.setWindowTitle(T.APP_TITLE)
         screen = QApplication.primaryScreen()
         if screen:
@@ -334,29 +341,33 @@ class MainWindow(QMainWindow):
         def check_and_notify() -> None:
             try:
                 latest_version, release_url = fetch_latest_project_version(timeout=6)
-            except RuntimeError as err:
-                self._set_status("", "muted")
-                QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
+            except (RuntimeError, error.URLError, error.HTTPError, OSError) as err:
+                self._version_check_done.emit(err)
                 return
-            except (error.URLError, error.HTTPError, OSError) as err:
-                self._set_status("", "muted")
-                QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(err)))
-                return
-            current_key = version_key(APP_VERSION)
-            latest_key = version_key(latest_version)
-            if latest_key > current_key:
-                self._set_status(T.status_update_available(latest_version), "warning")
-                answer = QMessageBox.question(self, T.TITLE_WARNING, T.MSG_UPDATE_AVAILABLE.format(latest=latest_version, current=APP_VERSION), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                if answer == QMessageBox.Yes:
-                    QDesktopServices.openUrl(QUrl(release_url or PROJECT_GITHUB_URL))
-                return
-            self._set_status(T.status_update_latest(APP_VERSION), "success")
-            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_LATEST.format(current=APP_VERSION))
+            self._version_check_done.emit((latest_version, release_url))
 
         thread = QThread()
         thread.run = check_and_notify
         thread.finished.connect(thread.deleteLater)
         thread.start()
+
+    def _on_version_check_done(self, result: object) -> None:
+        """Handle version check result on the main thread."""
+        if isinstance(result, Exception):
+            self._set_status("", "muted")
+            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(result)))
+            return
+        latest_version, release_url = result
+        current_key = version_key(APP_VERSION)
+        latest_key = version_key(latest_version)
+        if latest_key > current_key:
+            self._set_status(T.status_update_available(latest_version), "warning")
+            answer = QMessageBox.question(self, T.TITLE_WARNING, T.MSG_UPDATE_AVAILABLE.format(latest=latest_version, current=APP_VERSION), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if answer == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(release_url or PROJECT_GITHUB_URL))
+            return
+        self._set_status(T.status_update_latest(APP_VERSION), "success")
+        QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_LATEST.format(current=APP_VERSION))
 
     def _set_detect_busy(self, busy: bool) -> None:
         self._detect_busy = busy
@@ -479,16 +490,20 @@ class MainWindow(QMainWindow):
         def fetch_and_update() -> None:
             try:
                 profile = fetch_account_profile(self.session.cookie, timeout=10)
-                self._apply_account_profile(profile)
+                self._profile_refresh_done.emit(profile)
             except MusicFetchError as err:
                 logger.warning("Failed to refresh account profile. code=%s message=%s", err.code, err.message)
-                self._apply_account_profile(None)
-            self._sync_detect_button_state()
+                self._profile_refresh_done.emit(None)
 
         thread = QThread()
         thread.run = fetch_and_update
         thread.finished.connect(thread.deleteLater)
         thread.start()
+
+    def _on_profile_refresh_done(self, profile: object) -> None:
+        """Handle profile refresh result on the main thread."""
+        self._apply_account_profile(profile)
+        self._sync_detect_button_state()
 
     def _on_switch_account(self) -> None:
         logger.info("User requested switch account.")

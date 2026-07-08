@@ -165,6 +165,7 @@ class DownloadProgressDialog(QDialog):
     def _on_failed(self, code: str, message: str) -> None:
         self.result_state = TASK_STATE_FAILED
         self.error_code = code
+        self.pause_button.setEnabled(False)
         logger.warning("Download progress failed. task_id=%s code=%s", self.task_id, code)
         mapped = user_error_message(code, message)
         if self.notify_each_result:
@@ -173,6 +174,7 @@ class DownloadProgressDialog(QDialog):
 
     def _on_canceled(self) -> None:
         self.result_state = TASK_STATE_CANCELED
+        self.pause_button.setEnabled(False)
         logger.info("Download progress canceled. task_id=%s", self.task_id)
         if self.notify_each_result:
             QMessageBox.information(self, T.TITLE_DOWNLOAD_CANCELED, T.MSG_DOWNLOAD_CANCELED)
@@ -180,6 +182,7 @@ class DownloadProgressDialog(QDialog):
 
     def _on_succeeded(self, output_path: str, file_size: int) -> None:
         self.result_state = TASK_STATE_SUCCESS
+        self.pause_button.setEnabled(False)
         self.output_path = Path(output_path)
         logger.info("Download progress succeeded. task_id=%s output=%s size=%s", self.task_id, self.output_path, file_size)
         fallback_note = ""

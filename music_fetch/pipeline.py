@@ -201,20 +201,32 @@ def write_audio_tags(
             logger.debug("Unsupported audio format for tagging: %s", output_path.suffix)
             return
 
-        # Set basic tags
+        # Set basic tags — format-specific to avoid writing invalid frames
         if hasattr(audio, 'tags') and audio.tags is not None:
-            if title:
-                audio.tags['\xa9nam'] = title  # MP4
-                audio.tags['TIT2'] = title      # ID3
-                audio.tags['title'] = title     # FLAC/Vorbis
-            if artist:
-                audio.tags['\xa9ART'] = artist
-                audio.tags['TPE1'] = artist
-                audio.tags['artist'] = artist
-            if album:
-                audio.tags['\xa9alb'] = album
-                audio.tags['TALB'] = album
-                audio.tags['album'] = album
+            if isinstance(audio, MP4):
+                # MP4 uses 4-char atom codes
+                if title:
+                    audio.tags['\xa9nam'] = title
+                if artist:
+                    audio.tags['\xa9ART'] = artist
+                if album:
+                    audio.tags['\xa9alb'] = album
+            elif isinstance(audio, MP3):
+                # MP3 uses ID3 frame classes
+                if title:
+                    audio.tags.add(TIT2(encoding=3, text=title))
+                if artist:
+                    audio.tags.add(TPE1(encoding=3, text=artist))
+                if album:
+                    audio.tags.add(TALB(encoding=3, text=album))
+            else:
+                # FLAC, Ogg Vorbis, etc. use Vorbis comment keys
+                if title:
+                    audio.tags['title'] = title
+                if artist:
+                    audio.tags['artist'] = artist
+                if album:
+                    audio.tags['album'] = album
             audio.save()
 
         # Embed cover art for MP3 files
