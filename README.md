@@ -3,9 +3,9 @@
 网易云音乐单曲下载工具。  
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v1.4.0）
+## 1. 版本概览（v1.4.1）
 
-### 1.1 近期更新（v1.0.0 → v1.4.0）
+### 1.1 近期更新（v1.0.0 → v1.4.1）
 
 - **架构升级**：迁移到 `music_fetch/` 包目录，`ErrorCode` 错误码枚举，`DownloadPipeline` 统一下载管道。
 - **暂停/恢复**：下载支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
@@ -13,7 +13,7 @@
 - **CLI 补全**：`--format`、`--rename`、`--retry` 参数，播放列表批量下载，`download_song_with_fallback` fallback 链。
 - **封面图 + ID3 标签**：`SongConfirmDialog` 显示专辑封面/艺人/专辑，下载文件自动嵌入 ID3 标签（mutagen）。
 - **系统托盘**（v1.1.0）：最小化到托盘，下载完成通知，剪贴板自动检测，窗口位置记忆。
-- **测试**：223 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查等。
+- **测试**：290 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
 迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
@@ -72,11 +72,11 @@ python build.py --clean
 
 ### CI 自动构建
 
-推送 `v*` 格式的 git 标签（如 `git tag v1.4.0 && git push origin v1.4.0`）会触发 GitHub Actions 自动构建 Windows 版本并上传到 GitHub Release（草稿状态）：
+推送 `v*` 格式的 git 标签（如 `git tag v1.4.1 && git push origin v1.4.1`）会触发 GitHub Actions 自动构建 Windows 版本并上传到 GitHub Release（草稿状态）：
 
 ```bash
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.4.1
+git push origin v1.4.1
 ```
 
 ## 4. 启动方式（跨平台）
@@ -195,7 +195,7 @@ GitHub 文件列表右侧展示的是“最后修改该文件的提交信息”�
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明、console script 和包声明。 |
-| `tests/` | 223 个单元/回归测试。 |
+| `tests/` | 290 个单元/回归测试。 |
 | `README.md` | 用户入口文档：能力说明、启动方式、架构和维护约定。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |

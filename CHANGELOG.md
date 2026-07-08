@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.1 (2026-07-08)
+
+### Added
+
+- **测试覆盖提升**：新增 67 个单元测试，覆盖 `api.py`（链接解析、cookie、短链）、`dialog_login.py`（异步登录检查流程）、`dialog_progress.py`（暂停/恢复/取消按钮状态）、`pipeline.py`（MP3/MP4/FLAC 标签写入分支、convert 异常清理）。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（290 通过，1 跳过）。
+
 ## v1.4.0 (2026-07-08)
 
 ### Added
