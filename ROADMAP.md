@@ -115,6 +115,20 @@
 - [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
 - [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
 
+## v1.4.0 (Completed - 2026-07-08)
+
+### Goal
+
+- 批量下载暂停/恢复 UI 交互完善 + 下载进度条实时更新。
+
+### Scope
+
+- [x] 暂停/恢复时行状态切换（downloading ↔ download_paused）。
+- [x] 暂停行灰色高亮、下载行蓝色高亮。
+- [x] 进度条累加所有活跃 worker 的部分进度，四舍五入。
+- [x] 暂停时跳过 status_label 更新避免视觉矛盾。
+- [x] 登录检查子线程添加 except Exception 兜底。
+
 ## v1.3.0 (Completed - 2026-07-05)
 
 ### Goal

@@ -5,11 +5,17 @@
 ### Added
 
 - **批量下载暂停/恢复 UI 完善**：暂停时正在下载的行状态切换为"下载已暂停"并灰色高亮，恢复时切回"下载中"并蓝色高亮。
-- **下载进度条实时更新**：批量下载过程中根据当前 worker 的下载比例实时更新进度条，不再只在每首完成时跳变。
+- **下载进度条实时更新**：批量下载过程中累加所有活跃 worker 的下载比例实时更新进度条，不再只在每首完成时跳变。
+
+### Fixed
+
+- **进度条截断 bug**：`int(downloaded/total)` 截断后几乎总是 0，进度条在下载过程中不动。改为累加所有 worker 的部分进度并四舍五入。
+- **暂停状态矛盾**：暂停后 worker 仍 emit progress 信号导致 status_label 显示下载速度文本与"已暂停"矛盾。暂停时跳过 status_label 更新。
+- **登录检查异常未兜底**：`check_status` 子线程只捕获 `MusicFetchError`，其他异常导致 `_login_checking` 永久 True、confirm 按钮永久禁用。添加 `except Exception` 兜底。
 
 ### QA
 
-- 回归测试：`python3 -m pytest tests/`（221 通过，1 跳过）。
+- 回归测试：`python3 -m pytest tests/`（223 通过，1 跳过）。
 
 ## v1.3.1 (2026-07-08)
 
