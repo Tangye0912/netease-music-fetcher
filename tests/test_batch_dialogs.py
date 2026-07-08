@@ -340,5 +340,94 @@ class BatchDialogDownloadSchedulingTests(unittest.TestCase):
         self.dialog._stop_download_flow.assert_called_once_with(stopped=True)
 
 
+class BatchDialogPauseResumeTests(unittest.TestCase):
+    """Tests for pause/resume UI interaction."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.history_path = Path(self._tmp_dir.name) / "test_history.json"
+        self.history_store = DownloadHistoryStore(self.history_path)
+        self.dialog = BatchDownloadDialog(
+            cookie="MUSIC_U=test",
+            history_store=self.history_store,
+            last_download_dir=str(Path(self._tmp_dir.name).resolve()),
+            detect_timeout_sec=5,
+            download_timeout_sec=10,
+            download_retry_count=1,
+            download_concurrency=2,
+        )
+
+    def tearDown(self):
+        self.dialog.close()
+        self.dialog.deleteLater()
+
+    def test_pause_sets_row_status_to_paused(self):
+        row = _make_row("1", status="downloading")
+        worker = mock.MagicMock(spec=DownloadWorker)
+        key = id(worker)
+        self.dialog._downloading = True
+        self.dialog._download_workers = {key: worker}
+        self.dialog._worker_rows = {key: row}
+
+        self.dialog._on_pause_download_clicked()
+
+        self.assertTrue(self.dialog._download_paused)
+        self.assertEqual(row.status, "download_paused")
+        self.assertEqual(self.dialog.pause_download_button.text(), "全部恢复")
+        worker.request_pause.assert_called_once()
+
+    def test_resume_sets_row_status_back_to_downloading(self):
+        row = _make_row("1", status="download_paused")
+        worker = mock.MagicMock(spec=DownloadWorker)
+        key = id(worker)
+        self.dialog._downloading = True
+        self.dialog._download_paused = True
+        self.dialog._download_workers = {key: worker}
+        self.dialog._worker_rows = {key: row}
+        self.dialog._dispatch_download_workers = mock.MagicMock()
+
+        self.dialog._on_pause_download_clicked()
+
+        self.assertFalse(self.dialog._download_paused)
+        self.assertEqual(row.status, "downloading")
+        self.assertEqual(self.dialog.pause_download_button.text(), "全部暂停")
+        worker.request_resume.assert_called_once()
+        self.dialog._dispatch_download_workers.assert_called_once()
+
+    def test_progress_updates_batch_progress_bar(self):
+        row = _make_row("1", status="downloading")
+        worker = mock.MagicMock(spec=DownloadWorker)
+        key = id(worker)
+        self.dialog._downloading = True
+        self.dialog._download_total = 3
+        self.dialog._download_cursor = 1
+        self.dialog._download_workers = {key: worker}
+        self.dialog._worker_rows = {key: row}
+        self.dialog.batch_progress.setRange(0, 3)
+        self.dialog.batch_progress.setValue(1)
+
+        self.dialog._on_download_progress(worker, 50, 100, 1024.0)
+
+        # cursor(1) + partial(50/100=0.5→int=0) = 1
+        self.assertEqual(self.dialog.batch_progress.value(), 1)
+
+    def test_progress_with_full_download_updates_bar(self):
+        row = _make_row("1", status="downloading")
+        worker = mock.MagicMock(spec=DownloadWorker)
+        key = id(worker)
+        self.dialog._downloading = True
+        self.dialog._download_total = 2
+        self.dialog._download_cursor = 0
+        self.dialog._download_workers = {key: worker}
+        self.dialog._worker_rows = {key: row}
+        self.dialog.batch_progress.setRange(0, 2)
+        self.dialog.batch_progress.setValue(0)
+
+        self.dialog._on_download_progress(worker, 80, 100, 2048.0)
+
+        # cursor(0) + partial(80/100=0.8→int=0) = 0
+        self.assertEqual(self.dialog.batch_progress.value(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

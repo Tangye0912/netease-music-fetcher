@@ -505,6 +505,11 @@ class BatchDownloadDialog(QDialog):
             status_item = QTableWidgetItem(T.batch_detect_status_text(row.status))
             if row.message:
                 status_item.setToolTip(row.message)
+            # Visual highlight for paused rows
+            if row.status == "download_paused":
+                status_item.setForeground(Qt.gray)
+            elif row.status == "downloading":
+                status_item.setForeground(Qt.blue)
             self.table.setItem(row_index, 5, status_item)
         self._table_syncing = False
 
@@ -756,6 +761,10 @@ class BatchDownloadDialog(QDialog):
                 )
             )
         set_label_state(self.status_label, "warning")
+        # Update progress bar with partial progress from active workers.
+        if total > 0:
+            partial = downloaded / total
+            self.batch_progress.setValue(self._download_cursor + int(partial))
 
     def _on_download_succeeded(self, worker: music_fetch.workers.DownloadWorker, output_path: str, file_size: int) -> None:
         row = self._worker_rows.get(id(worker))
@@ -881,8 +890,12 @@ class BatchDownloadDialog(QDialog):
             self.pause_download_button.setText(T.BATCH_BTN_PAUSE)
             self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}{T.batch_download_concurrency_label(self.download_concurrency)}")
             set_label_state(self.status_label, "warning")
-            for worker in list(self._download_workers.values()):
-                worker.request_resume()
+            for key in list(self._download_workers.keys()):
+                row = self._worker_rows.get(key)
+                if row and row.status == "download_paused":
+                    row.status = "downloading"
+                self._download_workers[key].request_resume()
+            self._render_rows()
             self._dispatch_download_workers()
             logger.info("Batch download resumed. remaining=%s", self._download_total - self._download_cursor)
         else:
@@ -891,8 +904,12 @@ class BatchDownloadDialog(QDialog):
             self.pause_download_button.setText(T.BATCH_BTN_RESUME)
             self.status_label.setText(T.BATCH_STATUS_DOWNLOAD_PAUSED)
             set_label_state(self.status_label, "muted")
-            for worker in list(self._download_workers.values()):
-                worker.request_pause()
+            for key in list(self._download_workers.keys()):
+                row = self._worker_rows.get(key)
+                if row and row.status == "downloading":
+                    row.status = "download_paused"
+                self._download_workers[key].request_pause()
+            self._render_rows()
             logger.info("Batch download paused. cursor=%s/%s", self._download_cursor, self._download_total)
 
     def _on_cancel_download_clicked(self) -> None:
