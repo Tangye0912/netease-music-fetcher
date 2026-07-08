@@ -238,9 +238,9 @@ class BatchDownloadDialog(QDialog):
         self.pause_download_button.setEnabled(False)
         self.pause_download_button.setVisible(False)
         self.pause_download_button.clicked.connect(self._on_pause_download_clicked)
-        back_button = QPushButton(T.BTN_BACK)
-        set_back_button(back_button)
-        back_button.clicked.connect(self.reject)
+        self.back_button = QPushButton(T.BTN_BACK)
+        set_back_button(self.back_button)
+        self.back_button.clicked.connect(self.reject)
         button_row.addWidget(self.detect_button)
         button_row.addWidget(self.batch_settings_button)
         button_row.addWidget(self.select_all_button)
@@ -251,7 +251,7 @@ class BatchDownloadDialog(QDialog):
         button_row.addWidget(self.export_csv_button)
         button_row.addWidget(self.cancel_download_button)
         button_row.addStretch(1)
-        button_row.addWidget(back_button)
+        button_row.addWidget(self.back_button)
         root.addLayout(button_row)
 
         current_signature = self._current_input_signature()
@@ -641,6 +641,7 @@ class BatchDownloadDialog(QDialog):
         self.status_label.setText(f"{T.BATCH_STATUS_DOWNLOADING}{T.batch_download_concurrency_label(self.download_concurrency)}")
         set_label_state(self.status_label, "warning")
         self.input_edit.setEnabled(False)
+        self.back_button.setEnabled(False)
         self.cancel_download_button.setVisible(True)
         self.cancel_download_button.setEnabled(True)
         self.pause_download_button.setVisible(True)
@@ -928,6 +929,7 @@ class BatchDownloadDialog(QDialog):
         self._download_queue = []
         self._download_next_index = 0
         self.input_edit.setEnabled(True)
+        self.back_button.setEnabled(True)
         self.cancel_download_button.setVisible(False)
         self.pause_download_button.setVisible(False)
         self.cancel_download_button.setEnabled(False)

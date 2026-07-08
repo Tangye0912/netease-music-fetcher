@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -138,41 +139,44 @@ class DownloadHistoryStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._cache: Optional[list[DownloadRecord]] = None
+        self._lock = threading.RLock()
 
     def load(self) -> list[DownloadRecord]:
-        if self._cache is not None:
-            return list(self._cache)
-        if not self.path.exists():
-            self._cache = []
-            return []
-        try:
-            rows = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
-            self._cache = []
-            return []
+        with self._lock:
+            if self._cache is not None:
+                return list(self._cache)
+            if not self.path.exists():
+                self._cache = []
+                return []
+            try:
+                rows = json.loads(self.path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
+                self._cache = []
+                return []
 
-        records: list[DownloadRecord] = []
-        for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, dict):
-                continue
-            records.append(
-                DownloadRecord(
-                    song_id=str(row.get("song_id") or ""),
-                    song_name=str(row.get("song_name") or UNKNOWN_SONG_NAME),
-                    output_path=str(row.get("output_path") or ""),
-                    size_bytes=self._safe_int(row.get("size_bytes")),
-                    downloaded_at=str(row.get("downloaded_at") or ""),
-                    status=self._safe_status(row.get("status")),
-                    error_code=str(row.get("error_code") or ""),
+            records: list[DownloadRecord] = []
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                records.append(
+                    DownloadRecord(
+                        song_id=str(row.get("song_id") or ""),
+                        song_name=str(row.get("song_name") or UNKNOWN_SONG_NAME),
+                        output_path=str(row.get("output_path") or ""),
+                        size_bytes=self._safe_int(row.get("size_bytes")),
+                        downloaded_at=str(row.get("downloaded_at") or ""),
+                        status=self._safe_status(row.get("status")),
+                        error_code=str(row.get("error_code") or ""),
+                    )
                 )
-            )
-        self._cache = records
-        return records
+            self._cache = records
+            return records
 
     def save(self, records: list[DownloadRecord]) -> None:
-        self._cache = list(records)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            self._cache = list(records)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = [
             {
                 "song_id": r.song_id,
@@ -188,12 +192,13 @@ class DownloadHistoryStore:
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, record: DownloadRecord) -> None:
-        records = self.load()
-        # v0.4.0: keep the latest task result at the top and dedupe by output path.
-        filtered = [row for row in records if row.output_path != record.output_path]
-        record.status = self._safe_status(record.status)
-        filtered.insert(0, record)
-        self.save(filtered)
+        with self._lock:
+            records = self.load()
+            # v0.4.0: keep the latest task result at the top and dedupe by output path.
+            filtered = [row for row in records if row.output_path != record.output_path]
+            record.status = self._safe_status(record.status)
+            filtered.insert(0, record)
+            self.save(filtered)
         logger.info(
             "Download history appended. song_id=%s path=%s status=%s",
             record.song_id,

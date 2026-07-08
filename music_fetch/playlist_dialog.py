@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from music_fetch.app_logging import get_logger
-from music_fetch.api import UserPlaylist, fetch_user_playlists
+from music_fetch.api import MusicFetchError, UserPlaylist, fetch_user_playlists
 from music_fetch.gui_styles import set_back_button, set_label_state, set_secondary_button
 import music_fetch.ui_texts as T
 
@@ -49,6 +49,9 @@ class PlaylistFetchWorker(QThread):
         try:
             playlists = fetch_user_playlists(self.cookie, timeout=self.timeout)
             self.succeeded.emit(playlists)
+        except MusicFetchError as err:
+            logger.warning("PlaylistFetchWorker failed. code=%s message=%s", err.code, err.message)
+            self.failed.emit(err.code, err.message)
         except (OSError, ValueError, TypeError) as err:
             logger.exception("PlaylistFetchWorker unexpected error.")
             self.failed.emit("UNKNOWN_ERROR", str(err))
@@ -100,6 +103,7 @@ class PlaylistDialog(QDialog):
         self.fetch_worker = PlaylistFetchWorker(self.cookie, timeout=self.timeout)
         self.fetch_worker.succeeded.connect(self._on_fetch_succeeded)
         self.fetch_worker.failed.connect(self._on_fetch_failed)
+        self.fetch_worker.finished.connect(self.fetch_worker.deleteLater)
         self.fetch_worker.start()
 
     def _on_fetch_succeeded(self, playlists: list[UserPlaylist]) -> None:

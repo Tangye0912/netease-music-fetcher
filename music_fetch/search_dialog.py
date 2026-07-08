@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from music_fetch.app_logging import get_logger
-from music_fetch.api import SearchResult, search_songs
+from music_fetch.api import MusicFetchError, SearchResult, search_songs
 from music_fetch.batch_models import format_duration
 from music_fetch.gui_styles import set_back_button, set_button_role, set_label_state, set_secondary_button
 import music_fetch.ui_texts as T
@@ -54,6 +54,9 @@ class SearchWorker(QThread):
         try:
             results = search_songs(self.keyword, self.cookie, timeout=self.timeout)
             self.succeeded.emit(results)
+        except MusicFetchError as err:
+            logger.warning("SearchWorker failed. code=%s message=%s", err.code, err.message)
+            self.failed.emit(err.code, err.message)
         except (OSError, ValueError, TypeError) as err:
             logger.exception("SearchWorker unexpected error.")
             self.failed.emit("UNKNOWN_ERROR", str(err))
@@ -129,6 +132,7 @@ class SearchDialog(QDialog):
         self.search_worker = SearchWorker(keyword, self.cookie, timeout=self.timeout)
         self.search_worker.succeeded.connect(self._on_search_succeeded)
         self.search_worker.failed.connect(self._on_search_failed)
+        self.search_worker.finished.connect(self.search_worker.deleteLater)
         self.search_worker.start()
 
     def _on_search_succeeded(self, results: list[SearchResult]) -> None:

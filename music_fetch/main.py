@@ -349,6 +349,7 @@ class MainWindow(QMainWindow):
         thread = QThread()
         thread.run = check_and_notify
         thread.finished.connect(thread.deleteLater)
+        self._version_thread = thread  # prevent GC while running
         thread.start()
 
     def _on_version_check_done(self, result: object) -> None:
@@ -498,6 +499,7 @@ class MainWindow(QMainWindow):
         thread = QThread()
         thread.run = fetch_and_update
         thread.finished.connect(thread.deleteLater)
+        self._profile_thread = thread  # prevent GC while running
         thread.start()
 
     def _on_profile_refresh_done(self, profile: object) -> None:

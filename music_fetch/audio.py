@@ -335,6 +335,9 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 logger.warning("Download attempt HTTP error. attempt=%s/%s status=%s scheme=%s referer=%s cookie=%s body=%s", attempt_no, total_attempts, http_err.code, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no", body_preview[:120])
                 if http_err.code == 403:
                     last_403_error = http_err
+                    # .part was deleted above; reset resume_offset so the next
+                    # attempt starts fresh (wb mode, no Range header).
+                    resume_offset = 0
                     continue
                 raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Media request failed: HTTP {http_err.code}.") from http_err
             except error.URLError as url_err:
