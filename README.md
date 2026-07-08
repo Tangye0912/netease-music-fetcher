@@ -5,15 +5,15 @@
 
 ## 1. 版本概览（v1.1.0）
 
-### 1.1 近期更新（v0.10.0 → v1.1.0）
+### 1.1 近期更新（v1.0.0 → v1.1.0）
 
-- **模块拆分**：新增 `_batch_models.py`、`_gui_styles.py`、`_dialog_login.py`、`_dialog_progress.py`、`_dialog_manager.py`、`_dialog_batch_settings.py`、`_version_check.py`，`_dialogs.py` 和 `_batch_dialogs.py` 体积大幅缩减。
-- **暂停/恢复**：`DownloadWorker` 支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
+- **架构升级**：迁移到 `music_fetch/` 包目录，`ErrorCode` 错误码枚举，`DownloadPipeline` 统一下载管道。
+- **暂停/恢复**：下载支持暂停/恢复与断点续传（`Range` 请求头），GUI 已集成暂停/恢复按钮。
 - **暗色主题**：软件设置中可切换浅色/深色主题（Catppuccin 风格），持久化到 `ui_theme`。
-- **CLI 补全**：新增 `--format`（mp3/m4a/wav/flac/aac）、`--rename`、`--retry` 参数，支持播放列表批量下载，改用 `download_song_with_fallback`。
-- **测试**：从 115 → 206 个测试用例，覆盖 `_dialogs.py`、`_batch_models.py`、`app_logging.py` 等。
-- **代码质量**：消除硬编码中文、统一 `__all__` 定义、消除重复钳位模式、类型精确化。
-- **架构升级（v0.14.0）**：迁移到 `music_fetch/` 包目录，`ErrorCode` 错误码枚举，`DownloadPipeline` 统一下载管道，`DownloadCanceled`/`DownloadPaused` 专用控制流异常。
+- **CLI 补全**：`--format`、`--rename`、`--retry` 参数，播放列表批量下载，`download_song_with_fallback` fallback 链。
+- **封面图 + ID3 标签**：`SongConfirmDialog` 显示专辑封面/艺人/专辑，下载文件自动嵌入 ID3 标签（mutagen）。
+- **系统托盘**（v1.1.0）：最小化到托盘，下载完成通知，剪贴板自动检测，窗口位置记忆。
+- **测试**：217 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。  
 迭代路线与后续技术债规划见 [ROADMAP.md](./ROADMAP.md)。  
@@ -52,7 +52,7 @@
 建议开发环境：`Python 3.13`（运行时按依赖实际兼容为准）
 
 ```bash
-python3 -m pip install PySide6
+python3 -m pip install PySide6 mutagen
 ```
 
 如果要做格式转换（例如 `m4a -> mp3/wav/flac`），还需要安装 `ffmpeg`。
