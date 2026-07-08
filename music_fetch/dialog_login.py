@@ -7,6 +7,8 @@ Extracted from music_fetch.dialogs.py to reduce module size.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
     NETEASE_LOGIN_URL,
@@ -76,11 +78,15 @@ def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
 
 class LoginDialog(QDialog):
     login_success = Signal(str, bool)
+    _login_check_done = Signal(object)  # True, False, or MusicFetchError
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(T.LOGIN_DIALOG_TITLE)
         self.cookie_fields: dict[str, str] = {}
+        self._pending_cookie = ""
+        self._pending_remember = True
+        self._login_check_thread: Optional[QThread] = None
         self._configure_window_size()
 
         root_layout = QVBoxLayout(self)
@@ -114,6 +120,8 @@ class LoginDialog(QDialog):
         buttons.addWidget(cancel_button)
         buttons.addWidget(self.confirm_button)
         root_layout.addLayout(buttons)
+
+        self._login_check_done.connect(self._on_login_check_done)
 
     def _configure_window_size(self) -> None:
         screen = QApplication.primaryScreen()
@@ -196,9 +204,30 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, T.TITLE_LOGIN_FAIL, T.MSG_LOGIN_COOKIE_MISSING)
             return
 
-        try:
-            is_valid = check_login_status(cookie, timeout=10)
-        except MusicFetchError as err:
+        # Run check_login_status in a background thread to avoid blocking GUI.
+        self._pending_cookie = cookie
+        self._pending_remember = self.remember_checkbox.isChecked()
+        self.confirm_button.setEnabled(False)
+
+        def check_status() -> None:
+            try:
+                result = check_login_status(cookie, timeout=10)
+                self._login_check_done.emit(result)
+            except MusicFetchError as err:
+                self._login_check_done.emit(err)
+
+        thread = QThread()
+        thread.run = check_status
+        thread.finished.connect(thread.deleteLater)
+        self._login_check_thread = thread  # prevent GC while running
+        thread.start()
+
+    def _on_login_check_done(self, result: object) -> None:
+        """Handle login check result on the main thread."""
+        self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
+
+        if isinstance(result, MusicFetchError):
+            err = result
             logger.warning("Login status online check failed. code=%s message=%s", err.code, err.message)
             mapped = user_error_message(err.code, err.message)
             answer = QMessageBox.question(
@@ -211,11 +240,13 @@ class LoginDialog(QDialog):
             if answer != QMessageBox.Yes:
                 return
             is_valid = True
+        else:
+            is_valid = bool(result)
 
         if not is_valid:
             QMessageBox.warning(self, T.TITLE_LOGIN_INVALID, T.MSG_LOGIN_INVALID)
             return
 
-        self.login_success.emit(cookie, self.remember_checkbox.isChecked())
-        logger.info("LoginDialog confirmed success. remember_login=%s", self.remember_checkbox.isChecked())
+        self.login_success.emit(self._pending_cookie, self._pending_remember)
+        logger.info("LoginDialog confirmed success. remember_login=%s", self._pending_remember)
         self.accept()
