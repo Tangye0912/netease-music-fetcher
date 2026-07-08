@@ -849,7 +849,7 @@ class BatchDownloadDialog(QDialog):
             return
         row = self._worker_rows.get(id(worker))
         output_path = self._worker_output_paths.get(id(worker))
-        if row and row.status == "downloading":
+        if row and row.status in ("downloading", "download_paused"):
             row.status = "download_failed"
             row.selected = False
             row.message = T.MSG_BATCH_WORKER_UNEXPECTED
@@ -939,14 +939,17 @@ class BatchDownloadDialog(QDialog):
         processed = self._download_cursor
         total = self._download_total
         pending = max(total - processed, 0)
-        # Clean up .part files from paused or canceled workers
+        # Clean up temp files from paused or canceled workers
         for output_path in self._worker_output_paths.values():
-            part_path = output_path.with_name(f"{output_path.name}.part")
-            if part_path.exists():
-                part_path.unlink(missing_ok=True)
-            source_path = output_path.with_name(f"{output_path.name}.source")
-            if source_path.exists():
-                source_path.unlink(missing_ok=True)
+            for suffix in (".part", ".source", ".source.part"):
+                tmp = output_path.with_name(f"{output_path.name}{suffix}")
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+        # Ensure workers are stopped before clearing references
+        for worker in list(self._download_workers.values()):
+            worker.request_cancel()
+            worker.wait(3000)
+            worker.deleteLater()
         self._downloading = False
         self._download_cancel_requested = False
         self._download_paused = False

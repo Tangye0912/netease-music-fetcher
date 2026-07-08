@@ -152,7 +152,7 @@ class DownloadHistoryStore:
                 rows = json.loads(self.path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
-                self._cache = []
+                # Don't cache the failure — allow next load() to retry reading.
                 return []
 
             records: list[DownloadRecord] = []

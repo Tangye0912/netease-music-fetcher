@@ -149,16 +149,19 @@ def run_download_pipeline(
         if cancel_checker and cancel_checker():
             _cleanup_paths(temp_source_path, output_path)
             raise DownloadCanceled()
-        convert_audio_file(
-            temp_source_path, output_path, target_format,
-            timeout=max(240, timeout * 8),
-        )
+        try:
+            convert_audio_file(
+                temp_source_path, output_path, target_format,
+                timeout=max(240, timeout * 8),
+            )
+        except Exception:
+            _cleanup_paths(temp_source_path, output_path)
+            raise
         temp_source_path.unlink(missing_ok=True)
         if cancel_checker and cancel_checker():
             _cleanup_paths(output_path)
             raise DownloadCanceled()
 
-    file_size = output_path.stat().st_size if output_path.exists() else 0
     if tags:
         write_audio_tags(
             output_path,
@@ -167,6 +170,7 @@ def run_download_pipeline(
             album=tags.get("album"),
             cover_url=tags.get("cover_url"),
         )
+    file_size = output_path.stat().st_size if output_path.exists() else 0
     logger.info(
         "Download pipeline completed. song_id=%s output=%s size=%s",
         song_id, output_path, file_size,

@@ -118,6 +118,7 @@ class DownloadProgressDialog(QDialog):
         self.worker.failed.connect(self._on_failed)
         self.worker.canceled.connect(self._on_canceled)
         self.worker.succeeded.connect(self._on_succeeded)
+        self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
         self.result_state = TASK_STATE_DOWNLOADING
         logger.info(
