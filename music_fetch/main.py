@@ -297,13 +297,14 @@ class MainWindow(QMainWindow):
                 self.url_input.setPlainText(text)
                 self._set_status(T.TRAY_CLIPBOARD_DETECTED, "muted")
                 logger.info("Clipboard URL detected and auto-filled.")
-        except Exception:
+        except (ValueError, TypeError, OSError):
             pass
 
     def closeEvent(self, event) -> None:
         if self._tray_icon and self._tray_icon.isVisible():
             event.ignore()
             self.hide()
+            self._save_window_geometry()
             self._tray_icon.showMessage(
                 T.APP_TITLE,
                 T.TRAY_TOOLTIP,
