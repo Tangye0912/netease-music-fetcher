@@ -49,6 +49,11 @@ class AppSession:
     download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
     ui_theme: str = DEFAULT_UI_THEME
     window_geometry: str = ""  # "x,y,w,h" serialized
+    proxy_type: str = ""  # "http", "socks5", or "" for direct
+    proxy_host: str = ""
+    proxy_port: int = 0
+    proxy_username: str = ""
+    proxy_password: str = ""
 
 
 @dataclass
@@ -87,6 +92,11 @@ class SessionStore:
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
             ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
             window_geometry=str(raw.get("window_geometry") or ""),
+            proxy_type=str(raw.get("proxy_type") or ""),
+            proxy_host=str(raw.get("proxy_host") or ""),
+            proxy_port=self._safe_int(raw.get("proxy_port")),
+            proxy_username=str(raw.get("proxy_username") or ""),
+            proxy_password=str(raw.get("proxy_password") or ""),
         )
 
     def save(self, session: AppSession) -> None:
@@ -103,6 +113,11 @@ class SessionStore:
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
             "ui_theme": self._safe_ui_theme(session.ui_theme),
             "window_geometry": session.window_geometry,
+            "proxy_type": session.proxy_type,
+            "proxy_host": session.proxy_host,
+            "proxy_port": session.proxy_port,
+            "proxy_username": session.proxy_username,
+            "proxy_password": session.proxy_password,
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
@@ -134,6 +149,13 @@ class SessionStore:
     @staticmethod
     def _safe_download_concurrency(value: object) -> int:
         return clamp(value, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
+
+    @staticmethod
+    def _safe_int(value: object) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
 
 class DownloadHistoryStore:

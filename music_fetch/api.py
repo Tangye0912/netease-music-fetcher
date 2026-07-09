@@ -313,6 +313,30 @@ def build_cookie_string(music_u: str, csrf: str = "") -> str:
     return "; ".join(segments)
 
 
+# ── Proxy support ──────────────────────────────────────────────────
+
+_proxy_handler: Optional[request.BaseHandler] = None
+
+
+def configure_proxy(proxy_type: str = "", host: str = "", port: int = 0,
+                    username: str = "", password: str = "") -> None:
+    """Configure an HTTP/SOCKS5 proxy for all API and download requests."""
+    global _proxy_handler
+    _proxy_handler = None
+    if not proxy_type or not host or not port:
+        logger.info("Proxy disabled — using direct connection.")
+        return
+    proxy_url = f"{proxy_type}://{host}:{port}"
+    _proxy_handler = request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    logger.info("Proxy configured. type=%s host=%s port=%s", proxy_type, host, port)
+
+
+def _get_opener() -> Optional[request.OpenerDirector]:
+    if _proxy_handler is None:
+        return None
+    return request.build_opener(_proxy_handler)
+
+
 # ── HTTP helpers ─────────────────────────────────────────────────
 
 def perform_json_post(url: str, payload: dict[str, str], headers: dict[str, str], timeout: int) -> Tuple[int, dict[str, object]]:
@@ -330,8 +354,10 @@ def perform_json_get(url: str, headers: dict[str, str], timeout: int) -> Tuple[i
 
 def _perform_request(req: request.Request, timeout: int) -> Tuple[int, bytes]:
     logger.debug("HTTP request. method=%s url=%s", req.get_method(), req.full_url)
+    opener = _get_opener()
+    urlopen = opener.open if opener else request.urlopen
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
+        with urlopen(req, timeout=timeout) as resp:
             status = getattr(resp, "status", resp.getcode())
             logger.debug("HTTP response. status=%s url=%s", status, req.full_url)
             return status, resp.read()
