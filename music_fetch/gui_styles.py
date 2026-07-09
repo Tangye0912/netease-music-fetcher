@@ -26,8 +26,9 @@ except ImportError as err:
     ) from err
 
 # Material Design theme names — light and dark variants.
-MATERIAL_THEME_LIGHT = "light_blue.xml"
-MATERIAL_THEME_DARK = "dark_cyan.xml"
+# Use red accent to match NetEase Cloud Music branding.
+MATERIAL_THEME_LIGHT = "light_red_500.xml"
+MATERIAL_THEME_DARK = "dark_red.xml"
 
 __all__ = [
     "apply_app_style",

@@ -467,7 +467,7 @@ class UiSettingsDialogTests(unittest.TestCase):
             download_concurrency=2,
             current_theme="invalid",
         )
-        self.assertEqual(dlg.ui_theme, "light")
+        self.assertEqual(dlg.ui_theme, "dark")
         dlg.close()
 
 

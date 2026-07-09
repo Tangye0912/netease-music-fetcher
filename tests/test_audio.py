@@ -213,5 +213,139 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertEqual(self.output_path.read_bytes(), b"dddd")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class DownloadStreamResumeTests(unittest.TestCase):
+    """Test _download_audio_stream resume / partial download logic."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.output_path = Path(self.tmp.name) / "song.mp3"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_resume_from_partial(self):
+        """When a .part file exists, resume from its offset."""
+        part_path = self.output_path.with_name("song.mp3.part")
+        part_path.write_bytes(b"aaaa")  # 4 bytes already downloaded
+
+        # Mock a response that returns 206 + "bbbb"
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 206
+        mock_resp.headers = {"Content-Length": "4"}
+        # Simulate reading 4 more bytes
+        mock_resp.read.side_effect = [b"bbbb", b""]
+
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            music_fetch.audio._download_audio_stream(
+                "https://example.com/song.mp3",
+                self.output_path, timeout=10,
+                progress_callback=None, cancel_checker=None, cookie="",
+            )
+        self.assertTrue(self.output_path.exists())
+        self.assertEqual(self.output_path.read_bytes(), b"aaaabbbb")
+
+    def test_server_ignores_range_restarts(self):
+        """If server returns 200 instead of 206 for a Range request, restart from scratch."""
+        part_path = self.output_path.with_name("song.mp3.part")
+        part_path.write_bytes(b"aaaa")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200  # Server ignored Range
+        mock_resp.headers = {"Content-Length": "4"}
+        mock_resp.read.side_effect = [b"bbbb", b""]
+
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            music_fetch.audio._download_audio_stream(
+                "https://example.com/song.mp3",
+                self.output_path, timeout=10,
+                progress_callback=None, cancel_checker=None, cookie="",
+            )
+        self.assertTrue(self.output_path.exists())
+        # Should overwrite, not append
+        self.assertEqual(self.output_path.read_bytes(), b"bbbb")
+
+
+class ConvertAudioFileTests(unittest.TestCase):
+    """Test convert_audio_file for all format branches."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.source = Path(self.tmp.name) / "test.m4a"
+        self.source.write_bytes(b"dummy")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+    @mock.patch("music_fetch.audio.subprocess.run")
+    def test_convert_to_mp3(self, run_mock, _which_mock):
+        run_mock.return_value = mock.MagicMock(returncode=0, stderr="")
+        target = Path(self.tmp.name) / "test.mp3"
+        music_fetch.audio.convert_audio_file(self.source, target, "mp3")
+        args = run_mock.call_args[0][0]
+        self.assertIn("libmp3lame", args)
+
+    @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+    @mock.patch("music_fetch.audio.subprocess.run")
+    def test_convert_to_m4a(self, run_mock, _which_mock):
+        run_mock.return_value = mock.MagicMock(returncode=0, stderr="")
+        target = Path(self.tmp.name) / "test.m4a"
+        music_fetch.audio.convert_audio_file(self.source, target, "m4a")
+        args = run_mock.call_args[0][0]
+        self.assertIn("aac", args)
+
+    @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+    @mock.patch("music_fetch.audio.subprocess.run")
+    def test_convert_to_wav(self, run_mock, _which_mock):
+        run_mock.return_value = mock.MagicMock(returncode=0, stderr="")
+        target = Path(self.tmp.name) / "test.wav"
+        music_fetch.audio.convert_audio_file(self.source, target, "wav")
+        args = run_mock.call_args[0][0]
+        self.assertIn("pcm_s16le", args)
+
+    @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+    @mock.patch("music_fetch.audio.subprocess.run")
+    def test_convert_to_flac(self, run_mock, _which_mock):
+        run_mock.return_value = mock.MagicMock(returncode=0, stderr="")
+        target = Path(self.tmp.name) / "test.flac"
+        music_fetch.audio.convert_audio_file(self.source, target, "flac")
+        args = run_mock.call_args[0][0]
+        self.assertIn("flac", args)
+
+    @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_convert_timeout(self, _which_mock):
+        import subprocess
+        with mock.patch("music_fetch.audio.subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 240)):
+            target = Path(self.tmp.name) / "test.mp3"
+            with self.assertRaises(MusicFetchError) as ctx:
+                music_fetch.audio.convert_audio_file(self.source, target, "mp3")
+            self.assertEqual(ctx.exception.code, "CONVERT_FAILED")
+
+
+class FetchOuterMediaUrlTests(unittest.TestCase):
+    """Test fetch_outer_media_url."""
+
+    def test_redirects_to_cdn(self):
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.geturl.return_value = "https://m10.music.126.net/song.mp3"
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            result = music_fetch.audio.fetch_outer_media_url("42")
+        self.assertIsNotNone(result)
+        self.assertIn("music.126.net", result)
+
+    def test_redirects_to_non_cdn(self):
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.geturl.return_value = "https://music.163.com/404"
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            result = music_fetch.audio.fetch_outer_media_url("42")
+        self.assertIsNone(result)
+
+    def test_http_error(self):
+        from urllib import error
+        with mock.patch("music_fetch.audio.request.urlopen", side_effect=error.HTTPError("url", 404, "Not Found", {}, None)):
+            result = music_fetch.audio.fetch_outer_media_url("42")
+        self.assertIsNone(result)

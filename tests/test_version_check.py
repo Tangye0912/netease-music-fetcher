@@ -3,8 +3,10 @@
 import json
 import unittest
 from unittest import mock
+from urllib import error
+from urllib.error import URLError
 
-from music_fetch.version_check import fetch_latest_project_version, version_key
+from music_fetch.version_check import fetch_latest_project_version, fetch_release_download_url, version_key
 
 
 class VersionKeyTests(unittest.TestCase):
@@ -70,6 +72,78 @@ class FetchLatestVersionTests(unittest.TestCase):
         with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
             with self.assertRaises(RuntimeError):
                 fetch_latest_project_version(timeout=3)
+
+
+class FetchLatestProjectVersionTagFallbackTests(unittest.TestCase):
+    """Test fallback to tags API when release API fails."""
+
+    def test_falls_back_to_tags(self):
+        from music_fetch.version_check import fetch_latest_project_version
+        # Release API returns 404, tags API returns a list
+        http_err = error.HTTPError("url", 404, "Not Found", {}, None)
+        tags_resp = mock.MagicMock()
+        tags_resp.__enter__.return_value = tags_resp
+        tags_resp.read.return_value = b'[{"name": "v1.0.0"}]'
+
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=[http_err, tags_resp]):
+            tag_name, url = fetch_latest_project_version(timeout=3)
+        self.assertEqual(tag_name, "v1.0.0")
+
+    def test_json_decode_error_falls_back(self):
+        from music_fetch.version_check import fetch_latest_project_version
+        # Release API returns invalid JSON, tags API works
+        bad_resp = mock.MagicMock()
+        bad_resp.__enter__.return_value = bad_resp
+        bad_resp.read.return_value = b"not json"
+        tags_resp = mock.MagicMock()
+        tags_resp.__enter__.return_value = tags_resp
+        tags_resp.read.return_value = b'[{"name": "v2.0.0"}]'
+
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=[bad_resp, tags_resp]):
+            tag_name, url = fetch_latest_project_version(timeout=3)
+        self.assertEqual(tag_name, "v2.0.0")
+
+    def test_release_empty_tag_name_falls_back(self):
+        from music_fetch.version_check import fetch_latest_project_version
+        # Release API returns tag_name=""
+        release_resp = mock.MagicMock()
+        release_resp.__enter__.return_value = release_resp
+        release_resp.read.return_value = b'{"tag_name": "", "html_url": "http://a"}'
+        tags_resp = mock.MagicMock()
+        tags_resp.__enter__.return_value = tags_resp
+        tags_resp.read.return_value = b'[{"name": "v3.0.0"}]'
+
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=[release_resp, tags_resp]):
+            tag_name, url = fetch_latest_project_version(timeout=3)
+        self.assertEqual(tag_name, "v3.0.0")
+
+
+class FetchReleaseDownloadUrlTests(unittest.TestCase):
+    """Test fetch_release_download_url."""
+
+    def test_returns_exe_url(self):
+        from music_fetch.version_check import fetch_release_download_url
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.exe", "browser_download_url": "http://dl.exe"}]}'
+        with mock.patch("music_fetch.version_check.request.urlopen", return_value=mock_resp):
+            result = fetch_release_download_url(timeout=3)
+        self.assertEqual(result, "http://dl.exe")
+
+    def test_returns_dmg_url(self):
+        from music_fetch.version_check import fetch_release_download_url
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.dmg", "browser_download_url": "http://dl.dmg"}]}'
+        with mock.patch("music_fetch.version_check.request.urlopen", return_value=mock_resp):
+            result = fetch_release_download_url(timeout=3)
+        self.assertEqual(result, "http://dl.dmg")
+
+    def test_network_error_returns_none(self):
+        from music_fetch.version_check import fetch_release_download_url
+        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
+            result = fetch_release_download_url(timeout=3)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
