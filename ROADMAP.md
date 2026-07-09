@@ -8,6 +8,44 @@
 - 每条功能改动必须补对应测试（单元测试或流程测试）。
 - 发现未使用代码或文档时，优先删除；若需要保留历史兼容，再显式说明原因。
 
+## v1.5.0 (Next)
+
+### Goal
+
+- 工程质量提升：强化类型检查、提升测试覆盖率、优化性能与日志。
+
+### Phase 1 — 类型安全
+
+- [ ] mypy strict mode：对 `music_fetch/` 全量启用严格类型检查，消除所有类型错误。
+- [ ] 为公开 API 补全类型注解（`__init__.py` 导出函数签名）。
+- [ ] 将 `BatchResultRow` Protocol 替换为更明确的结构类型。
+
+### Phase 2 — 测试覆盖
+
+- [ ] 测试覆盖率从当前 ~90% 提升到 95%+。
+- [ ] 补 `search_dialog.py`、`playlist_dialog.py` 单元测试。
+- [ ] 补 `batch_dialogs.py` 下载流程 E2E 测试（mock 网络）。
+- [ ] 补 `main.py` 中 `MainWindow` 关键交互流程测试。
+- [ ] 为 `_download_audio_stream` 的 header 轮换、403 重试、断点续传补边界测试。
+
+### Phase 3 — 性能优化
+
+- [ ] 大歌单检测：`BatchInspectWorker` 支持取消中途检测（当前只能等全部完成）。
+- [ ] 下载历史：`DownloadHistoryStore` 超过 1000 条时分页加载，避免一次性读全量。
+- [ ] `probe_media_size_bytes` 批量场景加并发控制，避免 HEAD 请求洪泛。
+
+### Phase 4 — 日志与可观测性
+
+- [ ] 日志分级：GUI 默认 WARNING 级别，CLI `--verbose` 切到 INFO，`--debug` 切到 DEBUG。
+- [ ] 日志查看器：GUI 内嵌日志面板，方便用户排查问题。
+- [ ] 下载失败时收集诊断信息（Cookie 状态、网络连通性、CDN 可达性）。
+
+### Phase 5 — 清理与文档
+
+- [ ] 移除 `music_fetch/__init__.py` 中未使用的重导出项。
+- [ ] 统一 `__all__` 定义格式（当前各模块不一致）。
+- [ ] README 补充开发者指南（本地开发、测试、打包流程）。
+
 ## v0.7.0 (Completed - 2026-07-01)
 
 ### Goal
