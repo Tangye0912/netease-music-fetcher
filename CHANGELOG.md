@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.4.2 (2026-07-09)
+
+### Fixed
+
+- **歌单翻页 bug**：`fetch_playlist_song_ids` 翻页循环中始终使用第一页的 `first_page_body` 而非当前页的 `body`，导致超过 1000 首的歌单无法完整下载。
+- **批量下载进度计数偏差**：`_on_download_worker_finished` 与 status 回调（succeeded/failed/canceled）双重调用 `_finalize_download_worker`，可能导致 `_download_cursor` 重复递增。
+
+### Refactored
+
+- **QThread.run 猴子补丁**：`main.py` 和 `dialog_login.py` 中 3 处 `thread.run = fn` 替换为 `_TaskThread(QThread)` 子类，避免 PySide6 兼容性隐患。
+- **PyInstaller onefile 模式**：打包从 `COLLECT`（目录）改为单文件 `EXE`，避免源码泄露到 `dist/` 中。
+
+### Changed
+
+- `pyproject.toml` 中 `requires-python` 从 `>=3.9` 收紧为 `>=3.10`（PySide6 实际要求）。
+- CI workflow 适配 onefile 输出，移除 zip 打包步骤。
+
+### Removed
+
+- `_download_audio_stream` 中不可达的 `except MusicFetchError` 死代码块。
+- `ui_texts.py` 中重复的 `ACC_BTN_LOGIN_CONFIRM` 和 `ACC_BTN_DETECT_SHORT` 常量定义。
+- `dist/` 中的 `__pycache__` 目录。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（297 通过，1 跳过）。
+
 ## v1.4.1 (2026-07-08)
 
 ### Added
