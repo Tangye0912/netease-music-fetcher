@@ -542,7 +542,7 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
         if status != 200 or code != 200:
             message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
             raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
-        playlist = (first_page_body or {}).get("playlist") or {}
+        playlist = (body or {}).get("playlist") or {}
         raw_track_ids = playlist.get("trackIds") or []
         page_ids: list[str] = []
         for row in raw_track_ids if isinstance(raw_track_ids, list) else []:

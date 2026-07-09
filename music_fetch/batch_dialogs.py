@@ -816,10 +816,14 @@ class BatchDownloadDialog(QDialog):
 
     def _on_download_worker_finished(self, worker: music_fetch.workers.DownloadWorker) -> None:
         # Defensive cleanup: worker may finish unexpectedly without status callbacks.
-        if id(worker) not in self._download_workers:
+        # If the worker already went through a status callback (succeeded/failed/canceled),
+        # _finalize_download_worker has already been called and the worker removed from
+        # _download_workers — so this guard returns early and avoids double finalization.
+        key = id(worker)
+        if key not in self._download_workers:
             return
-        row = self._worker_rows.get(id(worker))
-        output_path = self._worker_output_paths.get(id(worker))
+        row = self._worker_rows.get(key)
+        output_path = self._worker_output_paths.get(key)
         if row and row.status in ("downloading", "download_paused"):
             row.status = "download_failed"
             row.selected = False

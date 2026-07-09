@@ -68,6 +68,17 @@ logger = get_logger("music_fetch.gui")
 from music_fetch.version_check import version_key, fetch_latest_project_version
 
 
+class _TaskThread(QThread):
+    """Minimal QThread that runs a callable as its task."""
+
+    def __init__(self, task: object, parent: object = None) -> None:
+        super().__init__(parent)
+        self._task = task
+
+    def run(self) -> None:
+        self._task()
+
+
 class MainWindow(QMainWindow):
     # Signals for thread-safe UI updates (emitted from worker threads,
     # connected to slots that run on the main thread).
@@ -164,7 +175,7 @@ class MainWindow(QMainWindow):
         self.url_input.setMinimumHeight(max(48, int(self.session.ui_font_size * 3.6)))
         row.addWidget(self.url_input, stretch=1)
         self.detect_button = QPushButton(T.BTN_DETECT)
-        self.detect_button.setAccessibleName(T.ACC_BTN_DETECT_SHORT)
+        self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
         self.detect_button.clicked.connect(self._on_detect_clicked)
         set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)
@@ -347,8 +358,7 @@ class MainWindow(QMainWindow):
                 return
             self._version_check_done.emit((latest_version, release_url))
 
-        thread = QThread()
-        thread.run = check_and_notify
+        thread = _TaskThread(check_and_notify)
         thread.finished.connect(thread.deleteLater)
         if self._version_thread is not None and self._version_thread is not thread:
             self._version_thread = thread  # replace ref; old thread self-cleans via deleteLater
@@ -502,8 +512,7 @@ class MainWindow(QMainWindow):
                 logger.warning("Failed to refresh account profile. code=%s message=%s", err.code, err.message)
                 self._profile_refresh_done.emit(None)
 
-        thread = QThread()
-        thread.run = fetch_and_update
+        thread = _TaskThread(fetch_and_update)
         thread.finished.connect(thread.deleteLater)
         self._profile_thread = thread  # prevent GC while running
         thread.start()

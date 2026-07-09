@@ -51,6 +51,16 @@ except ImportError:
 logger = get_logger("music_fetch.gui")
 
 
+class _TaskThread(QThread):
+    """Minimal QThread that runs a callable as its task."""
+
+    def __init__(self, task: object, parent: object = None) -> None:
+        super().__init__(parent)
+        self._task = task
+
+    def run(self) -> None:
+        self._task()
+
 
 __all__ = ['LoginDialog', 'build_cookie_from_fields', 'WEB_ENGINE_AVAILABLE']
 def build_cookie_from_fields(cookie_fields: dict[str, str]) -> str:
@@ -224,8 +234,7 @@ class LoginDialog(QDialog):
                     MusicFetchError(ErrorCode.NETWORK_ERROR, f"Unexpected error: {err}")
                 )
 
-        thread = QThread()
-        thread.run = check_status
+        thread = _TaskThread(check_status)
         thread.finished.connect(thread.deleteLater)
         self._login_check_thread = thread  # prevent GC while running
         thread.start()
@@ -233,6 +242,7 @@ class LoginDialog(QDialog):
     def _on_login_check_done(self, result: object) -> None:
         """Handle login check result on the main thread."""
         self._login_checking = False
+        self._login_check_thread = None
         self.confirm_button.setEnabled(bool(self.cookie_fields.get("MUSIC_U")))
 
         if isinstance(result, MusicFetchError):

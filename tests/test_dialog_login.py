@@ -61,8 +61,8 @@ class LoginDialogInitTests(unittest.TestCase):
         self.dialog.cookie_fields["__csrf"] = "csrf_val"
         self.dialog.confirm_button.setEnabled(True)
 
-        # Mock QThread to prevent actual thread start
-        with mock.patch("music_fetch.dialog_login.QThread") as mock_thread_cls:
+        # Mock _TaskThread to prevent actual thread start
+        with mock.patch("music_fetch.dialog_login._TaskThread") as mock_thread_cls:
             mock_thread = mock.MagicMock()
             mock_thread_cls.return_value = mock_thread
             self.dialog._on_confirm()

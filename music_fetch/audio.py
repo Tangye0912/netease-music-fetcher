@@ -367,13 +367,6 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     output_path.unlink(missing_ok=True)
                 logger.info("Media download canceled, partial file removed. output=%s", output_path)
                 raise
-            except MusicFetchError as err:
-                if tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
-                if output_path.exists():
-                    output_path.unlink(missing_ok=True)
-                logger.warning("Media download canceled or failed, partial file removed. output=%s", output_path)
-                raise
     if last_403_error is not None:
         logger.error("All download attempts failed with 403. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
