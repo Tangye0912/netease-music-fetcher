@@ -7,7 +7,7 @@ Extracted from music_fetch.dialogs.py to reduce module size.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
@@ -23,7 +23,7 @@ from music_fetch.gui_styles import (
 )
 
 try:
-    from PySide6.QtCore import Qt, QThread, QUrl, Signal
+    from PySide6.QtCore import Qt, QObject, QThread, QUrl, Signal
     from PySide6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -54,7 +54,7 @@ logger = get_logger("music_fetch.gui")
 class _TaskThread(QThread):
     """Minimal QThread that runs a callable as its task."""
 
-    def __init__(self, task: object, parent: object = None) -> None:
+    def __init__(self, task: Callable[[], None], parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._task = task
 

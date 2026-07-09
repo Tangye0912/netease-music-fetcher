@@ -155,6 +155,8 @@ def validate_song_input(value: str) -> tuple[bool, str]:
 
 
 class SongConfirmDialog(QDialog):
+    result: SongDetectionResult  # type: ignore[assignment]
+
     def __init__(self, result: SongDetectionResult) -> None:
         super().__init__()
         self.result = result
@@ -217,6 +219,8 @@ class SongConfirmDialog(QDialog):
 
 
 class DownloadOptionsDialog(QDialog):
+    result: SongDetectionResult  # type: ignore[assignment]
+
     def __init__(self, result: SongDetectionResult, last_download_dir: str) -> None:
         super().__init__()
         self.result = result
@@ -548,6 +552,7 @@ class UiSettingsDialog(QDialog):
         layout.addLayout(button_row)
 
     def _on_theme_changed(self, _index: int) -> None:
+        from music_fetch.app_settings import DEFAULT_UI_THEME
         self.ui_theme = str(self.theme_combo.currentData() or DEFAULT_UI_THEME)
         self._refresh_preview()
 

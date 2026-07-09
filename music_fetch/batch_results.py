@@ -6,7 +6,10 @@ import csv
 from collections import Counter
 from dataclasses import dataclass
 from io import StringIO
-from typing import Iterable, Protocol
+from typing import TYPE_CHECKING, Iterable, Protocol
+
+if TYPE_CHECKING:
+    from music_fetch.batch_models import BatchDetectRow
 
 import music_fetch.ui_texts as T
 

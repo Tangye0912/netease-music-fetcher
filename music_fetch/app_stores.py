@@ -7,6 +7,7 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (

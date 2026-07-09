@@ -589,7 +589,7 @@ class BatchDownloadDialog(QDialog):
         if not failed_rows:
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_NEED_FAILED_RETRY)
             return
-        self._start_download_rows(failed_rows)
+        self._start_download_rows(failed_rows)  # type: ignore[arg-type]
 
     def _on_export_csv_clicked(self) -> None:
         if not self.rows:

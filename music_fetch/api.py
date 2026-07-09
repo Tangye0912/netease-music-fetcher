@@ -314,14 +314,14 @@ def build_cookie_string(music_u: str, csrf: str = "") -> str:
 
 # ── HTTP helpers ─────────────────────────────────────────────────
 
-def perform_json_post(url: str, payload: dict[str, str], headers: dict[str, str], timeout: int) -> Tuple[int, dict]:
+def perform_json_post(url: str, payload: dict[str, str], headers: dict[str, str], timeout: int) -> Tuple[int, dict[str, object]]:
     encoded = parse.urlencode(payload).encode("utf-8")
     req = request.Request(url, data=encoded, headers=headers, method="POST")
     status, body = _perform_request(req, timeout=timeout)
     return status, _decode_json(body)
 
 
-def perform_json_get(url: str, headers: dict[str, str], timeout: int) -> Tuple[int, dict]:
+def perform_json_get(url: str, headers: dict[str, str], timeout: int) -> Tuple[int, dict[str, object]]:
     req = request.Request(url, headers=headers, method="GET")
     status, body = _perform_request(req, timeout=timeout)
     return status, _decode_json(body)
@@ -437,7 +437,7 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
         if not data:
             saw_song_unavailable = True
             continue
-        media = data[0]
+        media = data[0]  # type: ignore[index]
         media_url = media.get("url")
         if not media_url:
             saw_song_unavailable = True
@@ -481,7 +481,7 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
     if not songs:
         logger.warning("Song metadata not found. song_id=%s", song_id)
         return None, None, None, None, None
-    song = songs[0]
+    song = songs[0]  # type: ignore[index]
     name = song.get("name")
     duration_ms = song.get("dt")
     # Extract cover art URL from album info

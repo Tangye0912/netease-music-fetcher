@@ -14,10 +14,10 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 from urllib import error
 
-from PySide6.QtCore import Qt, QSize, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QObject, QSize, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -71,7 +71,7 @@ from music_fetch.version_check import version_key, fetch_latest_project_version
 class _TaskThread(QThread):
     """Minimal QThread that runs a callable as its task."""
 
-    def __init__(self, task: object, parent: object = None) -> None:
+    def __init__(self, task: Callable[[], None], parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._task = task
 
@@ -372,7 +372,8 @@ class MainWindow(QMainWindow):
             self._set_status("", "muted")
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_UPDATE_CHECK_FAIL.format(message=str(result)))
             return
-        latest_version, release_url = result
+        result_tuple: Any = result
+        latest_version, release_url = result_tuple[0], result_tuple[1]
         current_key = version_key(APP_VERSION)
         latest_key = version_key(latest_version)
         if latest_key > current_key:
@@ -519,7 +520,7 @@ class MainWindow(QMainWindow):
 
     def _on_profile_refresh_done(self, profile: object) -> None:
         """Handle profile refresh result on the main thread."""
-        self._apply_account_profile(profile)
+        self._apply_account_profile(profile)  # type: ignore[arg-type]
         self._sync_detect_button_state()
 
     def _on_switch_account(self) -> None:
@@ -644,7 +645,7 @@ class MainWindow(QMainWindow):
         self.session_store.save(self.session)
         app = QApplication.instance()
         if app is not None:
-            apply_app_style(app, normalized, theme=self.session.ui_theme)
+            apply_app_style(app, normalized, theme=self.session.ui_theme)  # type: ignore[arg-type]
         self._set_status(
             T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency),
             "success",

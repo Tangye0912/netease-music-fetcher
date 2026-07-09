@@ -183,6 +183,7 @@ def prioritize_candidates_by_format(candidates: list[PlayableCandidate], prefer_
     normalized = (prefer_format or "").strip().lower()
     if not normalized:
         return candidates
+    preferred: tuple[str, ...]
     if normalized == "m4a":
         preferred = ("m4a", "aac")
     elif normalized == "aac":
@@ -320,7 +321,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                                 raise DownloadCanceled()
                             if pause_checker and pause_checker():
                                 # Block until resumed or canceled
-                                while pause_checker and pause_checker():
+                                while pause_checker is not None and pause_checker():
                                     time.sleep(0.1)
                                     if cancel_checker and cancel_checker():
                                         raise DownloadCanceled()
