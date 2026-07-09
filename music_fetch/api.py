@@ -346,7 +346,12 @@ def _perform_request(req: request.Request, timeout: int) -> Tuple[int, bytes]:
 def _decode_json(body: bytes) -> dict[str, object]:
     try:
         decoded = body.decode("utf-8")
-        return json.loads(decoded) if decoded else {}
+        if not decoded:
+            return {}
+        result = json.loads(decoded)
+        if not isinstance(result, dict):
+            raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Unexpected API response (not a JSON object).")
+        return result
     except (UnicodeDecodeError, json.JSONDecodeError) as err:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Unexpected API response (invalid JSON).") from err
 

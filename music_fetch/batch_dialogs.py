@@ -17,8 +17,6 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
-    DETECT_TIMEOUT_OPTIONS,
-    DOWNLOAD_TIMEOUT_OPTIONS,
     MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_RETRY_COUNT,
@@ -43,7 +41,6 @@ from music_fetch.batch_results import build_batch_results_csv, retryable_failed_
 from music_fetch.gui_styles import set_button_role, set_label_state, set_secondary_button, set_back_button
 from music_fetch.batch_models import BatchDetectRow, format_bytes
 from music_fetch.dialog_batch_settings import BatchRuntimeSettingsDialog
-import music_fetch.combo_utils
 import music_fetch.workers
 import music_fetch.ui_texts as T
 
@@ -687,17 +684,7 @@ class BatchDownloadDialog(QDialog):
                 row.status = "download_failed"
                 row.message = T.code_message(err.code, user_error_message(err.code, err.message))
                 row.selected = False
-                self.history_store.add(
-                    DownloadRecord(
-                        song_id=row.song_id,
-                        song_name=row.song_name or f"song-{row.song_id}",
-                        output_path=str(out_dir / f"song-{row.song_id}.{selected_format}"),
-                        size_bytes=0,
-                        downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        status=TASK_STATE_FAILED,
-                        error_code=err.code,
-                    )
-                )
+                self.history_store.add(self._make_record(row, TASK_STATE_FAILED, 0, str(out_dir / f"song-{row.song_id}.{selected_format}"), err.code))
                 self._download_failed += 1
                 self._download_cursor += 1
                 self.batch_progress.setValue(self._download_cursor)
@@ -776,6 +763,18 @@ class BatchDownloadDialog(QDialog):
         )
         self.batch_progress.setValue(self._download_cursor + int(partial_sum + 0.5))
 
+    def _make_record(self, row: BatchDetectRow, status: str, size_bytes: int = 0, output_path: str = "", error_code: str = "") -> DownloadRecord:
+        """Build a DownloadRecord from a batch row with common defaults."""
+        return DownloadRecord(
+            song_id=row.song_id,
+            song_name=row.song_name or f"song-{row.song_id}",
+            output_path=output_path,
+            size_bytes=size_bytes,
+            downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            status=status,
+            error_code=error_code,
+        )
+
     def _on_download_succeeded(self, worker: music_fetch.workers.DownloadWorker, output_path: str, file_size: int) -> None:
         row = self._worker_rows.get(id(worker))
         if not row:
@@ -784,16 +783,7 @@ class BatchDownloadDialog(QDialog):
         row.selected = False
         row.media_size_bytes = file_size if file_size > 0 else row.media_size_bytes
         row.message = Path(output_path).name
-        self.history_store.add(
-            DownloadRecord(
-                song_id=row.song_id,
-                song_name=row.song_name or f"song-{row.song_id}",
-                output_path=output_path,
-                size_bytes=file_size,
-                downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                status=TASK_STATE_SUCCESS,
-            )
-        )
+        self.history_store.add(self._make_record(row, TASK_STATE_SUCCESS, file_size, output_path))
         self._download_success += 1
         self._finalize_download_worker(worker)
 
@@ -807,17 +797,7 @@ class BatchDownloadDialog(QDialog):
         row.status = "download_failed"
         row.selected = False
         row.message = T.code_message(code, mapped)
-        self.history_store.add(
-            DownloadRecord(
-                song_id=row.song_id,
-                song_name=row.song_name or f"song-{row.song_id}",
-                output_path=str(output_path) if output_path else "",
-                size_bytes=0,
-                downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                status=TASK_STATE_FAILED,
-                error_code=code,
-            )
-        )
+        self.history_store.add(self._make_record(row, TASK_STATE_FAILED, 0, str(output_path) if output_path else "", code))
         self._download_failed += 1
         self._finalize_download_worker(worker)
 
@@ -830,16 +810,7 @@ class BatchDownloadDialog(QDialog):
         row.status = "download_canceled"
         row.selected = False
         row.message = T.MSG_DOWNLOAD_CANCELED
-        self.history_store.add(
-            DownloadRecord(
-                song_id=row.song_id,
-                song_name=row.song_name or f"song-{row.song_id}",
-                output_path=str(output_path) if output_path else "",
-                size_bytes=0,
-                downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                status=TASK_STATE_CANCELED,
-            )
-        )
+        self.history_store.add(self._make_record(row, TASK_STATE_CANCELED, 0, str(output_path) if output_path else ""))
         self._download_canceled += 1
         self._finalize_download_worker(worker)
 
@@ -854,17 +825,7 @@ class BatchDownloadDialog(QDialog):
             row.selected = False
             row.message = T.MSG_BATCH_WORKER_UNEXPECTED
             self._download_failed += 1
-            self.history_store.add(
-                DownloadRecord(
-                    song_id=row.song_id,
-                    song_name=row.song_name or f"song-{row.song_id}",
-                    output_path=str(output_path) if output_path else "",
-                    size_bytes=0,
-                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    status=TASK_STATE_FAILED,
-                    error_code=UNKNOWN_ERROR,
-                )
-            )
+            self.history_store.add(self._make_record(row, TASK_STATE_FAILED, 0, str(output_path) if output_path else "", UNKNOWN_ERROR))
         self._finalize_download_worker(worker)
 
     def _finalize_download_worker(self, worker: music_fetch.workers.DownloadWorker) -> None:

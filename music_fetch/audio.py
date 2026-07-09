@@ -19,6 +19,7 @@ __all__ = [
 import re
 import shutil
 import time
+import functools
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -82,8 +83,14 @@ def infer_audio_format_from_url(media_url: str) -> Optional[str]:
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def is_ffmpeg_available() -> bool:
     return bool(shutil.which("ffmpeg"))
+
+
+def invalidate_ffmpeg_cache() -> None:
+    """Clear the cached ffmpeg availability check (e.g. after install)."""
+    is_ffmpeg_available.cache_clear()
 
 
 def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:

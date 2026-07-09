@@ -321,14 +321,7 @@ class DownloadWorker(QThread):
             logger.exception("DownloadWorker unexpected error. task_id=%s", self.task_id)
             self.failed.emit(UNKNOWN_ERROR, str(err))
         finally:
-            stale_source = self.output_path.with_name(f"{self.output_path.name}.source")
-            if stale_source.exists():
-                stale_source.unlink(missing_ok=True)
-            stale_part = self.output_path.with_name(f"{self.output_path.name}.part")
-            if stale_part.exists():
-                stale_part.unlink(missing_ok=True)
-            # pipeline uses temp_source_path (<name>.source) as output_path,
-            # so audio.py creates <name>.source.part — clean that up too.
-            stale_source_part = self.output_path.with_name(f"{self.output_path.name}.source.part")
-            if stale_source_part.exists():
-                stale_source_part.unlink(missing_ok=True)
+            for suffix in (".source", ".part", ".source.part"):
+                stale = self.output_path.with_name(f"{self.output_path.name}{suffix}")
+                if stale.exists():
+                    stale.unlink(missing_ok=True)

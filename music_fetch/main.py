@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -449,6 +448,8 @@ class MainWindow(QMainWindow):
         logger.info("Download task state updated. task_id=%s song_id=%s state=%s error_code=%s", self.latest_download_task.task_id, self.latest_download_task.song_id, self.latest_download_task.state, self.latest_download_task.error_code)
 
     def _refresh_ffmpeg_status(self) -> None:
+        from music_fetch.audio import invalidate_ffmpeg_cache
+        invalidate_ffmpeg_cache()
         self.ffmpeg_available = is_ffmpeg_available()
         if self.ffmpeg_available:
             self.dependency_hint_label.setVisible(False)
