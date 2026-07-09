@@ -7,44 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          show-progress: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Run tests
-        run: python -m pytest tests/ -q
-
-      - name: Build executable
-        run: python build.py --clean
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: music-fetch-windows
-          path: dist/music-fetch.exe
-
-      - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/music-fetch.exe
-          draft: true
-          generate_release_notes: true
-
-  build-macos:
-    runs-on: macos-latest
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     steps:
@@ -63,16 +31,28 @@ jobs:
       - name: Build executable
         run: python build.py --clean
 
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "name=music-fetch-windows" >> $GITHUB_OUTPUT
+            echo "file=dist/music-fetch.exe" >> $GITHUB_OUTPUT
+          else
+            echo "name=music-fetch-macos" >> $GITHUB_OUTPUT
+            echo "file=dist/music-fetch" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: music-fetch-macos
-          path: dist/music-fetch
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.file }}
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/music-fetch
+          files: ${{ steps.artifact.outputs.file }}
           draft: true
           generate_release_notes: true
