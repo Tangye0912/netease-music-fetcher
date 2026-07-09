@@ -1,60 +1,53 @@
-"""Tests for music_fetch/gui_styles.py — build_app_stylesheet, build_dark_stylesheet."""
+"""Tests for music_fetch/gui_styles.py — Material Design theme integration."""
 
 import unittest
 
 from music_fetch.gui_styles import (
-    build_app_stylesheet,
-    build_dark_stylesheet,
+    clamp_ui_font_size,
+    MATERIAL_THEME_LIGHT,
+    MATERIAL_THEME_DARK,
+    set_button_role,
+    set_label_state,
+    set_back_button,
+    set_secondary_button,
 )
 
 
-class BuildAppStylesheetTests(unittest.TestCase):
-    def test_contains_key_selectors(self):
-        sheet = build_app_stylesheet(14)
-        self.assertIn("QWidget", sheet)
-        self.assertIn("QPushButton", sheet)
-        self.assertIn("QLineEdit", sheet)
-        self.assertIn("QComboBox", sheet)
-        self.assertIn("QProgressBar", sheet)
+class MaterialThemeTests(unittest.TestCase):
+    def test_theme_constants_defined(self):
+        self.assertIsInstance(MATERIAL_THEME_LIGHT, str)
+        self.assertIsInstance(MATERIAL_THEME_DARK, str)
+        self.assertTrue(MATERIAL_THEME_LIGHT.endswith(".xml"))
+        self.assertTrue(MATERIAL_THEME_DARK.endswith(".xml"))
 
-    def test_font_size_in_output(self):
-        sheet = build_app_stylesheet(16)
-        self.assertIn("16px", sheet)
-
-    def test_primary_button_role(self):
-        sheet = build_app_stylesheet(14)
-        self.assertIn('QPushButton[role="primary"]', sheet)
-
-    def test_label_states(self):
-        sheet = build_app_stylesheet(14)
-        self.assertIn('QLabel[state="success"]', sheet)
-        self.assertIn('QLabel[state="error"]', sheet)
-        self.assertIn('QLabel[state="muted"]', sheet)
+    def test_light_and_dark_are_different(self):
+        self.assertNotEqual(MATERIAL_THEME_LIGHT, MATERIAL_THEME_DARK)
 
 
-class BuildDarkStylesheetTests(unittest.TestCase):
-    def test_contains_key_selectors(self):
-        sheet = build_dark_stylesheet(14)
-        self.assertIn("QWidget", sheet)
-        self.assertIn("QPushButton", sheet)
-        self.assertIn("QTableWidget", sheet)
-        self.assertIn("QScrollBar", sheet)
-        self.assertIn("QToolTip", sheet)
-        self.assertIn("QStatusBar", sheet)
-        self.assertIn("QMenu", sheet)
-        self.assertIn("QCheckBox", sheet)
-        self.assertIn("QGroupBox", sheet)
+class ClampFontSizeTests(unittest.TestCase):
+    def test_normal_value(self):
+        self.assertEqual(clamp_ui_font_size(14), 14)
 
-    def test_uses_dark_colors(self):
-        sheet = build_dark_stylesheet(14)
-        self.assertIn("#1e1e2e", sheet)
-        self.assertIn("#cdd6f4", sheet)
-        self.assertIn("#313244", sheet)
+    def test_below_min(self):
+        self.assertEqual(clamp_ui_font_size(8), 12)
 
-    def test_primary_button_dark(self):
-        sheet = build_dark_stylesheet(14)
-        self.assertIn('QPushButton[role="primary"]', sheet)
-        self.assertIn("#89b4fa", sheet)
+    def test_above_max(self):
+        self.assertEqual(clamp_ui_font_size(30), 20)
+
+    def test_invalid_type(self):
+        self.assertEqual(clamp_ui_font_size("abc"), 14)  # default
+
+
+class BackwardCompatTests(unittest.TestCase):
+    """Verify that button/label helper functions are still importable."""
+
+    def test_functions_exist(self):
+        # These functions are still part of the public API, just no longer
+        # building QSS from scratch — they set Qt properties for qt-material.
+        self.assertTrue(callable(set_button_role))
+        self.assertTrue(callable(set_label_state))
+        self.assertTrue(callable(set_back_button))
+        self.assertTrue(callable(set_secondary_button))
 
 
 if __name__ == "__main__":

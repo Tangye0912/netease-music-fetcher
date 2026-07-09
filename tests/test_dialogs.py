@@ -25,7 +25,6 @@ from PySide6.QtCore import Qt
 import music_fetch.dialogs
 from music_fetch.gui_styles import (
     apply_app_style,
-    build_app_stylesheet,
     clamp_ui_font_size,
     set_back_button,
     set_button_role,
@@ -141,12 +140,6 @@ class StyleHelperTests(unittest.TestCase):
         from music_fetch.app_settings import MAX_UI_FONT_SIZE
         result = clamp_ui_font_size(999)
         self.assertEqual(result, MAX_UI_FONT_SIZE)
-
-    def test_build_app_stylesheet_contains_key_selectors(self):
-        sheet = build_app_stylesheet(14)
-        self.assertIn("QWidget", sheet)
-        self.assertIn("QPushButton", sheet)
-        self.assertIn("QLineEdit", sheet)
 
     def test_apply_app_style_returns_normalized_size(self):
         from music_fetch.app_settings import DEFAULT_UI_FONT_SIZE

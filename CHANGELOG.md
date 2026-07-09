@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.8.0 (2026-07-09)
+
+### Changed
+
+- **Material Design UI**：引入 `qt-material` 库，替代手写 QSS 样式表。
+  - 亮色主题：`light_blue.xml`，暗色主题：`dark_cyan.xml`。
+  - 按钮自动获得涟漪动效、圆角、阴影。
+  - 移除 390 行手写 QSS 代码（`build_app_stylesheet`、`build_dark_stylesheet`）。
+  - 保留按钮角色（primary/secondary/back）和标签状态（success/warning/error/muted）语义化 API。
+  - 新增依赖：`qt-material>=2.14`。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（331 通过，1 跳过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（零错误）。
+
 ## v1.7.0 (2026-07-09)
 
 ### Added

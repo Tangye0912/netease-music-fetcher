@@ -17,6 +17,8 @@ a = Analysis(
         'mutagen.mp3',
         'mutagen.mp4',
         'mutagen.flac',
+        'qt_material',
+        'qt_material.resources',
         # Project modules imported lazily inside functions (PyInstaller can't
         # detect them via static analysis).
         'music_fetch.search_dialog',

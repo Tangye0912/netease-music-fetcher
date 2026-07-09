@@ -49,7 +49,6 @@ import music_fetch.combo_utils
 from music_fetch.batch_models import format_bytes, format_duration
 from music_fetch.gui_styles import (
     apply_app_style,
-    build_app_stylesheet,
     clamp_ui_font_size,
     set_back_button,
     set_button_role,
