@@ -229,9 +229,10 @@ class ConvertAudioFileCleanupTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
     @mock.patch("music_fetch.pipeline.convert_audio_file")
     @mock.patch("music_fetch.pipeline.download_song_with_fallback")
-    def test_convert_failure_cleans_temp_files(self, fallback_mock, convert_mock):
+    def test_convert_failure_cleans_temp_files(self, fallback_mock, convert_mock, _ffmpeg_mock):
         from music_fetch.api import PlayableCandidate
 
         def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):

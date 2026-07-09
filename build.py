@@ -53,6 +53,9 @@ def build() -> int:
     if exe_path.exists():
         print(f"\nBuild successful!")
         print(f"Executable: {exe_path}")
+    else:
+        print(f"\nBuild failed: executable not found at {exe_path}")
+        return 1
     return 0
 
 
