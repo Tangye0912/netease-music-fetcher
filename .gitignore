@@ -28,4 +28,4 @@ env/
 # Runtime
 logs/
 *.log
-.reasonix/
+.reasonix/.coverage
