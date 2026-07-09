@@ -67,6 +67,123 @@ class RunDownloadTests(unittest.TestCase):
             self.assertTrue(result.output_path.exists())
             self.assertEqual(result.size_bytes, 4)
 
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    def test_run_download_ffmpeg_fallback_warning(self, meta_mock, pipeline_mock):
+        """When format mismatch, a warning is printed to stderr."""
+        from music_fetch.pipeline import DownloadPipelineResult
+        import sys, io
+        meta_mock.return_value = ("Test Song", 120000, None, None, None)
+
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Output .m4a instead of requested .mp3
+            actual_path = output_path.with_suffix(".m4a")
+            actual_path.write_bytes(b"data")
+            return DownloadPipelineResult(
+                output_path=actual_path,
+                file_size=4,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/song.m4a",
+                    duration_ms=120000, level="standard", encode_type="m4a",
+                ),
+                source_format="m4a",
+            )
+
+        pipeline_mock.side_effect = fake_pipeline
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                result = music_fetch.cli.run_download(
+                    song_url="https://music.163.com/song?id=42",
+                    out_dir=out_dir, cookie_file=cookie_file,
+                    timeout=10, out_format="mp3",
+                )
+            finally:
+                sys.stderr = old_stderr
+            self.assertEqual(result.size_bytes, 4)
+
+
+class RunPlaylistDownloadTests(unittest.TestCase):
+    """Test run_playlist_download with mocked pipeline."""
+
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.fetch_playlist_song_ids")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_playlist_download_success(self, _cookie_mock, ids_mock, meta_mock, pipeline_mock):
+        from music_fetch.pipeline import DownloadPipelineResult
+        ids_mock.return_value = ["1", "2"]
+        meta_mock.return_value = ("Song", 120000, None, None, None)
+
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"data")
+            return DownloadPipelineResult(
+                output_path=output_path, file_size=4,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/song.mp3",
+                    duration_ms=120000, level="standard", encode_type="mp3",
+                ),
+                source_format="mp3",
+            )
+
+        pipeline_mock.side_effect = fake_pipeline
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            results = music_fetch.cli.run_playlist_download(
+                playlist_url="https://music.163.com/playlist?id=123",
+                out_dir=out_dir, cookie_file=cookie_file,
+                timeout=10, out_format="mp3",
+            )
+            self.assertEqual(len(results), 2)
+
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.fetch_playlist_song_ids")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_playlist_download_partial_failure(self, _cookie_mock, ids_mock, meta_mock, pipeline_mock):
+        """One song fails, the other succeeds — should still return results."""
+        from music_fetch.pipeline import DownloadPipelineResult
+        from music_fetch.api import MusicFetchError
+        ids_mock.return_value = ["1", "2"]
+        meta_mock.return_value = ("Song", 120000, None, None, None)
+
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
+            if song_id == "1":
+                raise MusicFetchError("DOWNLOAD_FAILED", "fail")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"data")
+            return DownloadPipelineResult(
+                output_path=output_path, file_size=4,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/song.mp3",
+                    duration_ms=120000, level="standard", encode_type="mp3",
+                ),
+                source_format="mp3",
+            )
+
+        pipeline_mock.side_effect = fake_pipeline
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            results = music_fetch.cli.run_playlist_download(
+                playlist_url="https://music.163.com/playlist?id=123",
+                out_dir=out_dir, cookie_file=cookie_file,
+                timeout=10,
+            )
+            self.assertEqual(len(results), 1)
+
 
 class MainTests(unittest.TestCase):
     def test_main_help_succeeds(self):
@@ -124,6 +241,67 @@ class MainTests(unittest.TestCase):
     def test_main_verbose_and_debug_flags(self, _log_mock):
         with self.assertRaises(SystemExit) as ctx:
             music_fetch.cli.main(["--url", "42", "--verbose", "--debug", "--help"])
+        self.assertEqual(ctx.exception.code, 0)
+
+    @mock.patch("music_fetch.cli.run_download")
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_single_song_success(self, _cookie_mock, _log_mock, download_mock):
+        from music_fetch.api import DownloadResult
+        download_mock.return_value = DownloadResult(
+            song_id="42", output_path=Path("out/song.mp3"), size_bytes=4, duration_ms=1000,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/song?id=42",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                result = music_fetch.cli.main(args)
+            self.assertEqual(result, 0)
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_keyboard_interrupt(self, _cookie_mock, _log_mock):
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/song?id=42",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                with mock.patch("music_fetch.cli.run_download", side_effect=KeyboardInterrupt):
+                    result = music_fetch.cli.main(args)
+            self.assertEqual(result, 1)
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_os_error(self, _cookie_mock, _log_mock):
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/song?id=42",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                with mock.patch("music_fetch.cli.run_download", side_effect=OSError("permission denied")):
+                    result = music_fetch.cli.main(args)
+            self.assertEqual(result, 1)
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_lyric_flag(self, _log_mock):
+        with self.assertRaises(SystemExit) as ctx:
+            music_fetch.cli.main(["--url", "42", "--lyric", "--help"])
         self.assertEqual(ctx.exception.code, 0)
 
 
