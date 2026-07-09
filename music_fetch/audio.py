@@ -377,3 +377,58 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {last_network_error.reason}") from last_network_error
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")
+
+
+# ── Lyrics ──────────────────────────────────────────────────────────
+
+def save_lyric_file(output_path: Path, lyric: str) -> None:
+    """Save lyrics as a .lrc file alongside the audio file."""
+    if not lyric.strip():
+        return
+    lrc_path = output_path.with_suffix(".lrc")
+    lrc_path.write_text(lyric, encoding="utf-8")
+    logger.info("Lyric file saved. path=%s", lrc_path)
+
+
+def embed_lyric_tag(output_path: Path, lyric: str) -> None:
+    """Embed lyrics into the audio file's metadata tags (USLT frame for ID3)."""
+    if not lyric.strip():
+        return
+    try:
+        from mutagen.id3 import ID3, USLT
+        from mutagen.mp3 import MP3
+    except ImportError:
+        logger.debug("mutagen not installed, skipping lyric embedding.")
+        return
+
+    suffix = output_path.suffix.lower()
+    if suffix == ".mp3":
+        try:
+            audio = MP3(str(output_path), ID3=ID3)
+            # Remove existing lyrics if any
+            audio.tags.delall("USLT")
+            audio.tags.add(
+                USLT(encoding=3, lang="eng", desc="", text=lyric)
+            )
+            audio.save()
+            logger.info("Lyric embedded in MP3 tags. path=%s", output_path)
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.debug("Failed to embed lyric in MP3. path=%s", output_path, exc_info=True)
+    elif suffix in (".m4a", ".aac", ".mp4"):
+        try:
+            from mutagen.mp4 import MP4
+            audio = MP4(str(output_path))  # type: ignore[assignment]
+            audio["\xa9lyr"] = lyric
+            audio.save()
+            logger.info("Lyric embedded in M4A tags. path=%s", output_path)
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.debug("Failed to embed lyric in M4A. path=%s", output_path, exc_info=True)
+    elif suffix in (".flac", ".wav"):
+        try:
+            from mutagen.flac import FLAC
+            audio = FLAC(str(output_path))  # type: ignore[assignment]
+            audio["lyrics"] = lyric
+            audio.save()
+            logger.info("Lyric embedded in FLAC tags. path=%s", output_path)
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.debug("Failed to embed lyric in FLAC. path=%s", output_path, exc_info=True)

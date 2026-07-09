@@ -56,6 +56,7 @@ def run_download_pipeline(
     cancel_checker: Optional[CancelChecker] = None,
     pause_checker: Optional[PauseChecker] = None,
     tags: Optional[dict[str, Optional[str]]] = None,
+    download_lyric: bool = False,
 ) -> DownloadPipelineResult:
     """Execute the full download pipeline: retry loop, fallback, conversion.
 
@@ -170,6 +171,16 @@ def run_download_pipeline(
             album=tags.get("album"),
             cover_url=tags.get("cover_url"),
         )
+    if download_lyric:
+        from music_fetch.api import fetch_lyric
+        from music_fetch.audio import save_lyric_file, embed_lyric_tag
+        try:
+            lyric_result = fetch_lyric(song_id, timeout=timeout)
+            if lyric_result.lyric:
+                save_lyric_file(output_path, lyric_result.lyric)
+                embed_lyric_tag(output_path, lyric_result.lyric)
+        except Exception:
+            logger.warning("Failed to download lyric. song_id=%s", song_id, exc_info=True)
     file_size = output_path.stat().st_size if output_path.exists() else 0
     logger.info(
         "Download pipeline completed. song_id=%s output=%s size=%s",

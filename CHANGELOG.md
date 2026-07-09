@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.7.0 (2026-07-09)
+
+### Added
+
+- **歌词下载**：支持下载 `.lrc` 歌词文件并嵌入音频标签（MP3 USLT、M4A lyrics、FLAC lyrics）。
+  - `api.py`：新增 `fetch_lyric()` 和 `LyricResult` 数据类。
+  - `audio.py`：新增 `save_lyric_file()` 和 `embed_lyric_tag()`。
+  - `pipeline.py`：`run_download_pipeline` 新增 `download_lyric` 参数。
+  - CLI：新增 `--lyric` 参数。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（332 通过，1 跳过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（零错误）。
+
 ## v1.6.0 (2026-07-09)
 
 ### Added

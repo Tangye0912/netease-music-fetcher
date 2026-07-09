@@ -46,6 +46,7 @@ SONG_DETAIL_API = "https://music.163.com/api/song/detail"
 PLAYLIST_DETAIL_API = "https://music.163.com/api/v6/playlist/detail"
 ACCOUNT_STATUS_API = "https://music.163.com/api/nuser/account/get"
 OUTER_MEDIA_URL_API = "https://music.163.com/song/media/outer/url?id={song_id}.mp3"
+LYRIC_API = "https://music.163.com/api/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
 DEFAULT_OUT_DIR = "downloads"
 DEFAULT_COOKIE_FILE = "~/.config/music-fetch/cookies.txt"
 PLAYABLE_REQUEST_PROFILES: list[tuple[str, str]] = [
@@ -715,3 +716,30 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
         ))
     logger.info("User playlists fetched. count=%s", len(results))
     return results
+
+
+# ── Lyrics ─────────────────────────────────────────────────────────
+
+@dataclass
+class LyricResult:
+    """Lyric data for a song."""
+    lyric: str  # original LRC format lyrics
+    translated_lyric: str = ""  # translated LRC lyrics (may be empty)
+
+
+def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
+    """Fetch lyrics for a song. No authentication required."""
+    url = LYRIC_API.format(song_id=song_id)
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/"}
+    try:
+        status, body = perform_json_get(url, headers, timeout=timeout)
+    except MusicFetchError:
+        logger.warning("Failed to fetch lyric for song. song_id=%s", song_id)
+        return LyricResult(lyric="")
+    if status != 200 or body.get("code") != 200:
+        logger.warning("Lyric API returned non-200. song_id=%s status=%s", song_id, status)
+        return LyricResult(lyric="")
+    lrc = str(body.get("lrc", {}).get("lyric") or "")
+    tlyric = str(body.get("tlyric", {}).get("lyric") or "")
+    logger.info("Fetched lyric. song_id=%s lyric_len=%s translated_len=%s", song_id, len(lrc), len(tlyric))
+    return LyricResult(lyric=lrc, translated_lyric=tlyric)

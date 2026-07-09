@@ -41,6 +41,7 @@ def run_download(
     out_format: str = "mp3",
     rename: Optional[str] = None,
     retry_count: int = 1,
+    download_lyric: bool = False,
 ) -> DownloadResult:
     logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
@@ -61,6 +62,7 @@ def run_download(
         timeout=timeout,
         retry_count=retry_count,
         tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
+        download_lyric=download_lyric,
     )
     actual_format = result.output_path.suffix.lstrip(".").lower()
     if actual_format and actual_format != out_format.lower():
@@ -88,6 +90,7 @@ def run_playlist_download(
     timeout: int = 30,
     out_format: str = "mp3",
     retry_count: int = 1,
+    download_lyric: bool = False,
 ) -> list[DownloadResult]:
     _, playlist_id = parse_input_resource(playlist_url)
     cookie = load_cookie(cookie_file)
@@ -186,6 +189,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Custom output filename (without extension).",
     )
     parser.add_argument(
+        "--lyric", action="store_true",
+        help="Download and embed lyrics (.lrc file + audio tag).",
+    )
+    parser.add_argument(
         "--log-file", default=str(default_log_path()),
         help=f"Log file path (default: {default_log_path()}).",
     )
@@ -219,6 +226,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 timeout=args.timeout,
                 out_format=args.out_format,
                 retry_count=args.retry_count,
+                download_lyric=args.lyric,
             )
             if results:
                 print(f"\nDownloaded {len(results)} songs.")
@@ -235,6 +243,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 out_format=args.out_format,
                 rename=args.rename,
                 retry_count=args.retry_count,
+                download_lyric=args.lyric,
             )
             duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
             print(

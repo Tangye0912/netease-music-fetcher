@@ -45,6 +45,9 @@ from music_fetch.api import (
     SearchResult,
     fetch_user_playlists,
     UserPlaylist,
+    # Lyrics
+    fetch_lyric,
+    LyricResult,
     # Constants
     SUPPORTED_GUI_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,
