@@ -10,6 +10,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+dist_test/
+build_test/
 *.egg
 .venv/
 venv/
