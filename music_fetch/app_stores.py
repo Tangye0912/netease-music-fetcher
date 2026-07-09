@@ -171,6 +171,9 @@ class DownloadHistoryStore:
                         error_code=str(row.get("error_code") or ""),
                     )
                 )
+            # Keep only the most recent 1000 records to avoid unbounded memory growth.
+            if len(records) > 1000:
+                records = records[:1000]
             self._cache = records
             return records
 

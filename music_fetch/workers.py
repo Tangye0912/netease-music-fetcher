@@ -73,6 +73,10 @@ class BatchInspectWorker(QThread):
         self.cookie = cookie
         self.timeout = timeout
         self.detect_concurrency = max(1, min(10, int(detect_concurrency)))
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
@@ -147,6 +151,12 @@ class BatchInspectWorker(QThread):
         results_by_index: dict[int, BatchDetectRow] = {}
 
         def _detect_one(index: int, source_type: str, source_value: str, song_id: str, source_label: str) -> tuple[int, BatchDetectRow]:
+            if self._cancel_event.is_set():
+                return (index, BatchDetectRow(
+                    raw_input=source_value, source_type=source_type, source_label=source_label,
+                    song_id=song_id, status="download_canceled",
+                    message="Detection canceled by user.", selected=False,
+                ))
             try:
                 result = detect_song(song_id, self.cookie, timeout=self.timeout)
                 size_bytes = 0

@@ -200,5 +200,188 @@ class ResolveShortUrlTests(unittest.TestCase):
                 resolve_short_url("https://163cn.tv/abc")
 
 
+class PerformRequestTests(unittest.TestCase):
+    """Test _perform_request and JSON helpers via urlopen mocking."""
+
+    def test_perform_json_get_success(self):
+        from music_fetch.api import perform_json_get
+        fake_body = b'{"code": 200, "data": {"ok": true}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            status, body = perform_json_get("https://example.com/api", {"User-Agent": "test"}, timeout=10)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["code"], 200)
+
+    def test_perform_json_post_success(self):
+        from music_fetch.api import perform_json_post
+        fake_body = b'{"code": 200}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            status, body = perform_json_post("https://example.com/api", {"key": "val"}, {"User-Agent": "test"}, timeout=10)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["code"], 200)
+
+    def test_perform_request_http_error(self):
+        from music_fetch.api import perform_json_get
+        http_err = error.HTTPError("url", 403, "Forbidden", {}, None)
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = b'{"code": 403}'
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err) as mock_urlopen:
+            status, body = perform_json_get("https://example.com/api", {}, timeout=10)
+        self.assertEqual(status, 403)
+
+    def test_perform_request_url_error(self):
+        from music_fetch.api import perform_json_get, MusicFetchError
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=error.URLError("timeout")):
+            with self.assertRaises(MusicFetchError):
+                perform_json_get("https://example.com/api", {}, timeout=10)
+
+    def test_decode_json_invalid(self):
+        from music_fetch.api import perform_json_get, MusicFetchError
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"not json"
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError):
+                perform_json_get("https://example.com/api", {}, timeout=10)
+
+
+class CheckLoginStatusTests(unittest.TestCase):
+    """Test check_login_status with mocked HTTP responses."""
+
+    def test_no_music_u_returns_false(self):
+        from music_fetch.api import check_login_status
+        self.assertFalse(check_login_status("MUSIC_A=test"))
+
+    def test_valid_login(self):
+        from music_fetch.api import check_login_status
+        fake_body = b'{"code": 200, "account": {"id": 1}, "profile": {"nickname": "test"}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            self.assertTrue(check_login_status("MUSIC_U=test"))
+
+    def test_401_returns_false(self):
+        from music_fetch.api import check_login_status
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 401
+        mock_resp.read.return_value = b'{}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            self.assertFalse(check_login_status("MUSIC_U=test"))
+
+    def test_code_301_returns_false(self):
+        from music_fetch.api import check_login_status
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"code": 301}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            self.assertFalse(check_login_status("MUSIC_U=test"))
+
+
+class FetchAccountProfileTests(unittest.TestCase):
+    """Test fetch_account_profile with mocked HTTP responses."""
+
+    def test_no_music_u_raises(self):
+        from music_fetch.api import fetch_account_profile, MusicFetchError
+        with self.assertRaises(MusicFetchError):
+            fetch_account_profile("MUSIC_A=bad")
+
+    def test_success(self):
+        from music_fetch.api import fetch_account_profile
+        fake_body = b'{"code": 200, "account": {"id": 1}, "profile": {"nickname": "test", "avatarUrl": "http://a", "vipType": 0}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            profile = fetch_account_profile("MUSIC_U=test")
+        self.assertEqual(profile.nickname, "test")
+        self.assertFalse(profile.is_vip)
+
+    def test_vip_user(self):
+        from music_fetch.api import fetch_account_profile
+        fake_body = b'{"code": 200, "account": {"id": 1}, "profile": {"nickname": "vip", "avatarUrl": "http://a", "vipType": 11}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            profile = fetch_account_profile("MUSIC_U=test")
+        self.assertTrue(profile.is_vip)
+
+    def test_auth_expired(self):
+        from music_fetch.api import fetch_account_profile, MusicFetchError
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 401
+        mock_resp.read.return_value = b'{}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError):
+                fetch_account_profile("MUSIC_U=test")
+
+
+class SearchSongsTests(unittest.TestCase):
+    """Test search_songs with mocked HTTP responses."""
+
+    def test_empty_keyword(self):
+        from music_fetch.api import search_songs
+        self.assertEqual(search_songs("", "cookie"), [])
+
+    def test_success(self):
+        from music_fetch.api import search_songs
+        fake_body = b'{"code": 200, "result": {"songs": [{"id": 1, "name": "Song A", "artists": [{"name": "Artist"}], "album": {"name": "Album"}, "duration": 240000}]}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            results = search_songs("test", "cookie")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].song_name, "Song A")
+
+    def test_network_error_returns_empty(self):
+        from music_fetch.api import search_songs
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=error.URLError("timeout")):
+            results = search_songs("test", "cookie")
+        self.assertEqual(results, [])
+
+
+class FetchUserPlaylistsTests(unittest.TestCase):
+    """Test fetch_user_playlists with mocked HTTP responses."""
+
+    def test_no_music_u_raises(self):
+        from music_fetch.api import fetch_user_playlists, MusicFetchError
+        with self.assertRaises(MusicFetchError):
+            fetch_user_playlists("bad_cookie")
+
+    def test_success(self):
+        from music_fetch.api import fetch_user_playlists
+        account_body = b'{"code": 200, "account": {"id": 123}}'
+        playlist_body = b'{"code": 200, "playlist": [{"id": 1, "name": "My List", "trackCount": 10, "coverImgUrl": "", "creator": {"nickname": "Me"}}]}'
+        mock_resp1 = mock.MagicMock()
+        mock_resp1.__enter__.return_value = mock_resp1
+        mock_resp1.status = 200
+        mock_resp1.read.return_value = account_body
+        mock_resp2 = mock.MagicMock()
+        mock_resp2.__enter__.return_value = mock_resp2
+        mock_resp2.status = 200
+        mock_resp2.read.return_value = playlist_body
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=[mock_resp1, mock_resp2]):
+            results = fetch_user_playlists("MUSIC_U=test")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].name, "My List")
+
+
 if __name__ == "__main__":
     unittest.main()

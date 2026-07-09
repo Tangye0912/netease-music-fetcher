@@ -10,6 +10,7 @@ from __future__ import annotations
 __all__ = ["run_download", "run_playlist_download", "build_parser", "main"]
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -188,13 +189,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--log-file", default=str(default_log_path()),
         help=f"Log file path (default: {default_log_path()}).",
     )
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="Enable verbose (INFO) logging to stdout.",
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Enable debug (DEBUG) logging to stdout.",
+    )
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    log_path = setup_logging(Path(args.log_file))
+    log_level = logging.DEBUG if args.debug else (logging.INFO if args.verbose else logging.WARNING)
+    log_path = setup_logging(Path(args.log_file), level=log_level)
     logger.info("CLI started. log_path=%s", log_path)
     try:
         resource_type, resource_id = parse_input_resource(args.url)

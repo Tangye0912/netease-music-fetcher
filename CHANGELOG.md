@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.5.0 (2026-07-09)
+
+### Added
+
+- **mypy strict mode**：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
+- **CLI 日志分级**：新增 `--verbose`（INFO）和 `--debug`（DEBUG）参数。
+- **BatchInspectWorker 取消支持**：检测流程可通过 `request_cancel()` 中途取消。
+- **测试覆盖**：新增 `test_search_dialog.py`（4 个）、`test_playlist_dialog.py`（4 个）、`test_api.py`（18 个网络 mock 测试）。测试总数从 297 → 323。
+
+### Changed
+
+- `DownloadHistoryStore` 加载时限制最多保留最近 1000 条记录，避免内存无限增长。
+- `pyproject.toml` 中 mypy 禁用 PySide6 相关的 `attr-defined`/`no-untyped-def` 等噪声错误码，忽略 `mutagen`/`PySide6`/`shiboken6` incomplete stubs。
+
+### Fixed
+
+- CI 上 2 个测试因 ffmpeg 缺失而失败：`test_is_ffmpeg_available` 添加 `invalidate_ffmpeg_cache()` 调用，`test_convert_failure_cleans_temp_files` mock `is_ffmpeg_available`。
+- `build.py` 中 exe 未找到时返回非零退出码。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（323 通过，1 跳过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（零错误）。
+
 ## v1.4.2 (2026-07-09)
 
 ### Fixed
