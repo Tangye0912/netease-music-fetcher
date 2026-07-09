@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.0 (2026-07-09)
+
+### Added
+
+- **macOS CI 构建**：新增 `build-macos` job，发布 macOS 可执行文件。
+- **测试覆盖**：新增 `cli.py` 集成测试（5 个）和 `api.py` 网络 mock 测试（`fetch_playable_candidates`、`detect_song` 共 5 个）。测试总数 323 → 332（+9）。
+
+### Fixed
+
+- CI `Upload to Release` 403 错误，添加 `permissions: contents: write`。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/`（332 通过，1 跳过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（零错误）。
+- CI：Windows + macOS 双平台构建。
+
 ## v1.5.0 (2026-07-09)
 
 ### Added

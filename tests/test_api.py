@@ -383,5 +383,87 @@ class FetchUserPlaylistsTests(unittest.TestCase):
         self.assertEqual(results[0].name, "My List")
 
 
+class FetchPlayableCandidatesTests(unittest.TestCase):
+    """Test fetch_playable_candidates with mocked HTTP responses."""
+
+    def test_401_raises_auth_expired(self):
+        from music_fetch.api import fetch_playable_candidates, MusicFetchError
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 401
+        mock_resp.read.return_value = b'{}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+            self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+
+    def test_song_unavailable(self):
+        from music_fetch.api import fetch_playable_candidates, MusicFetchError
+        # All profiles return empty data — song unavailable
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"code": 200, "data": []}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+            self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
+
+    def test_success(self):
+        from music_fetch.api import fetch_playable_candidates
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = (
+            b'{"code": 200, "data": [{"url": "https://m10.music.126.net/song.mp3", "time": 240000}]}'
+        )
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            candidates = fetch_playable_candidates("42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].encode_type, "mp3")
+
+
+class DetectSongTests(unittest.TestCase):
+    """Test detect_song with mocked HTTP responses."""
+
+    def test_detect_success(self):
+        from music_fetch.api import detect_song
+        # Mock metadata response
+        meta_resp = mock.MagicMock()
+        meta_resp.__enter__.return_value = meta_resp
+        meta_resp.status = 200
+        meta_resp.read.return_value = (
+            b'{"code": 200, "songs": [{"name": "Test Song", "dt": 240000, '
+            b'"al": {"picUrl": "http://cover.jpg"}, "ar": [{"name": "Artist"}]}]}'
+        )
+        # Mock playable URL response — fetch_playable_candidates iterates 5 profiles
+        player_resp = mock.MagicMock()
+        player_resp.__enter__.return_value = player_resp
+        player_resp.status = 200
+        player_resp.read.return_value = (
+            b'{"code": 200, "data": [{"url": "https://m10.music.126.net/song.mp3", "time": 240000}]}'
+        )
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [player_resp] * 5):
+            result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+        self.assertTrue(result.can_download)
+        self.assertEqual(result.song_name, "Test Song")
+
+    def test_detect_unavailable(self):
+        from music_fetch.api import detect_song
+        meta_resp = mock.MagicMock()
+        meta_resp.__enter__.return_value = meta_resp
+        meta_resp.status = 200
+        meta_resp.read.return_value = (
+            b'{"code": 200, "songs": [{"name": "Test", "dt": 240000}]}'
+        )
+        empty_resp = mock.MagicMock()
+        empty_resp.__enter__.return_value = empty_resp
+        empty_resp.status = 200
+        empty_resp.read.return_value = b'{"code": 200, "data": []}'
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [empty_resp] * 5):
+            result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+        self.assertFalse(result.can_download)
+
+
 if __name__ == "__main__":
     unittest.main()

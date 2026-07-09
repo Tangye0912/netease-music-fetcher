@@ -79,6 +79,53 @@ class MainTests(unittest.TestCase):
             music_fetch.cli.main([])
         self.assertNotEqual(ctx.exception.code, 0)
 
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_invalid_url(self, _log_mock):
+        result = music_fetch.cli.main(["--url", "not-a-valid-url-at-all"])
+        self.assertEqual(result, 1)
+
+    @mock.patch("music_fetch.cli.run_playlist_download")
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_playlist_route(self, _cookie_mock, _log_mock, playlist_mock):
+        from music_fetch.api import DownloadResult
+        playlist_mock.return_value = [DownloadResult(song_id="1", output_path=Path("out/song.mp3"), size_bytes=4, duration_ms=1000)]
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/playlist?id=123",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                result = music_fetch.cli.main(args)
+            self.assertEqual(result, 0)
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_playlist_empty(self, _cookie_mock, _log_mock):
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/playlist?id=123",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                with mock.patch("music_fetch.cli.run_playlist_download", return_value=[]):
+                    result = music_fetch.cli.main(args)
+            self.assertEqual(result, 1)
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_verbose_and_debug_flags(self, _log_mock):
+        with self.assertRaises(SystemExit) as ctx:
+            music_fetch.cli.main(["--url", "42", "--verbose", "--debug", "--help"])
+        self.assertEqual(ctx.exception.code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
