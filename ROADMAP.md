@@ -2,279 +2,41 @@
 
 ## Maintenance Rules
 
-- `CHANGELOG.md` 是唯一版本历史来源；不要再为单个历史版本新增独立 release notes。
-- `README.md` 只保留用户启动、功能概览、项目结构和测试入口，避免复制完整版本说明。
-- `ROADMAP.md` 只记录规划和仍需推进的技术方向；已完成细节沉淀到 `CHANGELOG.md`。
-- 每条功能改动必须补对应测试（单元测试或流程测试）。
-- 发现未使用代码或文档时，优先删除；若需要保留历史兼容，再显式说明原因。
+- `CHANGELOG.md` 是唯一版本历史来源；已完成内容不再重复保留在 ROADMAP。
+- `README.md` 只保留用户启动、功能概览、项目结构和测试入口。
+- `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
+- 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## v1.5.0 (Completed - 2026-07-09)
+## Current Backlog (after v1.8.0)
 
-### Goal
+### Proxy Integration
 
-- 工程质量提升：强化类型检查、提升测试覆盖率、优化性能与日志。
+- [ ] 在软件设置中提供代理类型、地址、端口和可选凭据配置，并增加输入校验。
+- [ ] 应用启动和设置变更时调用 `configure_proxy()`，让已持久化配置真正进入当前网络会话。
+- [ ] 统一 API、短链接解析、头像和音频下载的代理传输层，避免只有部分请求经过代理。
+- [ ] 验证 SOCKS5 和代理认证行为；若继续基于 `urllib` 无法可靠支持，则引入明确依赖并补端到端 mock 测试。
 
-### Phase 1 — 类型安全
+### Performance and Scalability
 
-- [ ] mypy strict mode：对 `music_fetch/` 全量启用严格类型检查，消除所有类型错误。
-- [ ] 为公开 API 补全类型注解（`__init__.py` 导出函数签名）。
-- [ ] 将 `BatchResultRow` Protocol 替换为更明确的结构类型。
+- [ ] `BatchInspectWorker` 支持在大歌单检测过程中及时取消。
+- [ ] 下载历史超过 1000 条时分页或增量加载，避免一次性构造全部表格行。
+- [ ] 批量媒体大小探测增加并发上限，避免短时间发起过多 HEAD 请求。
 
-### Phase 2 — 测试覆盖
+### Type Safety and Tests
 
-- [ ] 测试覆盖率从当前 ~90% 提升到 95%+。
-- [ ] 补 `search_dialog.py`、`playlist_dialog.py` 单元测试。
-- [ ] 补 `batch_dialogs.py` 下载流程 E2E 测试（mock 网络）。
-- [ ] 补 `main.py` 中 `MainWindow` 关键交互流程测试。
-- [ ] 为 `_download_audio_stream` 的 header 轮换、403 重试、断点续传补边界测试。
+- [ ] 将 mypy 加入开发依赖和 CI，持续验证 `music_fetch/` 的 strict 配置。
+- [ ] 为 `MainWindow` 的检测、批量路由、设置切换和下载结果流程补行为级测试。
+- [ ] 补齐 `_download_audio_stream` 的 header 轮换、403 重试和断点续传边界覆盖。
+- [ ] 收紧 `music_fetch/__init__.py` 的公开 API，并用更明确的结构类型替换 `BatchResultRow` Protocol。
+- [ ] 重新测量覆盖率并逐步提升到 95% 以上，避免仅依赖测试数量判断质量。
 
-### Phase 3 — 性能优化
+### Logging and Diagnostics
 
-- [ ] 大歌单检测：`BatchInspectWorker` 支持取消中途检测（当前只能等全部完成）。
-- [ ] 下载历史：`DownloadHistoryStore` 超过 1000 条时分页加载，避免一次性读全量。
-- [ ] `probe_media_size_bytes` 批量场景加并发控制，避免 HEAD 请求洪泛。
+- [ ] GUI 默认日志级别调整为 WARNING，CLI 继续由 `--verbose` / `--debug` 控制详细程度。
+- [ ] 增加 GUI 日志查看入口，便于用户在不查找配置目录的情况下导出排障信息。
+- [ ] 下载失败时汇总脱敏后的 Cookie 状态、网络连通性和 CDN 可达性诊断。
 
-### Phase 4 — 日志与可观测性
+### Distribution
 
-- [ ] 日志分级：GUI 默认 WARNING 级别，CLI `--verbose` 切到 INFO，`--debug` 切到 DEBUG。
-- [ ] 日志查看器：GUI 内嵌日志面板，方便用户排查问题。
-- [ ] 下载失败时收集诊断信息（Cookie 状态、网络连通性、CDN 可达性）。
-
-### Phase 5 — 清理与文档
-
-- [ ] 移除 `music_fetch/__init__.py` 中未使用的重导出项。
-- [ ] 统一 `__all__` 定义格式（当前各模块不一致）。
-- [ ] README 补充开发者指南（本地开发、测试、打包流程）。
-
-## v0.7.0 (Completed - 2026-07-01)
-
-### Goal
-
-- 修复已知 bug，清理技术债，为后续版本奠定代码质量基础。
-
-### Scope
-
-- [x] 修复批量下载 worker 异常结束遗漏历史记录。
-- [x] 修复批量检测后无条件重置选中状态。
-- [x] CLI 移除无效的 `--format` 参数。
-- [x] 下载取消标志改用 `threading.Event`。
-- [x] 清理 `main.py` 约 15 处重复局部导入，移除未使用导入。
-- [x] `fetch_song_metadata` 网络错误时添加日志。
-
-## v0.8.0 (Completed - 2026-07-01)
-
-### Goal
-
-- 补核心功能缺口（歌单分页），提升批量检测性能，大幅增加测试覆盖。
-
-### Scope
-
-- [x] 歌单分页获取：`fetch_playlist_song_ids` 支持分页循环拉取，大歌单不再截断。
-- [x] 批量检测并发化：`BatchInspectWorker` 使用 `ThreadPoolExecutor` 并行 `detect_song`。
-- [x] 新增 `tests/test_batch_dialogs.py`（17 个用例），覆盖选择、调度、历史、取消。
-- [x] 新增 `tests/test_audio.py`（12 个用例），覆盖 header 轮换、403 重试、取消、日志脱敏。
-
-## v0.9.0 (Completed - 2026-07-01)
-
-### Goal
-
-- 消除阻断级技术债，清理星号导入、硬编码中文、异常处理。
-
-### Scope
-
-- [x] 消除 `main.py` 星号导入，改为显式导入 17 个名字。
-- [x] 定义 `error_texts.UNKNOWN_ERROR` 常量，统一 5 处散落引用。
-- [x] 提取硬编码中文错误消息到 `ui_texts.py`。
-- [x] 版本检查异常处理区分 `RuntimeError` 和网络错误。
-- [x] 设置状态文本复用 `T.status_ui_settings_updated()`。
-
-## v0.10.0 (Completed - 2026-07-03)
-
-### Goal
-
-- 继续清理技术债，降低模块耦合度，补测试覆盖。
-
-### Scope
-
-- [x] 提取通用 `clamp` 函数，消除 17 处重复钳位模式。（v0.9.1 已完成）
-- [x] 消除 `BatchRuntimeSettingsDialog` 和 `UiSettingsDialog` 的重复钳位逻辑。（v0.9.1 已完成）
-- [x] 拆分 `_workers.py` 中工具函数和模型到 `_batch_models.py`。（v0.10.0 已完成）
-- [x] 拆分 `_dialogs.py` 中样式工具到 `_gui_styles.py`。（v0.10.0 已完成）
-- [x] 补 `_dialogs.py` 中 7 个对话框类的单元测试。（v0.10.0 已完成）
-- [x] 下载队列暂停/恢复与断点续传。（v0.10.0 已完成）
-- [x] 软件设置增加暗色主题切换。（v0.10.0 已完成）
-
-## v0.11.0 (Completed - 2026-07-03)
-
-### Goal
-
-- 完成暂停/恢复 UI 集成，补齐 CLI 与 GUI 功能差距，继续拆分大模块。
-
-### Phase 1 — 功能优先
-
-- [x] 暂停/恢复 UI 集成（v0.11.0 已完成）
-- [x] CLI 补全：`--format`、`--rename`、播放列表批量下载、`download_song_with_fallback`（v0.11.0 已完成）
-- [x] 补 `_batch_models.py` 单元测试（v0.11.0 已完成）
-- [x] 修复 `_cli.py` 裸 `except Exception`（v0.11.0 已完成）
-
-### Phase 2 — 重构与清理
-
-- [x] 拆分 `_dialogs.py`：`LoginDialog` → `_dialog_login.py`（v0.11.0 已完成）
-- [x] 消除重复设置钳位模式：`clamp_download_settings`（v0.11.0 已完成）
-- [x] `_api.py` 返回类型精确化（v0.11.0 已完成）
-
-## v0.12.0 (Next)
-
-### Goal
-
-- 修复已知 bug，清理硬编码中文，继续拆分大模块，补测试和类型覆盖。
-
-### Bug 修复
-
-- [x] 修复暂停后取消时 `.part` 文件残留（v0.12.0 已完成）：`_stop_download_flow` 应清理暂停 worker 的 `.part` 临时文件。
-- [x] 修正 ROADMAP v0.11.0 中 `DownloadProgressDialog`（v0.12.0 已完成）/`DownloadManagerDialog` 误标为已完成 → 实际未拆分。
-
-### 硬编码清理
-
-- [x] `_batch_dialogs.py` 硬编码中文状态消息提取到 `ui_texts`（v0.12.0 已完成）（`下载设置已更新`、`并发 N 路`、`已完成` 等）。
-- [x] `main.py` 硬编码中文状态消息提取到 `ui_texts`（v0.12.0 已完成）（`发现新版本`、`已是最新版本`、`下载完成`、`网络错误`）。
-- [x] `_batch_dialogs.py` / `_dialogs.py` 中 `"次"` / `"路"` 后缀提取到 `ui_texts`（v0.12.0 已完成）。
-
-### 模块拆分
-
-- [x] 拆分 `_dialogs.py`：`DownloadProgressDialog` → `_dialog_progress.py`（v0.12.0 已完成），`DownloadManagerDialog` → `_dialog_manager.py`。
-- [x] 拆分 `_batch_dialogs.py`：`BatchRuntimeSettingsDialog` → `_dialog_batch_settings.py`（v0.12.0 已完成）。
-- [x] 提取 `main.py` 中版本检查逻辑（v0.12.0 已完成）（`fetch_latest_project_version`、`version_key`）到 `_version_check.py`。
-
-### 测试与质量
-
-- [x] 补 `__all__` 定义（v0.12.0 已完成）：`_batch_dialogs.py`、`_dialogs.py`、`_dialog_login.py`、`_batch_models.py`、`_batch_results.py`、`_gui_styles.py`、`_combo_utils.py`。
-- [x] 补 `app_logging.py` 单元测试（v0.12.0 已完成）。
-- [x] CLI 添加 `--retry` 参数（v0.12.0 已完成）。
-- [x] 清理 `_cli.py` 中无效的 `argparse.ArgumentError` 捕获（v0.12.0 已完成）。
-
-## v1.4.0 (Completed - 2026-07-08)
-
-### Goal
-
-- 批量下载暂停/恢复 UI 交互完善 + 下载进度条实时更新。
-
-### Scope
-
-- [x] 暂停/恢复时行状态切换（downloading ↔ download_paused）。
-- [x] 暂停行灰色高亮、下载行蓝色高亮。
-- [x] 进度条累加所有活跃 worker 的部分进度，四舍五入。
-- [x] 暂停时跳过 status_label 更新避免视觉矛盾。
-- [x] 登录检查子线程添加 except Exception 兜底。
-
-## v1.3.0 (Completed - 2026-07-05)
-
-### Goal
-
-- 打包分发：PyInstaller 打包 + GitHub Actions CI。
-
-### Scope
-
-- [x] PyInstaller spec 文件，支持一键打包。
-- [x] GitHub Actions CI，推送 tag 自动构建 Windows + macOS Release。
-
-## v1.2.0 (Completed - 2026-07-05)
-
-### Goal
-
-- 功能扩展：搜索下载、用户歌单、自动更新链接。
-
-### Scope
-
-- [x] 搜索下载：search_songs API + SearchDialog。
-- [x] 用户歌单：fetch_user_playlists API + PlaylistDialog。
-- [x] 自动更新：fetch_release_download_url。
-
-## v1.1.0 (Completed - 2026-07-05)
-
-### Goal
-
-- 用户体验增强：系统托盘、剪贴板检测、窗口记忆。
-
-### Scope
-
-- [x] 系统托盘最小化 + 下载完成通知。
-- [x] 剪贴板自动检测网易云链接。
-- [x] 窗口位置/大小持久化和恢复。
-
-## v1.0.0 (Completed - 2026-07-04)
-
-### Goal
-
-- 1.0.0 就绪：修复阻塞性 bug、收紧公开 API、补文档和测试、清理代码质量。
-
-### Must-fix
-
-- [x] 修复 music-fetch shell wrapper（v1.0.0 已完成） 引用 -m _cli 改为 -m music_fetch.cli。
-- [x] 收紧 music_fetch/__init__.py（v1.0.0 已完成） 公开 API，移除 perform_json_post 等内部实现。
-- [x] README 添加 pre-package（v1.0.0 已完成） 到 package 迁移指南。
-
-### Should-fix
-
-- [x] MusicFetchError 构造改用 ErrorCode（v1.0.0 已完成） 枚举成员。
-- [x] from music_fetch import X 间接导入（v1.0.0 已完成）改为直接子模块导入。
-- [x] load_cookie 添加 UnicodeDecodeError（v1.0.0 已完成） 捕获。
-- [x] 下载目录不可写映射为友好错误码（v1.0.0 已完成）。
-- [x] 补 main.py / dialog_manager.py（v1.0.0 已完成） / gui_styles.py / pipeline.py 测试。
-- [x] PySide6 版本约束加（v1.0.0 已完成） <7.0 上限。
-
-### Nice-to-have
-
-- [x] 删除根目录空 __init__.py。（v1.3.1 已完成）
-- [x] batch_dialogs.py 的 type: ignore[override] 迁移到全局配置。（v1.3.1 已完成）
-- [x] playlist 下载中途网络断开时保留已获取 ID。（v1.3.1 已完成）
-- [x] CLI ffmpeg 缺失时提示输出格式已降级。（v1.3.1 已完成）
-
-## v0.14.0 (Completed - 2026-07-04)
-
-### Goal
-
-- 结构性大升级：包迁移、错误处理重构、下载管道抽象，为 1.0.0 奠定基础。
-
-### Scope
-
-- [x] 包结构迁移：26 个平铺模块迁移到 music_fetch/ 包，music_fetch.py 替换为 __init__.py。
-- [x] 错误处理重构：ErrorCode 枚举 + DownloadCanceled/DownloadPaused 专用异常。
-- [x] 下载管道抽象：DownloadPipeline 纯逻辑类，GUI/CLI 统一下载逻辑。
-
-## v0.13.0 (Completed - 2026-07-03)
-
-### Goal
-
-- 修复 v0.12.0 遗留的 HIGH 严重度 bug，补关键模块测试，继续 UI 完善。
-
-### Bug 修复（HIGH）
-
-- [x] 修复 `_dialog_batch_settings.py:96` `NameError`（v0.13.0 已完成）：`set_label_state` 未导入。
-- [x] 修复 CLI `--retry` 参数死代码（v0.13.0 已完成）：`run_download`/`run_playlist_download` 未接收 `retry_count`，`download_song_with_fallback` 无重试循环。
-
-### 测试补全
-
-- [x] 补 `_cli.py` 单元测试（v0.13.0 已完成）（`run_download`、`run_playlist_download`、`build_parser`、`main`）。
-- [x] 补 `_version_check.py` 单元测试（v0.13.0 已完成）（`version_key`、`fetch_latest_project_version`）。
-- [x] 补 `_dialog_batch_settings.py` 单元测试（v0.13.0 已完成）（`BatchRuntimeSettingsDialog`）。
-
-### UI 与代码完善
-
-- [x] 修复 `_dialog_progress.py` 恢复后状态标签（v0.13.0 已完成）显示 `"准备下载..."` → 应显示 `"下载恢复中..."`。
-- [x] 清理 `_dialogs.py` 中 `.replace("状态：", "")` hack（v0.13.0 已完成），为 `status_ui_settings_updated` 添加 `prefix` 参数。
-- [x] 清理 `main.py` 未使用导入（v0.13.0 已完成）：`json`、`time`、`parse`、`request`。
-- [x] 暗色主题补全（v0.13.0 已完成）：`QScrollBar`、`QToolTip`、`QStatusBar` 样式。
-
-### Goal
-
-- 在已完成批量并发下载与 0.5.1 技术债修复基础上，继续提升异常批次的可恢复能力、结果可读性与工程边界清晰度。
-
-### Scope
-
-- [x] 批量下载“仅重试失败项”一键入口。
-- [x] 批次结果汇总（按失败原因分组统计）。
-- [x] 批次导出（CSV 成功/失败明细）。
-- [x] 继续拆分 `_dialogs.py`：批量下载对话框与批量运行时设置已迁移到 `_batch_dialogs.py`。
-- [x] 为 GUI 关键回调增加轻量 smoke test，覆盖 CLI 入口、单曲检测 worker 导入与批量入口导入。
-- [x] 暂不迁移到真正的 `music_fetch/` 包目录，保持 `pyproject.toml` 的 `py-modules` 清单同步。
+- [ ] 为 macOS 构建补代码签名、公证和可重复的启动冒烟检查。
+- [ ] 评估 PyInstaller WebEngine 资源裁剪，降低当前 onefile 产物体积，同时保持扫码登录可用。

@@ -55,6 +55,13 @@ class LoginDialogInitTests(unittest.TestCase):
         self.assertIsNone(self.dialog._login_check_thread)
         self.assertFalse(self.dialog.confirm_button.isEnabled())
 
+    def test_close_releases_web_engine_objects(self):
+        if not hasattr(self.dialog, "web_page"):
+            self.skipTest("Qt WebEngine is unavailable")
+        self.dialog.close()
+        self.assertIsNone(self.dialog.web_view)
+        self.assertIsNone(self.dialog.web_page)
+
     def test_login_checking_flag_on_confirm(self):
         """Verify _login_checking is set during confirm (with mocked thread)."""
         self.dialog.cookie_fields["MUSIC_U"] = "test_token"

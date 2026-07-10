@@ -5,14 +5,14 @@
 
 ## 1. 版本概览（v1.8.0）
 
-### 1.1 近期更新（v1.4.2 → v1.8.0）
+### 1.1 近期更新（v1.4.2 → 当前开发版）
 
-- **Material Design UI**（v1.8.0）：引入 `qt-material` 库，浅色/深色主题自动适配，按钮涟漪动效。
+- **Material Design UI**（v1.8.0）：基于 `qt-material` 提供浅色/深色主题切换；当前开发版进一步加入卡片式主界面、语义状态色和统一控件细节。
 - **歌词下载**（v1.7.0）：`--lyric` 参数，下载 `.lrc` 歌词文件并嵌入音频标签（MP3/M4A/FLAC）。
 - **macOS CI 构建**（v1.6.0）：GitHub Actions 双平台（Windows + macOS）自动打包。
 - **mypy strict mode**（v1.5.0）：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
 - **CI 矩阵策略**：串行构建避免抢 runner 超时，只在推送 `v*` tag 时触发。
-- **测试**：354 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查等。
+- **测试**：360 个测试用例，覆盖 API、下载管道、对话框、CLI、版本检查和主窗口结构等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。
 迭代路线见 [ROADMAP.md](./ROADMAP.md)。
@@ -41,7 +41,7 @@
 建议开发环境：`Python 3.10+`
 
 ```bash
-pip install -e ".[dev]"
+python3 -m pip install -e ".[dev]"
 ```
 
 如果要做格式转换（例如 `m4a -> mp3/wav/flac`），还需要安装 `ffmpeg`。
@@ -51,7 +51,7 @@ pip install -e ".[dev]"
 ### GUI
 
 ```bash
-python -m music_fetch.main
+python3 -m music_fetch.main
 ```
 
 或双击 `start_windows.bat`（Windows）/ `start_mac.command`（macOS）。
@@ -82,8 +82,8 @@ music-fetch \
 ### 本地打包
 
 ```bash
-pip install -e ".[dev]"
-python build.py --clean
+python3 -m pip install -e ".[dev]"
+python3 build.py --clean
 ```
 
 产物在 `dist/music-fetch.exe`（Windows）或 `dist/music-fetch`（macOS）。
@@ -125,8 +125,8 @@ git push origin v1.8.0
 | `music_fetch/cli.py` | CLI 命令行入口，支持单曲/播放列表下载、`--lyric`/`--verbose`/`--debug`。 |
 | `music_fetch/__init__.py` | 包外观层，重新导出公共 API。 |
 | `music_fetch/batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具。 |
-| `music_fetch/gui_styles.py` | Material Design 主题（qt-material），按钮角色和标签状态辅助。 |
-| `music_fetch/dialog_login.py` | 登录对话框：内嵌网页扫码登录，cookie 提取与校验。 |
+| `music_fetch/gui_styles.py` | 基于 qt-material 的应用级浅/深色设计系统，统一卡片、控件、按钮角色和状态反馈。 |
+| `music_fetch/dialog_login.py` | 登录对话框：内嵌网页扫码登录、cookie 提取与校验，以及 WebEngine 生命周期清理。 |
 | `music_fetch/dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
 | `music_fetch/dialog_manager.py` | 下载管理对话框：历史记录浏览、状态筛选、文件操作、失败重试。 |
 | `music_fetch/dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
@@ -146,14 +146,14 @@ git push origin v1.8.0
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明（`PySide6`、`mutagen`、`qt-material`）。 |
-| `tests/` | 354 个单元/回归测试。 |
+| `tests/` | 360 个单元/回归测试。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
 
 ## 7. 测试
 
 ```bash
-python -m pytest tests/ -q
+python3 -m pytest tests/ -q
 ```
 
 ## 8. 日志与排障

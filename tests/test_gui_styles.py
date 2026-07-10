@@ -3,6 +3,7 @@
 import unittest
 
 from music_fetch.gui_styles import (
+    build_app_stylesheet,
     clamp_ui_font_size,
     MATERIAL_THEME_LIGHT,
     MATERIAL_THEME_DARK,
@@ -22,6 +23,15 @@ class MaterialThemeTests(unittest.TestCase):
 
     def test_light_and_dark_are_different(self):
         self.assertNotEqual(MATERIAL_THEME_LIGHT, MATERIAL_THEME_DARK)
+
+    def test_custom_stylesheet_has_app_surfaces_and_semantic_states(self):
+        stylesheet = build_app_stylesheet("light")
+        self.assertIn("QFrame#heroPanel", stylesheet)
+        self.assertIn('QPushButton[role="primary"]', stylesheet)
+        self.assertIn('QLabel#statusLabel[state="error"]', stylesheet)
+
+    def test_custom_dark_theme_uses_distinct_palette(self):
+        self.assertNotEqual(build_app_stylesheet("light"), build_app_stylesheet("dark"))
 
 
 class ClampFontSizeTests(unittest.TestCase):

@@ -148,7 +148,10 @@ class LoginDialog(QDialog):
         group = QGroupBox(T.LOGIN_WEB_GROUP)
         layout = QVBoxLayout(group)
 
-        self.web_profile = QWebEngineProfile(group)
+        # The application-owned default profile outlives every login page.
+        # A profile parented to this dialog can otherwise be released before
+        # its QWebEnginePage during Qt shutdown, which may abort the process.
+        self.web_profile = QWebEngineProfile.defaultProfile()
         self.web_page = QWebEnginePage(self.web_profile, group)
         self.web_view = QWebEngineView(group)
         self.web_view.setPage(self.web_page)
@@ -161,6 +164,31 @@ class LoginDialog(QDialog):
         layout.addWidget(tip)
         layout.addWidget(self.web_view, stretch=1)
         return group
+
+    def _dispose_web_engine(self) -> None:
+        """Synchronously release WebEngine objects before the app profile."""
+        if not WEB_ENGINE_AVAILABLE:
+            return
+        from shiboken6 import Shiboken
+
+        for name in ("web_view", "web_page"):
+            obj = getattr(self, name, None)
+            if obj is None:
+                continue
+            try:
+                if Shiboken.isValid(obj):
+                    Shiboken.delete(obj)
+            except RuntimeError:
+                logger.debug("WebEngine object was already released. name=%s", name)
+            setattr(self, name, None)
+
+    def done(self, result: int) -> None:
+        self._dispose_web_engine()
+        super().done(result)
+
+    def closeEvent(self, event) -> None:
+        self._dispose_web_engine()
+        super().closeEvent(event)
 
     def _try_focus_qr_login(self, ok: bool) -> None:
         if not ok:

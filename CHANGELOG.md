@@ -1,12 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **应用级视觉系统**：在 `qt-material` 基础主题之上恢复可维护的应用样式层，统一浅色/深色调色板、卡片、按钮、输入框、表格、进度条和语义状态反馈。
+- **代理基础能力**：API 层新增 HTTP/SOCKS5 代理配置接口，会话存储可持久化代理字段；GUI/CLI 配置入口、SOCKS5 行为验证和下载链路统一代理仍列入 ROADMAP。
+
+### Changed
+
+- **主窗口重构**：调整为品牌区、账户卡片、快捷入口、主输入卡片、状态区和页脚的分层布局。
+- **动态视觉尺寸**：字体大小变更后同步刷新头像、输入区和主操作按钮尺寸；恢复窗口尺寸时不再允许小于当前最小布局。
+- **键盘导航**：补全主输入、检测、搜索、歌单、下载管理、依赖管理和软件设置之间的 Tab 顺序。
+
+### Fixed
+
+- **WebEngine 退出崩溃**：关闭登录对话框时按顺序释放 WebView 和 WebEnginePage，避免 profile 先销毁导致进程异常退出。
+- **重新登录丢失设置**：登录流程直接复用完整 `AppSession`，保留代理等新增字段；未勾选“记住登录”时仍仅在当前进程使用 cookie。
+- **主题状态对比度**：禁用的主按钮不再显示为可点击高亮色，页脚链接颜色随浅色/深色主题切换。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（360 通过，退出码 0）。
+- 语法检查：`python3 -m compileall -q music_fetch`。
+- PyInstaller 打包和隔离启动冒烟测试通过。
+
 ## v1.8.0 (2026-07-09)
 
 ### Changed
 
 - **Material Design UI**：引入 `qt-material` 库，替代手写 QSS 样式表。
-  - 亮色主题：`light_blue.xml`，暗色主题：`dark_cyan.xml`。
-  - 按钮自动获得涟漪动效、圆角、阴影。
+  - 亮色主题：`light_red_500.xml`，暗色主题：`dark_red.xml`。
+  - 统一 Qt 控件的基础调色板、圆角和交互状态。
   - 移除 390 行手写 QSS 代码（`build_app_stylesheet`、`build_dark_stylesheet`）。
   - 保留按钮角色（primary/secondary/back）和标签状态（success/warning/error/muted）语义化 API。
   - 新增依赖：`qt-material>=2.14`。

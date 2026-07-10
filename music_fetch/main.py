@@ -22,6 +22,7 @@ from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -107,21 +108,48 @@ class MainWindow(QMainWindow):
         self._version_check_done.connect(self._on_version_check_done)
         self._profile_refresh_done.connect(self._on_profile_refresh_done)
         self.setWindowTitle(T.APP_TITLE)
+        self.setMinimumSize(860, 540)
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
-            self.resize(max(700, int(geo.width() * 0.55)), max(300, int(geo.height() * 0.35)))
+            self.resize(max(860, int(geo.width() * 0.58)), max(540, int(geo.height() * 0.62)))
         else:
-            self.resize(860, 340)
+            self.resize(920, 580)
 
         root = QWidget()
+        root.setObjectName("appRoot")
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(28, 26, 28, 18)
+        layout.setSpacing(16)
 
-        account_row = QHBoxLayout()
+        hero_panel = QFrame()
+        hero_panel.setObjectName("heroPanel")
+        hero_row = QHBoxLayout(hero_panel)
+        hero_row.setContentsMargins(22, 18, 18, 18)
+        hero_row.setSpacing(20)
+
+        brand_column = QVBoxLayout()
+        brand_column.setSpacing(3)
+        eyebrow = QLabel(T.HOME_EYEBROW)
+        eyebrow.setObjectName("brandEyebrow")
+        brand_column.addWidget(eyebrow)
+        title = QLabel(T.APP_TITLE)
+        title.setObjectName("brandTitle")
+        brand_column.addWidget(title)
+        description = QLabel(T.APP_DESC)
+        description.setObjectName("brandSubtitle")
+        description.setWordWrap(True)
+        brand_column.addWidget(description)
+        hero_row.addLayout(brand_column, stretch=1)
+
+        account_panel = QFrame()
+        account_panel.setObjectName("accountPanel")
+        account_row = QHBoxLayout(account_panel)
+        account_row.setContentsMargins(12, 10, 14, 10)
+        account_row.setSpacing(11)
         self.avatar_button = QToolButton()
-        self.avatar_button.setFixedSize(int(self.session.ui_font_size * 3.7), int(self.session.ui_font_size * 3.7))
-        self.avatar_button.setIconSize(QSize(44, 44))
+        self.avatar_button.setObjectName("avatarButton")
         self.avatar_button.setText(T.ACCOUNT_BTN_FALLBACK)
         self.avatar_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
 
@@ -137,61 +165,87 @@ class MainWindow(QMainWindow):
         account_row.addWidget(self.avatar_button)
 
         account_text = QVBoxLayout()
+        account_text.setSpacing(1)
         self.nickname_label = QLabel(T.ACCOUNT_LABEL_NICKNAME_LOGOUT)
+        self.nickname_label.setObjectName("accountName")
         self.vip_label = QLabel(T.ACCOUNT_LABEL_VIP_UNKNOWN)
+        self.vip_label.setObjectName("accountMeta")
         account_text.addWidget(self.nickname_label)
         account_text.addWidget(self.vip_label)
         account_row.addLayout(account_text)
+        hero_row.addWidget(account_panel)
+        layout.addWidget(hero_panel)
 
-        account_row.addStretch(1)
+        toolbar_panel = QFrame()
+        toolbar_panel.setObjectName("toolbarPanel")
+        toolbar_row = QHBoxLayout(toolbar_panel)
+        toolbar_row.setContentsMargins(16, 10, 12, 10)
+        toolbar_row.setSpacing(8)
+        toolbar_title = QLabel(T.HOME_TOOLBAR_TITLE)
+        toolbar_title.setObjectName("toolbarTitle")
+        toolbar_row.addWidget(toolbar_title)
         self.dependency_hint_label = QLabel("")
         self.dependency_hint_label.setVisible(False)
-        account_row.addWidget(self.dependency_hint_label)
-        self.dependency_button = QPushButton(T.BTN_DEPENDENCY_MANAGER)
-        self.dependency_button.clicked.connect(self._open_dependency_manager)
-        account_row.addWidget(self.dependency_button)
+        toolbar_row.addWidget(self.dependency_hint_label)
+        toolbar_row.addStretch(1)
         self.search_button = QPushButton(T.SEARCH_BTN)
         self.search_button.clicked.connect(self._open_search)
-        account_row.addWidget(self.search_button)
+        toolbar_row.addWidget(self.search_button)
         self.playlist_button = QPushButton(T.PLAYLIST_BTN_MY)
         self.playlist_button.clicked.connect(self._open_playlists)
-        account_row.addWidget(self.playlist_button)
+        toolbar_row.addWidget(self.playlist_button)
         self.manager_button = QPushButton(T.BTN_DOWNLOAD_MANAGER)
         self.manager_button.clicked.connect(self._open_download_manager)
-        account_row.addWidget(self.manager_button)
+        toolbar_row.addWidget(self.manager_button)
+        self.dependency_button = QPushButton(T.BTN_DEPENDENCY_MANAGER)
+        self.dependency_button.clicked.connect(self._open_dependency_manager)
+        toolbar_row.addWidget(self.dependency_button)
         self.settings_button = QPushButton(T.BTN_UI_SETTINGS)
         self.settings_button.clicked.connect(self._open_ui_settings)
-        account_row.addWidget(self.settings_button)
-        layout.addLayout(account_row)
+        toolbar_row.addWidget(self.settings_button)
+        layout.addWidget(toolbar_panel)
 
-        description = QLabel(T.APP_DESC)
-        description.setWordWrap(True)
-        layout.addWidget(description)
+        input_panel = QFrame()
+        input_panel.setObjectName("inputPanel")
+        input_layout = QVBoxLayout(input_panel)
+        input_layout.setContentsMargins(22, 19, 22, 18)
+        input_layout.setSpacing(9)
+        input_title = QLabel(T.HOME_INPUT_TITLE)
+        input_title.setObjectName("sectionTitle")
+        input_layout.addWidget(input_title)
+        input_description = QLabel(T.HOME_INPUT_DESC)
+        input_description.setObjectName("sectionSubtitle")
+        input_description.setWordWrap(True)
+        input_layout.addWidget(input_description)
 
         row = QHBoxLayout()
+        row.setSpacing(12)
         self.url_input = QPlainTextEdit()
+        self.url_input.setObjectName("urlInput")
         self.url_input.setPlaceholderText(T.INPUT_PLACEHOLDER)
         self.url_input.textChanged.connect(self._on_url_input_changed)
-        self.url_input.setMinimumHeight(max(48, int(self.session.ui_font_size * 3.6)))
         row.addWidget(self.url_input, stretch=1)
         self.detect_button = QPushButton(T.BTN_DETECT)
+        self.detect_button.setObjectName("detectButton")
         self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
         self.detect_button.clicked.connect(self._on_detect_clicked)
         set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)
-        layout.addLayout(row)
+        input_layout.addLayout(row)
 
         self.input_hint_label = QLabel(T.INPUT_MULTI_HINT)
         self.input_hint_label.setWordWrap(True)
         set_label_state(self.input_hint_label, "muted")
-        layout.addWidget(self.input_hint_label)
+        input_layout.addWidget(self.input_hint_label)
 
         self.input_feedback_label = QLabel("")
         self.input_feedback_label.setWordWrap(True)
         set_label_state(self.input_feedback_label, "muted")
-        layout.addWidget(self.input_feedback_label)
+        input_layout.addWidget(self.input_feedback_label)
+        layout.addWidget(input_panel, stretch=1)
 
         self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
         set_label_state(self.status_label, "muted")
         self.status_label.setMinimumHeight(24)
         self.status_label.setVisible(False)
@@ -199,6 +253,7 @@ class MainWindow(QMainWindow):
 
         footer_row = QHBoxLayout()
         self.version_link_label = QLabel(f'<a href="check-update">{T.FOOTER_VERSION_LINK.format(version=APP_VERSION)}</a>')
+        self.version_link_label.setObjectName("footerLabel")
         self.version_link_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.version_link_label.setOpenExternalLinks(False)
         self.version_link_label.linkActivated.connect(self._on_version_link_activated)
@@ -206,6 +261,7 @@ class MainWindow(QMainWindow):
         footer_row.addWidget(self.version_link_label)
         footer_row.addStretch(1)
         self.github_link_label = QLabel(f'<a href="{PROJECT_GITHUB_URL}">{T.FOOTER_GITHUB_LINK}</a>')
+        self.github_link_label.setObjectName("footerLabel")
         self.github_link_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.github_link_label.setOpenExternalLinks(True)
         set_label_state(self.github_link_label, "muted")
@@ -219,6 +275,7 @@ class MainWindow(QMainWindow):
         self._tray_icon: Optional[QSystemTrayIcon] = None
         self._clipboard_timer: Optional[QTimer] = None
         self._last_clipboard_text = ""
+        self._refresh_visual_metrics()
         self._refresh_ffmpeg_status()
         self._refresh_account_profile()
         self._on_url_input_changed()
@@ -227,6 +284,16 @@ class MainWindow(QMainWindow):
         self._setup_tray_icon()
         self._setup_clipboard_timer()
 
+    def _refresh_visual_metrics(self) -> None:
+        """Keep fixed-size controls in sync with the selected UI font size."""
+        font_size = clamp_ui_font_size(self.session.ui_font_size)
+        avatar_size = max(52, min(64, int(font_size * 3.8)))
+        self.avatar_button.setFixedSize(avatar_size, avatar_size)
+        self.avatar_button.setIconSize(QSize(avatar_size - 12, avatar_size - 12))
+        input_height = max(96, min(132, int(font_size * 7.2)))
+        self.url_input.setMinimumHeight(input_height)
+        self.detect_button.setMinimumSize(max(112, int(font_size * 7.4)), input_height)
+
     def _setup_accessibility(self) -> None:
         self.url_input.setAccessibleName(T.ACC_INPUT_SONG_LINK)
         self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
@@ -234,9 +301,11 @@ class MainWindow(QMainWindow):
         self.manager_button.setAccessibleName(T.ACC_BTN_DOWNLOAD_MANAGER)
         self.settings_button.setAccessibleName(T.ACC_BTN_UI_SETTINGS)
         self.setTabOrder(self.url_input, self.detect_button)
-        self.setTabOrder(self.detect_button, self.dependency_button)
-        self.setTabOrder(self.dependency_button, self.manager_button)
-        self.setTabOrder(self.manager_button, self.settings_button)
+        self.setTabOrder(self.detect_button, self.search_button)
+        self.setTabOrder(self.search_button, self.playlist_button)
+        self.setTabOrder(self.playlist_button, self.manager_button)
+        self.setTabOrder(self.manager_button, self.dependency_button)
+        self.setTabOrder(self.dependency_button, self.settings_button)
 
 
     def _restore_window_geometry(self) -> None:
@@ -247,7 +316,7 @@ class MainWindow(QMainWindow):
                 try:
                     x, y, w, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
                     self.move(x, y)
-                    self.resize(w, h)
+                    self.resize(max(self.minimumWidth(), w), max(self.minimumHeight(), h))
                     logger.info("Window geometry restored. x=%s y=%s w=%s h=%s", x, y, w, h)
                 except (ValueError, TypeError):
                     pass
@@ -489,7 +558,7 @@ class MainWindow(QMainWindow):
             self.avatar_button.setIcon(icon)
             self.avatar_button.setText("")
             self.avatar_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
-            self.avatar_button.setIconSize(QSize(44, 44))
+            self.avatar_button.setIconSize(QSize(self.avatar_button.width() - 12, self.avatar_button.height() - 12))
             self._avatar_error_notified = False
         else:
             self.avatar_button.setIcon(QIcon())
@@ -646,6 +715,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             apply_app_style(app, normalized, theme=self.session.ui_theme)  # type: ignore[arg-type]
+        self._refresh_visual_metrics()
         self._set_status(
             T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency),
             "success",
@@ -812,7 +882,11 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
     loaded.cookie = cookie if remember else ""
     loaded.remember_login = remember
     session_store.save(loaded)
-    return AppSession(cookie=cookie, remember_login=remember, last_download_dir=loaded.last_download_dir, ui_font_size=loaded.ui_font_size, detect_timeout_sec=loaded.detect_timeout_sec, download_timeout_sec=loaded.download_timeout_sec, download_retry_count=loaded.download_retry_count, download_concurrency=loaded.download_concurrency, ui_theme=loaded.ui_theme, window_geometry=loaded.window_geometry)
+    # Keep the freshly authenticated cookie available for this process even
+    # when the user chose not to persist it. Returning the loaded object also
+    # preserves newer settings fields such as proxy configuration.
+    loaded.cookie = cookie
+    return loaded
 
 
 def main() -> int:

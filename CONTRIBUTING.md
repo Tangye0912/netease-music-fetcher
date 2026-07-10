@@ -28,8 +28,24 @@ feat: 优化登录与启动体验
 
 ## 开发检查
 
-提交前建议执行：
+首次开发先安装项目和开发依赖：
+
+```bash
+python3 -m pip install -e ".[dev]"
+```
+
+提交前至少执行：
 
 ```bash
 python3 -m pytest tests/ -q
+python3 -m compileall -q music_fetch
+git diff --check
 ```
+
+涉及依赖、GUI 入口或打包配置时，额外执行：
+
+```bash
+python3 build.py --clean
+```
+
+提交前应阅读完整 `git diff`，确认没有构建产物、凭据或无关改动。

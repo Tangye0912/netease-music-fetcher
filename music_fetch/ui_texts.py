@@ -5,6 +5,10 @@ from __future__ import annotations
 
 APP_TITLE = "网易云音乐下载助手"
 APP_DESC = "支持检测网易云音乐单曲链接或歌单链接"
+HOME_EYEBROW = "MUSIC FETCH"
+HOME_INPUT_TITLE = "添加音乐链接"
+HOME_INPUT_DESC = "粘贴网易云音乐链接、分享文案或歌曲 ID，支持批量自动识别。"
+HOME_TOOLBAR_TITLE = "快捷入口"
 STATUS_IDLE = "状态：待输入"
 STATUS_DETECTING = "状态：检测中..."
 STATUS_DETECT_DONE = "状态：检测完成"
