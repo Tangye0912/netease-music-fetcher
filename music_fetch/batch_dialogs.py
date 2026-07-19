@@ -103,6 +103,10 @@ class BatchDownloadDialog(QDialog):
         self.inspect_worker: Optional[music_fetch.workers.BatchInspectWorker] = None
         self.auto_detect_on_open = auto_detect_on_open
         self._last_detect_signature = ""
+        self._active_detect_signature = ""
+        self._detect_cancel_requested = False
+        self._detect_incomplete = False
+        self._close_when_idle = False
         self._restored_from_cache = False
         self._table_syncing = False
         self._downloading = False
@@ -261,6 +265,7 @@ class BatchDownloadDialog(QDialog):
             self.batch_progress.setValue(len(self.rows))
             self._set_detect_summary_status()
 
+        self._initialized = True
         self._update_detect_button_state()
         self._update_download_button_state()
         if self.auto_detect_on_open and not self._restored_from_cache and self.input_edit.toPlainText().strip():
@@ -268,7 +273,6 @@ class BatchDownloadDialog(QDialog):
         QTimer.singleShot(0, self._adjust_table_columns)
         self.setTabOrder(self.input_edit, self.detect_button)
         self.setTabOrder(self.detect_button, self.out_dir_input)
-        self._initialized = True
 
     def _current_input_signature(self) -> str:
         return self.input_edit.toPlainText().strip()
@@ -322,10 +326,25 @@ class BatchDownloadDialog(QDialog):
         signature = self._current_input_signature()
         has_input = bool(signature)
         running_detect = bool(self.inspect_worker and self.inspect_worker.isRunning())
-        unchanged = bool(self.rows) and signature == self._last_detect_signature
+        unchanged = (
+            bool(self.rows)
+            and signature == self._last_detect_signature
+            and not self._detect_incomplete
+        )
         can_detect = has_input and not self._downloading and not running_detect and not unchanged
-        self.detect_button.setVisible(has_input and not self._downloading and not running_detect and not unchanged)
-        self.detect_button.setEnabled(can_detect)
+        self.detect_button.setVisible(has_input and not self._downloading and (running_detect or not unchanged))
+        if running_detect:
+            self.detect_button.setText(
+                T.BATCH_BTN_CANCELING_DETECT
+                if self._detect_cancel_requested
+                else T.BATCH_BTN_CANCEL_DETECT
+            )
+            set_button_role(self.detect_button, "secondary")
+            self.detect_button.setEnabled(not self._detect_cancel_requested)
+        else:
+            self.detect_button.setText(T.BATCH_BTN_DETECT)
+            set_button_role(self.detect_button, "primary")
+            self.detect_button.setEnabled(can_detect)
         if unchanged:
             self.detect_button.setToolTip(T.MSG_BATCH_INPUT_UNCHANGED)
         else:
@@ -414,7 +433,7 @@ class BatchDownloadDialog(QDialog):
 
     def _on_detect_clicked(self) -> None:
         if self.inspect_worker and self.inspect_worker.isRunning():
-            QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_DETECT_RUNNING)
+            self._request_detect_cancel()
             return
         if self._downloading:
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_DOWNLOAD_RUNNING)
@@ -427,12 +446,16 @@ class BatchDownloadDialog(QDialog):
         if not raw_text:
             QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.MSG_BATCH_NEED_INPUT)
             return
-        if self.rows and raw_text == self._last_detect_signature:
+        if self.rows and raw_text == self._last_detect_signature and not self._detect_incomplete:
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_INPUT_UNCHANGED)
             return
 
         self.rows = []
         self._last_detect_signature = ""
+        self._active_detect_signature = raw_text
+        self._detect_cancel_requested = False
+        self._detect_incomplete = False
+        self._close_when_idle = False
         self._render_rows()
         self.batch_progress.setRange(0, 1)
         self.batch_progress.setValue(0)
@@ -440,12 +463,15 @@ class BatchDownloadDialog(QDialog):
         self._update_detect_button_state()
         self.status_label.setText(T.BATCH_STATUS_DETECTING)
         set_label_state(self.status_label, "warning")
+        self.input_edit.setEnabled(False)
+        self.batch_settings_button.setEnabled(False)
+        self.back_button.setEnabled(False)
         self.inspect_worker = music_fetch.workers.BatchInspectWorker(raw_text, self.cookie, timeout=self.detect_timeout_sec, detect_concurrency=self.download_concurrency)
         self.inspect_worker.progress.connect(self._on_detect_progress)
         self.inspect_worker.completed.connect(self._on_detect_completed)
+        self.inspect_worker.canceled.connect(self._on_detect_canceled)
         self.inspect_worker.failed.connect(self._on_detect_failed)
-        self.inspect_worker.finished.connect(self._update_detect_button_state)
-        self.inspect_worker.finished.connect(self._update_download_button_state)
+        self.inspect_worker.finished.connect(self._on_detect_finished)
         self.inspect_worker.start()
         self._update_detect_button_state()
         self._update_download_button_state()
@@ -455,6 +481,16 @@ class BatchDownloadDialog(QDialog):
         self.batch_progress.setValue(min(current, total))
         self.status_label.setText(f"{T.BATCH_STATUS_DETECTING} {current}/{total} - {current_input[:80]}")
         set_label_state(self.status_label, "warning")
+
+    def _request_detect_cancel(self) -> None:
+        if not self.inspect_worker or not self.inspect_worker.isRunning() or self._detect_cancel_requested:
+            return
+        self._detect_cancel_requested = True
+        self.inspect_worker.request_cancel()
+        self.status_label.setText(T.BATCH_STATUS_DETECT_CANCELING)
+        set_label_state(self.status_label, "warning")
+        self._update_detect_button_state()
+        self._update_download_button_state()
 
     def _on_detect_failed(self, code: str, message: str) -> None:
         mapped = user_error_message(code, message)
@@ -466,7 +502,8 @@ class BatchDownloadDialog(QDialog):
         self._update_download_button_state()
 
     def _on_detect_completed(self, rows: list[BatchDetectRow]) -> None:
-        self._last_detect_signature = self._current_input_signature()
+        self._last_detect_signature = self._active_detect_signature
+        self._detect_incomplete = False
         self.rows = rows
         self._render_rows()
         self.batch_progress.setRange(0, max(len(rows), 1))
@@ -477,6 +514,48 @@ class BatchDownloadDialog(QDialog):
         QTimer.singleShot(0, self._adjust_table_columns)
         if not rows:
             QMessageBox.information(self, T.TITLE_WARNING, T.MSG_BATCH_DETECT_EMPTY)
+
+    def _on_detect_canceled(self, rows: list[BatchDetectRow]) -> None:
+        self._last_detect_signature = self._active_detect_signature
+        self._detect_incomplete = True
+        self.rows = rows
+        self._render_rows()
+        self.status_label.setText(T.BATCH_STATUS_DETECT_CANCELED.format(completed=len(rows)))
+        set_label_state(self.status_label, "warning")
+        self._update_detect_button_state()
+        self._update_download_button_state()
+        QTimer.singleShot(0, self._adjust_table_columns)
+
+    def _on_detect_finished(self) -> None:
+        worker = self.inspect_worker
+        self.inspect_worker = None
+        self._detect_cancel_requested = False
+        self._active_detect_signature = ""
+        self.input_edit.setEnabled(True)
+        self.batch_settings_button.setEnabled(True)
+        self.back_button.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
+        self._update_detect_button_state()
+        self._update_download_button_state()
+        if self._close_when_idle:
+            self._close_when_idle = False
+            QTimer.singleShot(0, self.reject)
+
+    def reject(self) -> None:
+        if self.inspect_worker and self.inspect_worker.isRunning():
+            self._close_when_idle = True
+            self._request_detect_cancel()
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if self.inspect_worker and self.inspect_worker.isRunning():
+            self._close_when_idle = True
+            self._request_detect_cancel()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _render_rows(self) -> None:
         self._table_syncing = True

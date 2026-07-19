@@ -305,11 +305,11 @@ def apply_app_style(app: QApplication, font_size: int, theme: str = "light") -> 
 def set_button_role(button: QPushButton, role: Optional[str]) -> None:
     """Set a semantic role on a button (primary, secondary, etc.)."""
     button.setProperty("role", role or "")
+    is_primary = role == "primary"
+    button.setDefault(is_primary)
+    button.setAutoDefault(is_primary)
     button.style().unpolish(button)
     button.style().polish(button)
-    if role == "primary":
-        button.setDefault(True)
-        button.setAutoDefault(True)
 
 
 def set_back_button(button: QPushButton) -> None:

@@ -209,6 +209,58 @@ class BatchInspectWorkerDetectRowsTests(unittest.TestCase):
         rows = worker._detect_rows()
         self.assertEqual(rows, [])
 
+    def test_cancel_before_run_emits_canceled_instead_of_completed(self):
+        worker = self._make_worker("https://music.163.com/song?id=100")
+        canceled = []
+        completed = []
+        worker.canceled.connect(canceled.append)
+        worker.completed.connect(completed.append)
+
+        worker.request_cancel()
+        worker.run()
+
+        self.assertEqual(canceled, [[]])
+        self.assertEqual(completed, [])
+
+    @mock.patch("music_fetch.workers.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.workers.detect_song")
+    def test_cancel_stops_queued_detection_and_preserves_completed_row(self, mock_detect, mock_probe):
+        worker = music_fetch.workers.BatchInspectWorker(
+            raw_input_text="\n".join(
+                [
+                    "https://music.163.com/song?id=100",
+                    "https://music.163.com/song?id=200",
+                    "https://music.163.com/song?id=300",
+                ]
+            ),
+            cookie="MUSIC_U=test",
+            timeout=5,
+            detect_concurrency=1,
+        )
+
+        def detect_then_cancel(song_id, *_args, **_kwargs):
+            worker.request_cancel()
+            return SongDetectionResult(
+                song_id=song_id,
+                song_name=f"Song {song_id}",
+                duration_ms=120000,
+                media_url="https://example.com/song.mp3",
+                can_download=True,
+                unavailable_reason="",
+                artist="",
+                album_name="",
+                cover_url=None,
+            )
+
+        mock_detect.side_effect = detect_then_cancel
+
+        rows = worker._detect_rows()
+
+        self.assertEqual(mock_detect.call_count, 1)
+        self.assertEqual([row.song_id for row in rows if row.status == "ready"], ["100"])
+        self.assertFalse(any(row.status == "download_canceled" for row in rows))
+        mock_probe.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

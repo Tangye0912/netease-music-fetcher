@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "1.8.0"
+version = "1.9.0"
 description = "网易云音乐单曲下载工具"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 webengine = ["PySide6-Addons>=6.5"]
-dev = ["pyinstaller>=6.0", "pytest>=8.0"]
+dev = ["pyinstaller>=6.0", "pytest>=8.0", "mypy>=1.10"]
 
 [project.scripts]
 music-fetch = "music_fetch.cli:main"

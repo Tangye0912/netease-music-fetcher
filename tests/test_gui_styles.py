@@ -2,6 +2,12 @@
 
 import unittest
 
+from PySide6.QtWidgets import QApplication, QPushButton
+
+_app = QApplication.instance()
+if _app is None:
+    _app = QApplication(["test"])
+
 from music_fetch.gui_styles import (
     build_app_stylesheet,
     clamp_ui_font_size,
@@ -58,6 +64,17 @@ class BackwardCompatTests(unittest.TestCase):
         self.assertTrue(callable(set_label_state))
         self.assertTrue(callable(set_back_button))
         self.assertTrue(callable(set_secondary_button))
+
+    def test_switching_primary_button_to_secondary_clears_default_state(self):
+        button = QPushButton("Action")
+        set_button_role(button, "primary")
+        self.assertTrue(button.isDefault())
+        self.assertTrue(button.autoDefault())
+
+        set_button_role(button, "secondary")
+
+        self.assertFalse(button.isDefault())
+        self.assertFalse(button.autoDefault())
 
 
 if __name__ == "__main__":

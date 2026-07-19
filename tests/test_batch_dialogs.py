@@ -14,7 +14,7 @@ if _app is None:
 
 from music_fetch.batch_models import BatchDetectRow
 from music_fetch.batch_dialogs import BatchDownloadDialog
-from music_fetch.workers import DownloadWorker
+from music_fetch.workers import BatchInspectWorker, DownloadWorker
 from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
 from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS
 
@@ -107,6 +107,77 @@ class BatchDialogSelectionTests(unittest.TestCase):
         self.assertFalse(self.dialog.rows[0].selected)
         self.assertFalse(self.dialog.rows[1].selected)  # unchanged
         self.assertFalse(self.dialog.rows[2].selected)  # unchanged
+
+    def test_initial_empty_input_hides_and_disables_detect_button(self):
+        self.assertTrue(self.dialog.detect_button.isHidden())
+        self.assertFalse(self.dialog.detect_button.isEnabled())
+
+    def test_running_detect_click_requests_cancel_without_dialog(self):
+        worker = mock.MagicMock(spec=BatchInspectWorker)
+        worker.isRunning.return_value = True
+        self.dialog.inspect_worker = worker
+
+        self.dialog._on_detect_clicked()
+
+        self.assertTrue(self.dialog._detect_cancel_requested)
+        worker.request_cancel.assert_called_once()
+        self.assertEqual(self.dialog.detect_button.text(), "正在取消...")
+        self.assertFalse(self.dialog.detect_button.isEnabled())
+
+    def test_canceled_detect_preserves_partial_rows_and_allows_redetect(self):
+        self.dialog.input_edit.setPlainText("https://music.163.com/song?id=100")
+        self.dialog._active_detect_signature = self.dialog._current_input_signature()
+        row = _make_row("100")
+
+        self.dialog._on_detect_canceled([row])
+
+        self.assertEqual(self.dialog.rows, [row])
+        self.assertEqual(self.dialog._last_detect_signature, row.raw_input)
+        self.assertTrue(self.dialog._detect_incomplete)
+        self.assertFalse(self.dialog.detect_button.isHidden())
+        self.assertTrue(self.dialog.detect_button.isEnabled())
+        self.assertTrue(self.dialog.download_button.isEnabled())
+
+    def test_completed_detect_binds_results_to_started_input(self):
+        self.dialog._active_detect_signature = "https://music.163.com/song?id=100"
+        self.dialog.input_edit.setPlainText("https://music.163.com/song?id=changed")
+
+        self.dialog._on_detect_completed([_make_row("100")])
+
+        self.assertEqual(
+            self.dialog._last_detect_signature,
+            "https://music.163.com/song?id=100",
+        )
+        self.assertTrue(self.dialog._input_changed_since_detect())
+
+    def test_start_detect_locks_mutable_controls(self):
+        self.dialog.input_edit.setPlainText("https://music.163.com/song?id=100")
+        worker = mock.MagicMock(spec=BatchInspectWorker)
+        worker.isRunning.return_value = True
+
+        with mock.patch("music_fetch.batch_dialogs.music_fetch.workers.BatchInspectWorker", return_value=worker):
+            self.dialog._on_detect_clicked()
+
+        self.assertFalse(self.dialog.input_edit.isEnabled())
+        self.assertFalse(self.dialog.batch_settings_button.isEnabled())
+        self.assertFalse(self.dialog.back_button.isEnabled())
+        worker.start.assert_called_once()
+
+    def test_detect_finished_releases_worker_and_controls(self):
+        worker = mock.MagicMock(spec=BatchInspectWorker)
+        worker.isRunning.return_value = False
+        self.dialog.inspect_worker = worker
+        self.dialog.input_edit.setEnabled(False)
+        self.dialog.batch_settings_button.setEnabled(False)
+        self.dialog.back_button.setEnabled(False)
+
+        self.dialog._on_detect_finished()
+
+        self.assertIsNone(self.dialog.inspect_worker)
+        self.assertTrue(self.dialog.input_edit.isEnabled())
+        self.assertTrue(self.dialog.batch_settings_button.isEnabled())
+        self.assertTrue(self.dialog.back_button.isEnabled())
+        worker.deleteLater.assert_called_once()
 
 
 class BatchDialogDownloadSchedulingTests(unittest.TestCase):

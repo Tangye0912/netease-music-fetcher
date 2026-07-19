@@ -7,7 +7,7 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v1.8.0)
+## Current Backlog (after v1.9.0)
 
 ### Proxy Integration
 
@@ -18,13 +18,10 @@
 
 ### Performance and Scalability
 
-- [ ] `BatchInspectWorker` 支持在大歌单检测过程中及时取消。
 - [ ] 下载历史超过 1000 条时分页或增量加载，避免一次性构造全部表格行。
-- [ ] 批量媒体大小探测增加并发上限，避免短时间发起过多 HEAD 请求。
 
 ### Type Safety and Tests
 
-- [ ] 将 mypy 加入开发依赖和 CI，持续验证 `music_fetch/` 的 strict 配置。
 - [ ] 为 `MainWindow` 的检测、批量路由、设置切换和下载结果流程补行为级测试。
 - [ ] 补齐 `_download_audio_stream` 的 header 轮换、403 重试和断点续传边界覆盖。
 - [ ] 收紧 `music_fetch/__init__.py` 的公开 API，并用更明确的结构类型替换 `BatchResultRow` Protocol。

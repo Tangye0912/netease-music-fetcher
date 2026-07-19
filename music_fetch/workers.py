@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Optional
 
@@ -65,6 +65,7 @@ __all__ = [
 class BatchInspectWorker(QThread):
     progress = Signal(int, int, str)
     completed = Signal(object)
+    canceled = Signal(object)
     failed = Signal(str, str)
 
     def __init__(self, raw_input_text: str, cookie: str, timeout: int, detect_concurrency: int = 5) -> None:
@@ -81,7 +82,11 @@ class BatchInspectWorker(QThread):
     def run(self) -> None:
         try:
             rows = self._detect_rows()
-            self.completed.emit(rows)
+            if self._cancel_event.is_set():
+                logger.info("Batch detect canceled. preserved_rows=%s", len(rows))
+                self.canceled.emit(rows)
+            else:
+                self.completed.emit(rows)
         except MusicFetchError as err:
             self.failed.emit(err.code, err.message)
         except Exception as err:  # pragma: no cover
@@ -101,12 +106,16 @@ class BatchInspectWorker(QThread):
         rows: list[BatchDetectRow] = []
         expanded: list[tuple[str, str, str, str]] = []
         for value in candidates:
+            if self._cancel_event.is_set():
+                break
             source_hint = hint_map.get(value, "")
             try:
                 resource_type, resource_id = parse_input_resource(value)
                 if resource_type == "playlist":
                     playlist_label = source_hint or f"{T.BATCH_SOURCE_PLAYLIST}-{resource_id}"
                     song_ids = fetch_playlist_song_ids(resource_id, self.cookie, timeout=self.timeout)
+                    if self._cancel_event.is_set():
+                        break
                     for song_id in song_ids:
                         expanded.append(("playlist", value, song_id, playlist_label))
                 else:
@@ -123,7 +132,6 @@ class BatchInspectWorker(QThread):
                 )
 
         seen_song_ids: set[str] = set()
-        total = len(expanded)
         if not expanded:
             return rows
 
@@ -145,22 +153,25 @@ class BatchInspectWorker(QThread):
             seen_song_ids.add(song_id)
             unique_expanded.append((source_type, source_value, song_id, source_label))
 
-        # Parallel detect: submit all unique songs to a thread pool
+        # Keep only a small bounded set of futures alive so cancellation does
+        # not leave a large queue of network requests waiting to start.
         completed_count = 0
         total_unique = len(unique_expanded)
         results_by_index: dict[int, BatchDetectRow] = {}
 
-        def _detect_one(index: int, source_type: str, source_value: str, song_id: str, source_label: str) -> tuple[int, BatchDetectRow]:
+        def _detect_one(
+            index: int,
+            source_type: str,
+            source_value: str,
+            song_id: str,
+            source_label: str,
+        ) -> tuple[int, Optional[BatchDetectRow]]:
             if self._cancel_event.is_set():
-                return (index, BatchDetectRow(
-                    raw_input=source_value, source_type=source_type, source_label=source_label,
-                    song_id=song_id, status="download_canceled",
-                    message="Detection canceled by user.", selected=False,
-                ))
+                return (index, None)
             try:
                 result = detect_song(song_id, self.cookie, timeout=self.timeout)
                 size_bytes = 0
-                if result.can_download and result.media_url:
+                if result.can_download and result.media_url and not self._cancel_event.is_set():
                     size_bytes = probe_media_size_bytes(result.media_url, timeout=min(10, self.timeout))
                 final_source_label = source_label
                 if source_type == "song" and not final_source_label:
@@ -190,17 +201,49 @@ class BatchInspectWorker(QThread):
                     selected=False,
                 ))
 
+        next_index = 0
         with ThreadPoolExecutor(max_workers=self.detect_concurrency) as executor:
-            future_to_index = {}
-            for idx, (source_type, source_value, song_id, source_label) in enumerate(unique_expanded):
-                future = executor.submit(_detect_one, idx, source_type, source_value, song_id, source_label)
-                future_to_index[future] = idx
+            pending: dict[Future[tuple[int, Optional[BatchDetectRow]]], int] = {}
 
-            for future in as_completed(future_to_index):
-                idx, row = future.result()
-                results_by_index[idx] = row
-                completed_count += 1
-                self.progress.emit(completed_count, total_unique, unique_expanded[idx][2])
+            def _fill_pending() -> None:
+                nonlocal next_index
+                while (
+                    len(pending) < self.detect_concurrency
+                    and next_index < total_unique
+                    and not self._cancel_event.is_set()
+                ):
+                    source_type, source_value, song_id, source_label = unique_expanded[next_index]
+                    future = executor.submit(
+                        _detect_one,
+                        next_index,
+                        source_type,
+                        source_value,
+                        song_id,
+                        source_label,
+                    )
+                    pending[future] = next_index
+                    next_index += 1
+
+            _fill_pending()
+            while pending:
+                finished, _unfinished = wait(
+                    tuple(pending),
+                    timeout=0.1,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in finished:
+                    pending.pop(future)
+                    idx, row = future.result()
+                    if row is None:
+                        continue
+                    results_by_index[idx] = row
+                    completed_count += 1
+                    self.progress.emit(completed_count, total_unique, unique_expanded[idx][2])
+                if self._cancel_event.is_set():
+                    for future in pending:
+                        future.cancel()
+                    break
+                _fill_pending()
 
         # Reconstruct results in original order, then append duplicates after
         for idx in range(total_unique):

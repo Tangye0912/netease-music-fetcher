@@ -28,6 +28,9 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
+      - name: Run strict type checks
+        run: python -m mypy music_fetch/ --strict
+
       - name: Build executable
         run: python build.py --clean
 
