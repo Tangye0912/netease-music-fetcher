@@ -69,6 +69,15 @@ from music_fetch.audio import (
     fetch_outer_media_url,
 )
 
+from music_fetch.network import (
+    ProxyConfig,
+    ProxyConfigError,
+    configure_proxy,
+    get_proxy_config,
+    normalize_proxy_config,
+    open_url,
+)
+
 from music_fetch.cli import (
     run_download,
     run_playlist_download,

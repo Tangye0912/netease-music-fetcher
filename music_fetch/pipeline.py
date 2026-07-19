@@ -29,6 +29,7 @@ from music_fetch.audio import (
     infer_audio_format_from_url,
     is_ffmpeg_available,
 )
+from music_fetch.network import open_url
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
 
@@ -249,7 +250,7 @@ def write_audio_tags(
             try:
                 from urllib import request
                 req = request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"})
-                with request.urlopen(req, timeout=10) as resp:
+                with open_url(req, timeout=10) as resp:
                     cover_data = resp.read()
                 if cover_data:
                     audio = MP3(str(output_path), ID3=ID3)

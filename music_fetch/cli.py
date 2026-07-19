@@ -11,6 +11,7 @@ __all__ = ["run_download", "run_playlist_download", "build_parser", "main"]
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -31,6 +32,7 @@ from music_fetch.app_logging import default_log_path, setup_logging
 from music_fetch.app_settings import SUPPORTED_AUDIO_FORMATS
 from music_fetch.audio import resolve_output_path
 from music_fetch.pipeline import run_download_pipeline
+from music_fetch.network import ProxyConfigError, configure_proxy
 
 
 def run_download(
@@ -193,6 +195,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Download and embed lyrics (.lrc file + audio tag).",
     )
     parser.add_argument(
+        "--proxy-type", choices=["direct", "http", "socks5"], default="direct",
+        help="Application proxy type (default: direct).",
+    )
+    parser.add_argument(
+        "--proxy-host", default="",
+        help="Proxy hostname or IP address.",
+    )
+    parser.add_argument(
+        "--proxy-port", type=int, default=0,
+        help="Proxy port (1-65535).",
+    )
+    parser.add_argument(
+        "--proxy-username", default="",
+        help="Optional proxy username. Read the password from MUSIC_FETCH_PROXY_PASSWORD.",
+    )
+    parser.add_argument(
         "--log-file", default=str(default_log_path()),
         help=f"Log file path (default: {default_log_path()}).",
     )
@@ -214,6 +232,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     log_path = setup_logging(Path(args.log_file), level=log_level)
     logger.info("CLI started. log_path=%s", log_path)
     try:
+        proxy_fields_supplied = bool(args.proxy_host or args.proxy_port or args.proxy_username)
+        if args.proxy_type == "direct" and proxy_fields_supplied:
+            raise ProxyConfigError("Select --proxy-type http or socks5 when proxy fields are provided.")
+        configure_proxy(
+            "" if args.proxy_type == "direct" else args.proxy_type,
+            args.proxy_host,
+            args.proxy_port,
+            args.proxy_username,
+            os.environ.get("MUSIC_FETCH_PROXY_PASSWORD", ""),
+        )
         resource_type, resource_id = parse_input_resource(args.url)
         out_dir = Path(args.out).expanduser()
         cookie_file = Path(args.cookie_file).expanduser()
@@ -251,6 +279,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             logger.info("CLI succeeded. output=%s", result.output_path)
             return 0
+    except ProxyConfigError as err:
+        print(f"PROXY_CONFIG_ERROR: {err}", file=sys.stderr)
+        logger.warning("CLI proxy configuration rejected. type=%s reason=%s", args.proxy_type, err)
+        return 2
     except MusicFetchError as err:
         print(f"{err.code}: {err.message}", file=sys.stderr)
         logger.warning("CLI failed with known error. code=%s message=%s", err.code, err.message)

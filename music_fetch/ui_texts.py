@@ -179,7 +179,7 @@ DEP_MANAGER_INSTALL_OK = "-"
 DEP_MANAGER_INSTALL_FFMPEG = "macOS: brew install ffmpeg\nWindows: winget install Gyan.FFmpeg"
 
 UI_SETTINGS_TITLE = "软件设置"
-UI_SETTINGS_DESC = "统一管理界面字体与下载参数，保存后立即生效并在下次启动时保持。"
+UI_SETTINGS_DESC = "统一管理界面、下载与网络代理参数，保存后立即生效并在下次启动时保持。"
 UI_SETTINGS_FONT_SIZE = "字体大小"
 UI_SETTINGS_DOWNLOAD_GROUP = "下载设置"
 UI_SETTINGS_DETECT_TIMEOUT = "检测超时（秒）"
@@ -187,6 +187,17 @@ UI_SETTINGS_DOWNLOAD_TIMEOUT = "下载超时（秒）"
 UI_SETTINGS_DOWNLOAD_RETRY = "下载重试次数"
 UI_SETTINGS_DOWNLOAD_CONCURRENCY = "并发上限"
 UI_SETTINGS_DOWNLOAD_CONCURRENCY_HINT = "批量下载同时执行的任务数。网络较慢时建议 1-2 路，更稳定。"
+UI_SETTINGS_PROXY_GROUP = "网络代理"
+UI_SETTINGS_PROXY_TYPE = "代理类型"
+UI_SETTINGS_PROXY_DIRECT = "直连（跟随系统网络）"
+UI_SETTINGS_PROXY_HTTP = "HTTP 代理"
+UI_SETTINGS_PROXY_SOCKS5 = "SOCKS5 代理"
+UI_SETTINGS_PROXY_HOST = "主机"
+UI_SETTINGS_PROXY_PORT = "端口"
+UI_SETTINGS_PROXY_USERNAME = "用户名（可选）"
+UI_SETTINGS_PROXY_PASSWORD = "密码（可选）"
+UI_SETTINGS_PROXY_HINT = "SOCKS5 使用远程 DNS 解析；代理密码仅保存在本机设置文件中，日志不会记录。"
+UI_SETTINGS_PROXY_INVALID = "代理配置无效：{message}"
 UI_SETTINGS_RESET = "恢复默认"
 UI_SETTINGS_SAVE = "保存"
 UI_SETTINGS_THEME = "界面主题"
@@ -332,6 +343,14 @@ def status_update_available(latest_version: str) -> str:
 
 def status_update_latest(version: str) -> str:
     return f"状态：当前已是最新版本 {version}"
+
+
+def proxy_settings_summary(proxy_type: str, host: str = "", port: int = 0, authenticated: bool = False) -> str:
+    if not proxy_type:
+        return "网络：直连（跟随系统网络）"
+    type_label = "SOCKS5" if proxy_type == "socks5" else "HTTP"
+    auth_label = "，已配置认证" if authenticated else ""
+    return f"网络：{type_label} {host}:{port}{auth_label}"
 
 
 def batch_runtime_settings_updated(

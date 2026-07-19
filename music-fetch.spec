@@ -25,6 +25,10 @@ a = Analysis(
         'music_fetch.playlist_dialog',
         'music_fetch.batch_inputs',
         'music_fetch.batch_dialogs',
+        # Proxy support loads Requests and its SOCKS transport at runtime.
+        'requests',
+        'socks',
+        'urllib3.contrib.socks',
         # PySide6 WebEngine — imported in try/except blocks, may be skipped.
         'PySide6.QtWebEngineCore',
         'PySide6.QtWebEngineWidgets',

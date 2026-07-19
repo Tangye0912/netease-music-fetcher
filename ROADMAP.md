@@ -7,14 +7,7 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v1.9.0)
-
-### Proxy Integration
-
-- [ ] 在软件设置中提供代理类型、地址、端口和可选凭据配置，并增加输入校验。
-- [ ] 应用启动和设置变更时调用 `configure_proxy()`，让已持久化配置真正进入当前网络会话。
-- [ ] 统一 API、短链接解析、头像和音频下载的代理传输层，避免只有部分请求经过代理。
-- [ ] 验证 SOCKS5 和代理认证行为；若继续基于 `urllib` 无法可靠支持，则引入明确依赖并补端到端 mock 测试。
+## Current Backlog (after v1.10.0)
 
 ### Performance and Scalability
 

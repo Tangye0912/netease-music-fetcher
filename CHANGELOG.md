@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## v1.10.0 (2026-07-19)
+
+### Added
+
+- **代理设置界面**：软件设置新增直连、HTTP、SOCKS5、主机、端口和可选用户名/密码，保存前执行完整输入校验并立即生效。
+- **统一网络传输层**：新增 `music_fetch.network`，集中管理代理配置、认证、HTTP/SOCKS5 传输与 urllib 兼容响应。
+- **CLI 代理参数**：新增 `--proxy-type`、`--proxy-host`、`--proxy-port`、`--proxy-username`；密码仅从 `MUSIC_FETCH_PROXY_PASSWORD` 读取。
+- **SOCKS5 明确依赖**：加入 `requests[socks]`，使用 `socks5h` 让目标域名由代理端解析。
+
+### Changed
+
+- API、短链接解析、头像、媒体大小探测、音频流、封面下载和版本检查统一使用应用代理状态。
+- 应用在登录态在线校验前应用持久化代理；设置变更后同步刷新项目传输层和 Qt 应用代理。
+- SessionStore 对代理类型、端口和可选凭据进行规范化，非法旧配置启动时安全回退直连。
+
+### Fixed
+
+- 修复代理设置只能持久化、重启后却从未调用 `configure_proxy()` 的无效配置问题。
+- 修复代理用户名和密码字段已存在但 HTTP/SOCKS5 请求完全未使用的问题。
+- 修复音频 CDN、短链接、头像和封面仍绕过 API 代理处理器的问题。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（396 通过，10 个参数化子测试通过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（29 个源文件零错误）。
+- 本地 HTTP/SOCKS5 端到端测试验证 Basic 认证、SOCKS5 用户名/密码握手与远程 DNS。
+
 ## v1.9.0 (2026-07-19)
 
 ### Added

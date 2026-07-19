@@ -18,6 +18,9 @@ class BuildParserTests(unittest.TestCase):
         self.assertEqual(args.out_format, "mp3")
         self.assertEqual(args.retry_count, 1)
         self.assertEqual(args.timeout, 30)
+        self.assertEqual(args.proxy_type, "direct")
+        self.assertEqual(args.proxy_host, "")
+        self.assertEqual(args.proxy_port, 0)
 
     def test_format_choices(self):
         parser = music_fetch.cli.build_parser()
@@ -28,6 +31,22 @@ class BuildParserTests(unittest.TestCase):
         parser = music_fetch.cli.build_parser()
         args = parser.parse_args(["--url", "42", "--retry", "3"])
         self.assertEqual(args.retry_count, 3)
+
+    def test_proxy_arguments_parsed(self):
+        parser = music_fetch.cli.build_parser()
+        args = parser.parse_args(
+            [
+                "--url", "42",
+                "--proxy-type", "socks5",
+                "--proxy-host", "127.0.0.1",
+                "--proxy-port", "1080",
+                "--proxy-username", "user",
+            ]
+        )
+        self.assertEqual(args.proxy_type, "socks5")
+        self.assertEqual(args.proxy_host, "127.0.0.1")
+        self.assertEqual(args.proxy_port, 1080)
+        self.assertEqual(args.proxy_username, "user")
 
 
 class RunDownloadTests(unittest.TestCase):
@@ -242,6 +261,38 @@ class MainTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             music_fetch.cli.main(["--url", "42", "--verbose", "--debug", "--help"])
         self.assertEqual(ctx.exception.code, 0)
+
+    @mock.patch("music_fetch.cli.run_download")
+    @mock.patch("music_fetch.cli.configure_proxy")
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_applies_authenticated_socks_proxy_from_environment(
+        self, _log_mock, configure_proxy_mock, download_mock,
+    ):
+        from music_fetch.api import DownloadResult
+        download_mock.return_value = DownloadResult(
+            song_id="42", output_path=Path("out/song.mp3"), size_bytes=4, duration_ms=1000,
+        )
+        args = [
+            "--url", "42",
+            "--proxy-type", "socks5",
+            "--proxy-host", "127.0.0.1",
+            "--proxy-port", "1080",
+            "--proxy-username", "user",
+        ]
+        with mock.patch.dict("os.environ", {"MUSIC_FETCH_PROXY_PASSWORD": "secret"}):
+            result = music_fetch.cli.main(args)
+
+        self.assertEqual(result, 0)
+        configure_proxy_mock.assert_called_once_with(
+            "socks5", "127.0.0.1", 1080, "user", "secret",
+        )
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_rejects_proxy_fields_in_direct_mode(self, _log_mock):
+        result = music_fetch.cli.main(
+            ["--url", "42", "--proxy-host", "proxy.local", "--proxy-port", "8080"]
+        )
+        self.assertEqual(result, 2)
 
     @mock.patch("music_fetch.cli.run_download")
     @mock.patch("music_fetch.cli.setup_logging")

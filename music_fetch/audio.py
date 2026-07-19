@@ -40,6 +40,7 @@ from music_fetch.api import (
     logger,
     normalize_media_url,
 )
+from music_fetch.network import open_url
 
 
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]+')
@@ -212,7 +213,7 @@ def fetch_outer_media_url(song_id: str, timeout: int = 20) -> Optional[str]:
     url = OUTER_MEDIA_URL_API.format(song_id=song_id)
     req = request.Request(url, headers={"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Accept": "*/*"}, method="GET")
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
+        with open_url(req, timeout=timeout) as resp:
             final_url = resp.geturl()
             parsed = parse.urlparse(final_url)
             if parsed.netloc.lower().endswith(".music.126.net"):
@@ -303,7 +304,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
             req = request.Request(candidate_url, headers=headers, method="GET")
             logger.info("Download attempt started. attempt=%s/%s scheme=%s referer=%s cookie=%s offset=%s", attempt_no, total_attempts, parse.urlparse(candidate_url).scheme, headers.get("Referer", "none"), "yes" if "Cookie" in headers else "no", resume_offset)
             try:
-                with request.urlopen(req, timeout=timeout) as resp:
+                with open_url(req, timeout=timeout) as resp:
                     # If we requested a Range but server returns 200 (full content),
                     # don't append — overwrite from the beginning.
                     status_code = getattr(resp, "status", None) or getattr(resp, "code", 0)

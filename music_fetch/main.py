@@ -19,6 +19,7 @@ from urllib import error
 
 from PySide6.QtCore import Qt, QObject, QSize, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon
+from PySide6.QtNetwork import QNetworkProxy
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -43,6 +44,7 @@ from music_fetch.download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADI
 from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, check_login_status, fetch_account_profile, parse_input_resource
 from music_fetch.audio import is_ffmpeg_available
 from music_fetch.error_texts import user_error_message
+from music_fetch.network import ProxyConfigError, configure_proxy
 import music_fetch.ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
@@ -700,6 +702,11 @@ class MainWindow(QMainWindow):
             download_retry_count=self.session.download_retry_count,
             download_concurrency=self.session.download_concurrency,
             current_theme=self.session.ui_theme,
+            proxy_type=self.session.proxy_type,
+            proxy_host=self.session.proxy_host,
+            proxy_port=self.session.proxy_port,
+            proxy_username=self.session.proxy_username,
+            proxy_password=self.session.proxy_password,
             parent=self,
         )
         if dialog.exec() != QDialog.Accepted:
@@ -711,13 +718,26 @@ class MainWindow(QMainWindow):
         self.session.download_retry_count = dialog.download_retry_count
         self.session.download_concurrency = dialog.download_concurrency
         self.session.ui_theme = dialog.ui_theme
+        self.session.proxy_type = dialog.proxy_type
+        self.session.proxy_host = dialog.proxy_host
+        self.session.proxy_port = dialog.proxy_port
+        self.session.proxy_username = dialog.proxy_username
+        self.session.proxy_password = dialog.proxy_password
         self.session_store.save(self.session)
+        apply_session_proxy(self.session)
         app = QApplication.instance()
         if app is not None:
             apply_app_style(app, normalized, theme=self.session.ui_theme)  # type: ignore[arg-type]
         self._refresh_visual_metrics()
         self._set_status(
-            T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency),
+            T.status_ui_settings_updated(normalized, self.session.detect_timeout_sec, self.session.download_timeout_sec, self.session.download_retry_count, self.session.download_concurrency)
+            + " "
+            + T.proxy_settings_summary(
+                self.session.proxy_type,
+                self.session.proxy_host,
+                self.session.proxy_port,
+                bool(self.session.proxy_username),
+            ),
             "success",
         )
         self._on_url_input_changed()
@@ -847,8 +867,40 @@ class MainWindow(QMainWindow):
             logger.info("GUI flow ended without completed download. task_id=%s", task_id)
 
 
+def apply_session_proxy(session: AppSession) -> bool:
+    """Apply persisted proxy settings to project and Qt network clients."""
+    try:
+        config = configure_proxy(
+            session.proxy_type,
+            session.proxy_host,
+            session.proxy_port,
+            session.proxy_username,
+            session.proxy_password,
+        )
+    except ProxyConfigError as err:
+        logger.warning(
+            "Invalid persisted proxy configuration; falling back to direct mode. type=%s host=%s port=%s reason=%s",
+            session.proxy_type,
+            session.proxy_host,
+            session.proxy_port,
+            err,
+        )
+        configure_proxy()
+        QNetworkProxy.setApplicationProxy(QNetworkProxy(QNetworkProxy.DefaultProxy))
+        return False
+
+    if config.enabled:
+        proxy_kind = QNetworkProxy.Socks5Proxy if config.proxy_type == "socks5" else QNetworkProxy.HttpProxy
+        qt_proxy = QNetworkProxy(proxy_kind, config.host, config.port, config.username, config.password)
+    else:
+        qt_proxy = QNetworkProxy(QNetworkProxy.DefaultProxy)
+    QNetworkProxy.setApplicationProxy(qt_proxy)
+    return True
+
+
 def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSession]:
     session = session_store.load()
+    apply_session_proxy(session)
     if session.cookie:
         try:
             if check_login_status(session.cookie, timeout=10):

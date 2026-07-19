@@ -19,6 +19,7 @@ from typing import Optional
 from urllib import error, parse, request
 
 from music_fetch.app_logging import get_logger
+from music_fetch.network import normalize_proxy_config, open_url, ProxyConfigError
 from music_fetch.error_texts import user_error_message
 from music_fetch.app_settings import (
     APP_VERSION,
@@ -76,6 +77,7 @@ try:
         QMessageBox,
         QPushButton,
         QSizePolicy,
+        QSpinBox,
         QTableWidget,
         QTableWidgetItem,
         QVBoxLayout,
@@ -97,7 +99,7 @@ def load_avatar_icon(url: str) -> Optional[QIcon]:
         return None
     req = request.Request(url, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
     try:
-        with request.urlopen(req, timeout=10) as resp:
+        with open_url(req, timeout=10) as resp:
             image_bytes = resp.read()
     except (error.URLError, error.HTTPError):
         logger.warning("Failed to load avatar image. url=%s", url)
@@ -459,6 +461,11 @@ class UiSettingsDialog(QDialog):
         download_retry_count: int,
         download_concurrency: int,
         current_theme: str = "light",
+        proxy_type: str = "",
+        proxy_host: str = "",
+        proxy_port: int = 0,
+        proxy_username: str = "",
+        proxy_password: str = "",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -470,8 +477,19 @@ class UiSettingsDialog(QDialog):
         self.ui_theme = (current_theme or "").strip().lower()
         if self.ui_theme not in UI_THEME_OPTIONS:
             self.ui_theme = DEFAULT_UI_THEME
+        self.proxy_type = (proxy_type or "").strip().lower()
+        if self.proxy_type not in {"http", "socks5"}:
+            self.proxy_type = ""
+        self.proxy_host = (proxy_host or "").strip()
+        try:
+            normalized_proxy_port = int(proxy_port)
+        except (TypeError, ValueError):
+            normalized_proxy_port = 0
+        self.proxy_port = normalized_proxy_port if 1 <= normalized_proxy_port <= 65535 else 0
+        self.proxy_username = (proxy_username or "").strip()
+        self.proxy_password = proxy_password or ""
         self.setWindowTitle(T.UI_SETTINGS_TITLE)
-        self.resize(520, 380)
+        self.resize(560, 640)
 
         layout = QVBoxLayout(self)
         desc = QLabel(T.UI_SETTINGS_DESC)
@@ -529,10 +547,43 @@ class UiSettingsDialog(QDialog):
         download_form.addRow(download_hint)
         layout.addLayout(download_form)
 
+        proxy_title = QLabel(T.UI_SETTINGS_PROXY_GROUP)
+        set_label_state(proxy_title, "muted")
+        layout.addWidget(proxy_title)
+        proxy_form = QFormLayout()
+        proxy_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.proxy_type_combo = QComboBox()
+        self.proxy_type_combo.addItem(T.UI_SETTINGS_PROXY_DIRECT, "")
+        self.proxy_type_combo.addItem(T.UI_SETTINGS_PROXY_HTTP, "http")
+        self.proxy_type_combo.addItem(T.UI_SETTINGS_PROXY_SOCKS5, "socks5")
+        proxy_type_index = self.proxy_type_combo.findData(self.proxy_type)
+        self.proxy_type_combo.setCurrentIndex(max(proxy_type_index, 0))
+        self.proxy_type_combo.currentIndexChanged.connect(self._on_proxy_type_changed)
+        proxy_form.addRow(T.UI_SETTINGS_PROXY_TYPE, self.proxy_type_combo)
+
+        self.proxy_host_input = QLineEdit(self.proxy_host)
+        self.proxy_host_input.setPlaceholderText("127.0.0.1 / proxy.example.com")
+        proxy_form.addRow(T.UI_SETTINGS_PROXY_HOST, self.proxy_host_input)
+        self.proxy_port_input = QSpinBox()
+        self.proxy_port_input.setRange(0, 65535)
+        self.proxy_port_input.setSpecialValueText(T.MSG_UNKNOWN)
+        self.proxy_port_input.setValue(self.proxy_port)
+        proxy_form.addRow(T.UI_SETTINGS_PROXY_PORT, self.proxy_port_input)
+        self.proxy_username_input = QLineEdit(self.proxy_username)
+        proxy_form.addRow(T.UI_SETTINGS_PROXY_USERNAME, self.proxy_username_input)
+        self.proxy_password_input = QLineEdit(self.proxy_password)
+        self.proxy_password_input.setEchoMode(QLineEdit.Password)
+        proxy_form.addRow(T.UI_SETTINGS_PROXY_PASSWORD, self.proxy_password_input)
+        proxy_hint = QLabel(T.UI_SETTINGS_PROXY_HINT)
+        proxy_hint.setWordWrap(True)
+        set_label_state(proxy_hint, "muted")
+        proxy_form.addRow(proxy_hint)
+        layout.addLayout(proxy_form)
+
         self.preview_label = QLabel("")
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
-        self._refresh_preview()
+        self._on_proxy_type_changed(self.proxy_type_combo.currentIndex())
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
@@ -568,12 +619,50 @@ class UiSettingsDialog(QDialog):
         )
         self._refresh_preview()
 
+    def _on_proxy_type_changed(self, _index: int) -> None:
+        self.proxy_type = str(self.proxy_type_combo.currentData() or "")
+        enabled = bool(self.proxy_type)
+        for widget in (
+            self.proxy_host_input,
+            self.proxy_port_input,
+            self.proxy_username_input,
+            self.proxy_password_input,
+        ):
+            widget.setEnabled(enabled)
+        if enabled and self.proxy_port_input.value() == 0:
+            self.proxy_port_input.setValue(1080 if self.proxy_type == "socks5" else 8080)
+        self._refresh_preview()
+
+    def accept(self) -> None:
+        try:
+            config = normalize_proxy_config(
+                self.proxy_type_combo.currentData() or "",
+                self.proxy_host_input.text(),
+                self.proxy_port_input.value(),
+                self.proxy_username_input.text(),
+                self.proxy_password_input.text(),
+            )
+        except ProxyConfigError as err:
+            QMessageBox.warning(self, T.TITLE_PARAM_ERROR, T.UI_SETTINGS_PROXY_INVALID.format(message=str(err)))
+            return
+        self.proxy_type = config.proxy_type
+        self.proxy_host = config.host
+        self.proxy_port = config.port
+        self.proxy_username = config.username
+        self.proxy_password = config.password
+        super().accept()
+
     def _reset_default(self) -> None:
         music_fetch.combo_utils.set_combo_value(self.font_size_input, DEFAULT_UI_FONT_SIZE)
         music_fetch.combo_utils.set_combo_value(self.detect_timeout_input, DEFAULT_DETECT_TIMEOUT_SEC)
         music_fetch.combo_utils.set_combo_value(self.download_timeout_input, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
         music_fetch.combo_utils.set_combo_value(self.download_retry_input, DEFAULT_DOWNLOAD_RETRY_COUNT)
         music_fetch.combo_utils.set_combo_value(self.download_concurrency_input, DEFAULT_DOWNLOAD_CONCURRENCY)
+        self.proxy_type_combo.setCurrentIndex(0)
+        self.proxy_host_input.clear()
+        self.proxy_port_input.setValue(0)
+        self.proxy_username_input.clear()
+        self.proxy_password_input.clear()
         self._on_download_settings_changed()
         self._on_font_size_changed(0)
 
@@ -588,6 +677,13 @@ class UiSettingsDialog(QDialog):
                 self.download_retry_count,
                 self.download_concurrency,
                 prefix=False,
+            )
+            + "\n"
+            + T.proxy_settings_summary(
+                str(self.proxy_type_combo.currentData() or ""),
+                self.proxy_host_input.text().strip(),
+                self.proxy_port_input.value(),
+                bool(self.proxy_username_input.text().strip()),
             )
         )
         set_label_state(self.preview_label, "muted")

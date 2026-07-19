@@ -51,6 +51,11 @@ class SessionStoreTests(unittest.TestCase):
                 download_timeout_sec=10,
                 download_retry_count=2,
                 download_concurrency=1,
+                proxy_type="socks5",
+                proxy_host="127.0.0.1",
+                proxy_port=1080,
+                proxy_username="proxy-user",
+                proxy_password="proxy-secret",
             )
             store.save(origin)
             loaded = store.load()
@@ -61,6 +66,11 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.download_timeout_sec, 10)
             self.assertEqual(loaded.download_retry_count, 2)
             self.assertEqual(loaded.download_concurrency, 1)
+            self.assertEqual(loaded.proxy_type, "socks5")
+            self.assertEqual(loaded.proxy_host, "127.0.0.1")
+            self.assertEqual(loaded.proxy_port, 1080)
+            self.assertEqual(loaded.proxy_username, "proxy-user")
+            self.assertEqual(loaded.proxy_password, "proxy-secret")
 
     def test_font_size_is_clamped_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -97,6 +107,19 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.download_timeout_sec, MAX_DOWNLOAD_TIMEOUT_SEC)
             self.assertEqual(loaded.download_retry_count, MIN_DOWNLOAD_RETRY_COUNT)
             self.assertEqual(loaded.download_concurrency, MAX_DOWNLOAD_CONCURRENCY)
+
+    def test_invalid_proxy_settings_are_sanitized_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text(
+                '{"proxy_type":"ftp","proxy_host":" proxy.local ","proxy_port":70000,"proxy_username":" user "}',
+                encoding="utf-8",
+            )
+            loaded = SessionStore(path).load()
+            self.assertEqual(loaded.proxy_type, "")
+            self.assertEqual(loaded.proxy_host, "proxy.local")
+            self.assertEqual(loaded.proxy_port, 0)
+            self.assertEqual(loaded.proxy_username, "user")
 
 
 class DownloadHistoryStoreTests(unittest.TestCase):

@@ -13,6 +13,7 @@ from typing import Optional
 from urllib import error, request
 
 from music_fetch.app_settings import PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
+from music_fetch.network import open_url
 
 
 
@@ -30,7 +31,7 @@ def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
     for endpoint, mode in endpoints:
         req = request.Request(endpoint, headers=headers, method="GET")
         try:
-            with request.urlopen(req, timeout=timeout) as resp:
+            with open_url(req, timeout=timeout) as resp:
                 body_raw = resp.read().decode("utf-8")
         except (error.URLError, error.HTTPError, OSError):
             continue
@@ -57,7 +58,7 @@ def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
     headers = {"User-Agent": "music-fetch-gui", "Accept": "application/vnd.github+json"}
     req = request.Request(PROJECT_RELEASE_API, headers=headers, method="GET")
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
+        with open_url(req, timeout=timeout) as resp:
             body_raw = resp.read().decode("utf-8")
     except (error.URLError, error.HTTPError, OSError):
         return None
@@ -77,5 +78,4 @@ def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
             if url:
                 return url
     return None
-
 

@@ -13,6 +13,7 @@ from typing import Optional
 from urllib import error, request
 
 from music_fetch.app_logging import get_logger
+from music_fetch.network import open_url
 import music_fetch.ui_texts as T
 
 logger = get_logger("music_fetch.gui")
@@ -48,7 +49,7 @@ def probe_media_size_bytes(media_url: str, timeout: int = 8) -> int:
     headers = {"User-Agent": "Mozilla/5.0"}
     head_req = request.Request(media_url, headers=headers, method="HEAD")
     try:
-        with request.urlopen(head_req, timeout=timeout) as resp:
+        with open_url(head_req, timeout=timeout) as resp:
             content_length = str(getattr(resp, "headers", {}).get("Content-Length") or "").strip()
             if content_length.isdigit():
                 return int(content_length)
@@ -62,7 +63,7 @@ def probe_media_size_bytes(media_url: str, timeout: int = 8) -> int:
         method="GET",
     )
     try:
-        with request.urlopen(range_req, timeout=timeout) as resp:
+        with open_url(range_req, timeout=timeout) as resp:
             content_range = str(getattr(resp, "headers", {}).get("Content-Range") or "").strip()
             match = re.search(r"/(\d+)$", content_range)
             if match:

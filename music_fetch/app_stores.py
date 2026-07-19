@@ -92,10 +92,10 @@ class SessionStore:
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
             ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
             window_geometry=str(raw.get("window_geometry") or ""),
-            proxy_type=str(raw.get("proxy_type") or ""),
-            proxy_host=str(raw.get("proxy_host") or ""),
-            proxy_port=self._safe_int(raw.get("proxy_port")),
-            proxy_username=str(raw.get("proxy_username") or ""),
+            proxy_type=self._safe_proxy_type(raw.get("proxy_type")),
+            proxy_host=str(raw.get("proxy_host") or "").strip(),
+            proxy_port=self._safe_proxy_port(raw.get("proxy_port")),
+            proxy_username=str(raw.get("proxy_username") or "").strip(),
             proxy_password=str(raw.get("proxy_password") or ""),
         )
 
@@ -113,10 +113,10 @@ class SessionStore:
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
             "ui_theme": self._safe_ui_theme(session.ui_theme),
             "window_geometry": session.window_geometry,
-            "proxy_type": session.proxy_type,
-            "proxy_host": session.proxy_host,
-            "proxy_port": session.proxy_port,
-            "proxy_username": session.proxy_username,
+            "proxy_type": self._safe_proxy_type(session.proxy_type),
+            "proxy_host": str(session.proxy_host or "").strip(),
+            "proxy_port": self._safe_proxy_port(session.proxy_port),
+            "proxy_username": str(session.proxy_username or "").strip(),
             "proxy_password": session.proxy_password,
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -156,6 +156,16 @@ class SessionStore:
             return int(value)
         except (TypeError, ValueError):
             return 0
+
+    @staticmethod
+    def _safe_proxy_type(value: object) -> str:
+        normalized = str(value or "").strip().lower()
+        return normalized if normalized in {"http", "socks5"} else ""
+
+    @classmethod
+    def _safe_proxy_port(cls, value: object) -> int:
+        port = cls._safe_int(value)
+        return port if 1 <= port <= 65535 else 0
 
 
 class DownloadHistoryStore:

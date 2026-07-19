@@ -417,6 +417,8 @@ class UiSettingsDialogTests(unittest.TestCase):
         self.assertEqual(dlg.download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
         self.assertEqual(dlg.download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT)
         self.assertEqual(dlg.download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY)
+        self.assertEqual(dlg.proxy_type, "")
+        self.assertFalse(dlg.proxy_host_input.isEnabled())
         dlg.close()
 
     def test_clamps_extreme_values(self):
@@ -469,6 +471,79 @@ class UiSettingsDialogTests(unittest.TestCase):
         )
         self.assertEqual(dlg.ui_theme, "dark")
         dlg.close()
+
+    def test_proxy_defaults_to_direct_with_fields_disabled(self):
+        dlg = music_fetch.dialogs.UiSettingsDialog(
+            current_font_size=14,
+            detect_timeout_sec=5,
+            download_timeout_sec=10,
+            download_retry_count=1,
+            download_concurrency=2,
+        )
+        self.assertEqual(dlg.proxy_type_combo.currentData(), "")
+        self.assertFalse(dlg.proxy_host_input.isEnabled())
+        self.assertFalse(dlg.proxy_port_input.isEnabled())
+        dlg.close()
+
+    def test_proxy_existing_socks5_settings_are_loaded(self):
+        dlg = music_fetch.dialogs.UiSettingsDialog(
+            current_font_size=14,
+            detect_timeout_sec=5,
+            download_timeout_sec=10,
+            download_retry_count=1,
+            download_concurrency=2,
+            proxy_type="socks5",
+            proxy_host="127.0.0.1",
+            proxy_port=1080,
+            proxy_username="user",
+            proxy_password="secret",
+        )
+        self.assertEqual(dlg.proxy_type_combo.currentData(), "socks5")
+        self.assertTrue(dlg.proxy_host_input.isEnabled())
+        self.assertEqual(dlg.proxy_host_input.text(), "127.0.0.1")
+        self.assertEqual(dlg.proxy_port_input.value(), 1080)
+        self.assertEqual(dlg.proxy_password_input.text(), "secret")
+        self.assertIn("SOCKS5", dlg.preview_label.text())
+        dlg.close()
+
+    def test_proxy_invalid_settings_block_accept(self):
+        dlg = music_fetch.dialogs.UiSettingsDialog(
+            current_font_size=14,
+            detect_timeout_sec=5,
+            download_timeout_sec=10,
+            download_retry_count=1,
+            download_concurrency=2,
+        )
+        dlg.proxy_type_combo.setCurrentIndex(dlg.proxy_type_combo.findData("http"))
+        dlg.proxy_host_input.setText("https://proxy.local/path")
+        with mock.patch("music_fetch.dialogs.QMessageBox.warning") as warning:
+            dlg.accept()
+        warning.assert_called_once()
+        self.assertNotEqual(dlg.result(), QDialog.Accepted)
+        dlg.close()
+
+    def test_proxy_valid_settings_are_normalized_on_accept(self):
+        dlg = music_fetch.dialogs.UiSettingsDialog(
+            current_font_size=14,
+            detect_timeout_sec=5,
+            download_timeout_sec=10,
+            download_retry_count=1,
+            download_concurrency=2,
+        )
+        dlg.proxy_type_combo.setCurrentIndex(dlg.proxy_type_combo.findData("http"))
+        dlg.proxy_host_input.setText(" proxy.local ")
+        dlg.proxy_port_input.setValue(7890)
+        dlg.proxy_username_input.setText(" user ")
+        dlg.proxy_password_input.setText("secret")
+
+        dlg.accept()
+
+        self.assertEqual(dlg.result(), QDialog.Accepted)
+        self.assertEqual(dlg.proxy_type, "http")
+        self.assertEqual(dlg.proxy_host, "proxy.local")
+        self.assertEqual(dlg.proxy_port, 7890)
+        self.assertEqual(dlg.proxy_username, "user")
+        self.assertEqual(dlg.proxy_password, "secret")
 
 
 if __name__ == "__main__":
