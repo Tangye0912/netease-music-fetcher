@@ -20,6 +20,7 @@ from music_fetch.app_settings import (
     DEFAULT_UI_FONT_SIZE,
     MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
+    MAX_DOWNLOAD_HISTORY_RECORDS,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
     MAX_UI_FONT_SIZE,
@@ -203,15 +204,16 @@ class DownloadHistoryStore:
                         error_code=str(row.get("error_code") or ""),
                     )
                 )
-            # Keep only the most recent 1000 records to avoid unbounded memory growth.
-            if len(records) > 1000:
-                records = records[:1000]
+            # Keep only the most recent records to avoid unbounded memory growth.
+            if len(records) > MAX_DOWNLOAD_HISTORY_RECORDS:
+                records = records[:MAX_DOWNLOAD_HISTORY_RECORDS]
             self._cache = records
             return records
 
     def save(self, records: list[DownloadRecord]) -> None:
         with self._lock:
-            self._cache = list(records)
+            limited_records = list(records[:MAX_DOWNLOAD_HISTORY_RECORDS])
+            self._cache = limited_records
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = [
                 {
@@ -223,7 +225,7 @@ class DownloadHistoryStore:
                     "status": self._safe_status(r.status),
                     "error_code": r.error_code,
                 }
-                for r in records
+                for r in limited_records
             ]
             self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 

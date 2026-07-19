@@ -3,10 +3,11 @@
 网易云音乐单曲下载工具。
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v1.10.0）
+## 1. 版本概览（v1.11.0）
 
 ### 1.1 近期更新（v1.4.2 → 当前版本）
 
+- **下载历史分页**（v1.11.0）：下载管理器每页只渲染 50 条记录，支持状态筛选、页码导航与刷新后的有效页回退；历史在运行期间也严格限制为最新 1000 条。
 - **统一代理支持**（v1.10.0）：GUI/CLI 支持 HTTP、SOCKS5、可选认证和远程 DNS，API、短链、头像、音频、封面及版本检查共用同一传输层。
 - **批量识别可取消**（v1.9.0）：识别大歌单时可随时取消，保留已完成结果并支持直接下载或重新识别。
 - **Material Design UI**（v1.9.0）：在浅色/深色主题基础上加入卡片式主界面、语义状态色和统一控件细节。
@@ -14,7 +15,7 @@
 - **macOS CI 构建**（v1.6.0）：GitHub Actions 双平台（Windows + macOS）自动打包。
 - **mypy strict mode**（v1.5.0）：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
 - **CI 矩阵策略**：串行构建避免抢 runner 超时，只在推送 `v*` tag 时触发。
-- **测试**：396 个测试用例，覆盖 API、代理传输、下载管道、对话框、CLI、版本检查和主窗口结构等。
+- **测试**：401 个测试用例，覆盖 API、代理传输、下载管道、历史分页、对话框、CLI、版本检查和主窗口结构等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。
 迭代路线见 [ROADMAP.md](./ROADMAP.md)。
@@ -28,7 +29,7 @@
 - 批量流程：多条输入解析、结果去重、识别取消与部分结果保留、并发下载、取消/暂停/恢复
 - 下载：支持选择目录、重命名、格式选择（`mp3/m4a/wav/flac/aac`）
 - 歌词：`--lyric` 下载 `.lrc` 文件并嵌入音频标签
-- 下载管理：状态筛选、重试失败任务、打开目录、删除记录、导出 CSV
+- 下载管理：每页 50 条历史、状态筛选、页码导航、重试失败任务、打开目录、删除记录、导出 CSV
 - 搜索下载：直接搜索歌名/歌手名下载
 - 用户歌单：登录后浏览歌单一键下载
 - 依赖降级：未安装 `ffmpeg` 时自动回退 `mp3` 并限制转码选项
@@ -107,8 +108,8 @@ python3 build.py --clean
 推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows + macOS 版本并上传到 GitHub Release：
 
 ```bash
-git tag v1.10.0
-git push origin v1.10.0
+git tag v1.11.0
+git push origin v1.11.0
 ```
 
 ## 5. 错误码
@@ -143,7 +144,7 @@ git push origin v1.10.0
 | `music_fetch/gui_styles.py` | 基于 qt-material 的应用级浅/深色设计系统，统一卡片、控件、按钮角色和状态反馈。 |
 | `music_fetch/dialog_login.py` | 登录对话框：内嵌网页扫码登录、cookie 提取与校验，以及 WebEngine 生命周期清理。 |
 | `music_fetch/dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
-| `music_fetch/dialog_manager.py` | 下载管理对话框：历史记录浏览、状态筛选、文件操作、失败重试。 |
+| `music_fetch/dialog_manager.py` | 下载管理对话框：历史分页、状态筛选、文件操作、失败重试。 |
 | `music_fetch/dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
 | `music_fetch/version_check.py` | GitHub API 版本检查：获取最新 release/tag。 |
 | `music_fetch/combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助。 |
@@ -162,7 +163,7 @@ git push origin v1.10.0
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明（`PySide6`、`mutagen`、`qt-material`、`requests[socks]`）。 |
-| `tests/` | 396 个单元/回归测试。 |
+| `tests/` | 401 个单元/回归测试。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
 

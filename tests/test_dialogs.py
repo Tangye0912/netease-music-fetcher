@@ -314,6 +314,20 @@ class DownloadManagerDialogTests(unittest.TestCase):
     def tearDown(self):
         self.tmp_dir.cleanup()
 
+    @staticmethod
+    def _records(count: int, failed_every: int = 0) -> list[DownloadRecord]:
+        return [
+            DownloadRecord(
+                song_id=str(index),
+                song_name=f"Song {index}",
+                output_path=f"/tmp/song-{index}.mp3",
+                size_bytes=index,
+                downloaded_at="2026-07-19 00:00:00",
+                status=TASK_STATE_FAILED if failed_every and index % failed_every == 0 else TASK_STATE_SUCCESS,
+            )
+            for index in range(count)
+        ]
+
     def test_creates_empty_manager(self):
         dlg = music_fetch.dialogs.DownloadManagerDialog(
             history_store=self.history_store,
@@ -380,6 +394,74 @@ class DownloadManagerDialogTests(unittest.TestCase):
             dlg.filter_combo.setCurrentIndex(index)
             dlg.refresh()
             self.assertEqual(dlg.table.rowCount(), 1)
+        dlg.close()
+
+    def test_large_history_renders_only_first_page(self):
+        self.history_store.save(self._records(1000))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        self.assertEqual(dlg.table.rowCount(), 50)
+        self.assertEqual(dlg.page_label.text(), "第 1 / 20 页 · 共 1000 条")
+        self.assertFalse(dlg.previous_page_button.isEnabled())
+        self.assertTrue(dlg.next_page_button.isEnabled())
+        dlg.close()
+
+    def test_next_page_maps_selection_to_visible_record(self):
+        self.history_store.save(self._records(55))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        dlg.table.setCurrentCell(0, 0)
+        self.assertEqual(dlg._selected_record().song_id, "0")
+        dlg._go_next_page()
+        self.assertIsNone(dlg._selected_record())
+        self.assertEqual(dlg.table.rowCount(), 5)
+        self.assertEqual(dlg.table.item(0, 0).text(), "Song 50")
+        dlg.table.setCurrentCell(0, 0)
+        self.assertEqual(dlg._selected_record().song_id, "50")
+        self.assertTrue(dlg.previous_page_button.isEnabled())
+        self.assertFalse(dlg.next_page_button.isEnabled())
+        dlg.close()
+
+    def test_filter_change_returns_to_first_page(self):
+        self.history_store.save(self._records(120, failed_every=2))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        dlg._go_next_page()
+        failed_index = dlg.filter_combo.findData(TASK_STATE_FAILED)
+        dlg.filter_combo.setCurrentIndex(failed_index)
+        self.assertEqual(dlg.current_page, 0)
+        self.assertEqual(dlg.table.rowCount(), 50)
+        self.assertEqual(dlg.page_label.text(), "第 1 / 2 页 · 共 60 条")
+        dlg.close()
+
+    def test_refresh_clamps_page_after_history_shrinks(self):
+        records = self._records(120)
+        self.history_store.save(records)
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        dlg._go_next_page()
+        dlg._go_next_page()
+        self.history_store.save(records[:10])
+        dlg.refresh()
+        self.assertEqual(dlg.current_page, 0)
+        self.assertEqual(dlg.table.rowCount(), 10)
+        self.assertEqual(dlg.page_label.text(), "第 1 / 1 页 · 共 10 条")
         dlg.close()
 
 

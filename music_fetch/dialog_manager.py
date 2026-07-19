@@ -14,6 +14,7 @@ from typing import Optional
 
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
+    DOWNLOAD_HISTORY_PAGE_SIZE,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
     MIN_DOWNLOAD_RETRY_COUNT,
@@ -34,6 +35,7 @@ from music_fetch.batch_models import format_bytes
 from music_fetch.gui_styles import (
     set_back_button,
     set_label_state,
+    set_secondary_button,
 )
 import music_fetch.ui_texts as T
 
@@ -80,6 +82,9 @@ class DownloadManagerDialog(QDialog):
         self.download_retry_count = max(MIN_DOWNLOAD_RETRY_COUNT, min(MAX_DOWNLOAD_RETRY_COUNT, int(download_retry_count)))
         self.records: list[DownloadRecord] = []
         self.filtered_records: list[DownloadRecord] = []
+        self.page_records: list[DownloadRecord] = []
+        self.current_page = 0
+        self.page_size = DOWNLOAD_HISTORY_PAGE_SIZE
         self.setWindowTitle(T.MANAGER_TITLE)
         self.resize(900, 420)
 
@@ -97,7 +102,7 @@ class DownloadManagerDialog(QDialog):
         self.filter_combo.addItem(T.MANAGER_FILTER_CANCELED, TASK_STATE_CANCELED)
         self.filter_combo.addItem(T.MANAGER_FILTER_PENDING, TASK_STATE_PENDING)
         self.filter_combo.addItem(T.MANAGER_FILTER_DOWNLOADING, TASK_STATE_DOWNLOADING)
-        self.filter_combo.currentIndexChanged.connect(self.refresh)
+        self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self.filter_label)
         filter_row.addWidget(self.filter_combo)
         filter_row.addStretch(1)
@@ -131,6 +136,22 @@ class DownloadManagerDialog(QDialog):
         header.setSectionResizeMode(5, QHeaderView.Stretch)
         layout.addWidget(self.table)
 
+        page_row = QHBoxLayout()
+        page_row.addStretch(1)
+        self.previous_page_button = QPushButton(T.MANAGER_BTN_PREVIOUS_PAGE)
+        set_secondary_button(self.previous_page_button)
+        self.previous_page_button.clicked.connect(self._go_previous_page)
+        page_row.addWidget(self.previous_page_button)
+        self.page_label = QLabel("")
+        self.page_label.setAlignment(Qt.AlignCenter)
+        page_row.addWidget(self.page_label)
+        self.next_page_button = QPushButton(T.MANAGER_BTN_NEXT_PAGE)
+        set_secondary_button(self.next_page_button)
+        self.next_page_button.clicked.connect(self._go_next_page)
+        page_row.addWidget(self.next_page_button)
+        page_row.addStretch(1)
+        layout.addLayout(page_row)
+
         button_row = QHBoxLayout()
         self.open_folder_button = QPushButton(T.MANAGER_BTN_OPEN_FOLDER)
         self.open_folder_button.clicked.connect(self._open_selected_folder)
@@ -161,6 +182,19 @@ class DownloadManagerDialog(QDialog):
             self.filtered_records = list(self.records)
         else:
             self.filtered_records = [record for record in self.records if record.status == status_filter]
+        self._render_current_page()
+
+    def _render_current_page(self) -> None:
+        status_filter = str(self.filter_combo.currentData())
+        total_records = len(self.filtered_records)
+        total_pages = (total_records + self.page_size - 1) // self.page_size
+        if total_pages:
+            self.current_page = min(max(self.current_page, 0), total_pages - 1)
+        else:
+            self.current_page = 0
+        page_start = self.current_page * self.page_size
+        self.page_records = self.filtered_records[page_start:page_start + self.page_size]
+
         if not self.records:
             self.empty_label.setText(T.MSG_DOWNLOADS_EMPTY)
         elif not self.filtered_records:
@@ -169,8 +203,10 @@ class DownloadManagerDialog(QDialog):
             self.empty_label.setText("")
         self.empty_label.setVisible(len(self.filtered_records) == 0)
         self.table.setVisible(len(self.filtered_records) > 0)
-        self.table.setRowCount(len(self.filtered_records))
-        for row, record in enumerate(self.filtered_records):
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
+        self.table.setRowCount(len(self.page_records))
+        for row, record in enumerate(self.page_records):
             file_name = Path(record.output_path).name
             self.table.setItem(row, 0, QTableWidgetItem(record.song_name))
             self.table.setItem(row, 1, QTableWidgetItem(file_name))
@@ -178,19 +214,45 @@ class DownloadManagerDialog(QDialog):
             self.table.setItem(row, 3, QTableWidgetItem(record.downloaded_at))
             self.table.setItem(row, 4, QTableWidgetItem(T.manager_status_text(record.status)))
             self.table.setItem(row, 5, QTableWidgetItem(record.output_path))
+        displayed_page = self.current_page + 1 if total_pages else 0
+        self.page_label.setText(
+            T.MANAGER_PAGE_SUMMARY.format(
+                current=displayed_page,
+                total=total_pages,
+                count=total_records,
+            )
+        )
+        self.previous_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
         logger.info(
-            "Download manager refreshed. total=%s filtered=%s filter=%s",
+            "Download manager refreshed. total=%s filtered=%s page=%s/%s filter=%s",
             len(self.records),
             len(self.filtered_records),
+            displayed_page,
+            total_pages,
             status_filter,
         )
         self._sync_action_buttons()
 
+    def _on_filter_changed(self, *_args: object) -> None:
+        self.current_page = 0
+        self.refresh()
+
+    def _go_previous_page(self, *_args: object) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self, *_args: object) -> None:
+        if (self.current_page + 1) * self.page_size < len(self.filtered_records):
+            self.current_page += 1
+            self._render_current_page()
+
     def _selected_record(self) -> Optional[DownloadRecord]:
         current = self.table.currentRow()
-        if current < 0 or current >= len(self.filtered_records):
+        if current < 0 or current >= len(self.page_records):
             return None
-        return self.filtered_records[current]
+        return self.page_records[current]
 
     def _sync_action_buttons(self) -> None:
         record = self._selected_record()
@@ -310,5 +372,3 @@ class DownloadManagerDialog(QDialog):
             )
             logger.info("Retry task finished with canceled. task_id=%s", task_id)
         self.refresh()
-
-

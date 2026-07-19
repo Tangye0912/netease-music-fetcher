@@ -184,6 +184,42 @@ class DownloadHistoryStoreTests(unittest.TestCase):
             rows = store.load()
             self.assertEqual(rows[0].status, TASK_STATE_SUCCESS)
 
+    def test_save_caps_cache_and_file_to_latest_thousand_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            store = DownloadHistoryStore(path)
+            records = [
+                DownloadRecord(
+                    song_id=str(index),
+                    song_name=f"track-{index}",
+                    output_path=f"/tmp/track-{index}.mp3",
+                    size_bytes=index,
+                    downloaded_at="2026-07-19 00:00:00",
+                )
+                for index in range(1005)
+            ]
+
+            store.save(records)
+
+            self.assertEqual(len(store.load()), 1000)
+            self.assertEqual(store.load()[0].song_id, "0")
+            reloaded = DownloadHistoryStore(path).load()
+            self.assertEqual(len(reloaded), 1000)
+            self.assertEqual(reloaded[-1].song_id, "999")
+
+            store.add(
+                DownloadRecord(
+                    song_id="new",
+                    song_name="newest-track",
+                    output_path="/tmp/newest-track.mp3",
+                    size_bytes=1,
+                    downloaded_at="2026-07-19 00:01:00",
+                )
+            )
+            self.assertEqual(len(store.load()), 1000)
+            self.assertEqual(store.load()[0].song_id, "new")
+            self.assertEqual(store.load()[-1].song_id, "998")
+
 
 if __name__ == "__main__":
     unittest.main()
