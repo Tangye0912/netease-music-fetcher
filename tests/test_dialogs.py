@@ -7,6 +7,7 @@ DownloadManagerDialog, UiSettingsDialog) and pure helper functions
 clamp_ui_font_size, build_app_stylesheet, etc.).
 """
 
+import csv
 import tempfile
 import unittest
 from datetime import datetime
@@ -336,6 +337,7 @@ class DownloadManagerDialogTests(unittest.TestCase):
             download_retry_count=1,
         )
         self.assertIsInstance(dlg, QDialog)
+        self.assertFalse(dlg.export_csv_button.isEnabled())
         dlg.close()
 
     def test_creates_with_existing_records(self):
@@ -462,6 +464,98 @@ class DownloadManagerDialogTests(unittest.TestCase):
         self.assertEqual(dlg.current_page, 0)
         self.assertEqual(dlg.table.rowCount(), 10)
         self.assertEqual(dlg.page_label.text(), "第 1 / 1 页 · 共 10 条")
+        dlg.close()
+
+    def test_search_resets_page_and_filters_across_all_records(self):
+        self.history_store.save(self._records(120))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        dlg._go_next_page()
+        self.assertEqual(dlg.current_page, 1)
+
+        dlg.search_input.setText("Song 119")
+
+        self.assertEqual(dlg.current_page, 0)
+        self.assertEqual(dlg.table.rowCount(), 1)
+        self.assertEqual(dlg.table.item(0, 0).text(), "Song 119")
+        self.assertEqual(dlg.page_label.text(), "第 1 / 1 页 · 共 1 条")
+        self.assertTrue(dlg.export_csv_button.isEnabled())
+        dlg.close()
+
+    def test_status_and_search_empty_result_disables_export(self):
+        self.history_store.save(self._records(10, failed_every=2))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        failed_index = dlg.filter_combo.findData(TASK_STATE_FAILED)
+        dlg.filter_combo.setCurrentIndex(failed_index)
+        dlg.search_input.setText("Song 1")
+        self.assertEqual(dlg.filtered_records, [])
+        self.assertFalse(dlg.export_csv_button.isEnabled())
+        self.assertFalse(dlg.empty_label.isHidden())
+        dlg.close()
+
+    def test_export_includes_all_filtered_pages_and_adds_csv_suffix(self):
+        self.history_store.save(self._records(60))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        self.assertEqual(dlg.table.rowCount(), 50)
+        output_without_suffix = Path(self.tmp_dir.name) / "history-export"
+        with (
+            mock.patch(
+                "music_fetch.dialog_manager.QFileDialog.getSaveFileName",
+                return_value=(str(output_without_suffix), "CSV"),
+            ),
+            mock.patch("music_fetch.dialog_manager.QMessageBox.information") as information,
+        ):
+            dlg._export_filtered_csv()
+
+        output_path = output_without_suffix.with_suffix(".csv")
+        with output_path.open("r", encoding="utf-8-sig", newline="") as exported:
+            rows = list(csv.DictReader(exported))
+        self.assertEqual(len(rows), 60)
+        self.assertEqual(rows[0]["song_id"], "0")
+        self.assertEqual(rows[-1]["song_id"], "59")
+        information.assert_called_once()
+        dlg.close()
+
+    def test_export_write_error_is_reported_without_success_message(self):
+        self.history_store.save(self._records(1))
+        dlg = music_fetch.dialogs.DownloadManagerDialog(
+            history_store=self.history_store,
+            cookie="MUSIC_U=test",
+            download_timeout_sec=10,
+            download_retry_count=1,
+        )
+        selected = str(Path(self.tmp_dir.name) / "history.csv")
+        with (
+            mock.patch(
+                "music_fetch.dialog_manager.QFileDialog.getSaveFileName",
+                return_value=(selected, "CSV"),
+            ),
+            mock.patch(
+                "music_fetch.dialog_manager.Path.write_text",
+                side_effect=OSError("disk full"),
+            ),
+            mock.patch("music_fetch.dialog_manager.QMessageBox.critical") as critical,
+            mock.patch("music_fetch.dialog_manager.QMessageBox.information") as information,
+        ):
+            dlg._export_filtered_csv()
+
+        critical.assert_called_once()
+        self.assertIn("disk full", critical.call_args.args[2])
+        information.assert_not_called()
         dlg.close()
 
 

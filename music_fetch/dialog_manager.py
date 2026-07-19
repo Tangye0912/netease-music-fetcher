@@ -14,6 +14,7 @@ from typing import Optional
 
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
+    DEFAULT_DOWNLOAD_DIR,
     DOWNLOAD_HISTORY_PAGE_SIZE,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
@@ -22,6 +23,7 @@ from music_fetch.app_settings import (
 )
 from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
 from music_fetch.download_retry import can_retry_status, retry_target_format
+from music_fetch.history_results import build_download_history_csv, filter_download_history
 from music_fetch.dialog_progress import DownloadProgressDialog
 from music_fetch.download_tasks import (
     TASK_STATE_CANCELED,
@@ -46,9 +48,11 @@ try:
         QAbstractItemView,
         QComboBox,
         QDialog,
+        QFileDialog,
         QHBoxLayout,
         QHeaderView,
         QLabel,
+        QLineEdit,
         QMessageBox,
         QPushButton,
         QTableWidget,
@@ -105,7 +109,14 @@ class DownloadManagerDialog(QDialog):
         self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self.filter_label)
         filter_row.addWidget(self.filter_combo)
-        filter_row.addStretch(1)
+        filter_row.addSpacing(12)
+        search_label = QLabel(T.MANAGER_SEARCH_LABEL)
+        filter_row.addWidget(search_label)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(T.MANAGER_SEARCH_PLACEHOLDER)
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        filter_row.addWidget(self.search_input, stretch=1)
         layout.addLayout(filter_row)
 
         self.empty_label = QLabel(T.MSG_DOWNLOADS_EMPTY)
@@ -159,6 +170,9 @@ class DownloadManagerDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_selected_file)
         self.retry_failed_button = QPushButton(T.MANAGER_BTN_RETRY_FAILED)
         self.retry_failed_button.clicked.connect(self._retry_selected_failed)
+        self.export_csv_button = QPushButton(T.MANAGER_BTN_EXPORT_CSV)
+        set_secondary_button(self.export_csv_button)
+        self.export_csv_button.clicked.connect(self._export_filtered_csv)
         refresh_button = QPushButton(T.MANAGER_BTN_REFRESH)
         refresh_button.clicked.connect(self.refresh)
         close_button = QPushButton(T.BTN_BACK)
@@ -167,6 +181,7 @@ class DownloadManagerDialog(QDialog):
         button_row.addWidget(self.open_folder_button)
         button_row.addWidget(self.delete_button)
         button_row.addWidget(self.retry_failed_button)
+        button_row.addWidget(self.export_csv_button)
         button_row.addStretch(1)
         button_row.addWidget(refresh_button)
         button_row.addWidget(close_button)
@@ -178,10 +193,11 @@ class DownloadManagerDialog(QDialog):
     def refresh(self, *_args: object) -> None:
         self.records = self.history_store.load()
         status_filter = str(self.filter_combo.currentData())
-        if status_filter == "all":
-            self.filtered_records = list(self.records)
-        else:
-            self.filtered_records = [record for record in self.records if record.status == status_filter]
+        self.filtered_records = filter_download_history(
+            self.records,
+            status_filter=status_filter,
+            query=self.search_input.text(),
+        )
         self._render_current_page()
 
     def _render_current_page(self) -> None:
@@ -224,6 +240,7 @@ class DownloadManagerDialog(QDialog):
         )
         self.previous_page_button.setEnabled(self.current_page > 0)
         self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
+        self.export_csv_button.setEnabled(bool(self.filtered_records))
         logger.info(
             "Download manager refreshed. total=%s filtered=%s page=%s/%s filter=%s",
             len(self.records),
@@ -235,6 +252,10 @@ class DownloadManagerDialog(QDialog):
         self._sync_action_buttons()
 
     def _on_filter_changed(self, *_args: object) -> None:
+        self.current_page = 0
+        self.refresh()
+
+    def _on_search_changed(self, *_args: object) -> None:
         self.current_page = 0
         self.refresh()
 
@@ -272,6 +293,48 @@ class DownloadManagerDialog(QDialog):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         logger.info("Download manager opened folder. folder=%s", folder)
+
+    def _export_filtered_csv(self, *_args: object) -> None:
+        if not self.filtered_records:
+            QMessageBox.information(self, T.TITLE_WARNING, T.MANAGER_EXPORT_EMPTY)
+            return
+        default_name = f"download-history-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        default_path = str(Path(DEFAULT_DOWNLOAD_DIR).expanduser() / default_name)
+        selected, _filter = QFileDialog.getSaveFileName(
+            self,
+            T.MANAGER_EXPORT_TITLE,
+            default_path,
+            T.MANAGER_EXPORT_FILTER,
+        )
+        if not selected:
+            return
+        output_path = Path(selected).expanduser()
+        if not output_path.suffix:
+            output_path = output_path.with_suffix(".csv")
+        try:
+            output_path.write_text(
+                build_download_history_csv(self.filtered_records),
+                encoding="utf-8-sig",
+            )
+        except OSError as err:
+            QMessageBox.critical(
+                self,
+                T.TITLE_DOWNLOAD_FAIL,
+                T.MANAGER_EXPORT_FAILED.format(message=str(err)),
+            )
+            return
+        QMessageBox.information(
+            self,
+            T.TITLE_DOWNLOAD_DONE,
+            T.MANAGER_EXPORT_DONE.format(path=output_path),
+        )
+        logger.info(
+            "Download history exported. path=%s records=%s filter=%s query=%s",
+            output_path,
+            len(self.filtered_records),
+            self.filter_combo.currentData(),
+            bool(self.search_input.text().strip()),
+        )
 
     def _delete_selected_file(self) -> None:
         record = self._selected_record()

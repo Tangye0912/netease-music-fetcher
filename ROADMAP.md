@@ -7,7 +7,7 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v1.12.0)
+## Current Backlog (after v1.13.0)
 
 ### Type Safety and Tests
 
