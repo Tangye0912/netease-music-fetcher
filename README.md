@@ -3,10 +3,11 @@
 网易云音乐单曲下载工具。
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v1.13.0）
+## 1. 版本概览（v1.14.0）
 
 ### 1.1 近期更新（v1.4.2 → 当前版本）
 
+- **快捷入口可靠性**（v1.14.0）：搜索结果和用户歌单选中后会立即完成输入分析，并分别进入单曲检测或批量下载流程；新增主窗口行为级回归覆盖。
 - **历史检索与安全导出**（v1.13.0）：下载管理支持多关键词与状态组合筛选，可导出全部筛选结果；CSV 兼容中文 Excel，并防止表格公式注入。
 - **诊断中心**（v1.12.0）：GUI 可查看脱敏运行环境与 WARNING/ERROR 日志，异步检测网易云 API/CDN 连通性，并导出不含 Cookie/代理密码的排障报告。
 - **下载历史分页**（v1.11.0）：下载管理器每页只渲染 50 条记录，支持状态筛选、页码导航与刷新后的有效页回退；历史在运行期间也严格限制为最新 1000 条。
@@ -17,7 +18,7 @@
 - **macOS CI 构建**（v1.6.0）：GitHub Actions 双平台（Windows + macOS）自动打包。
 - **mypy strict mode**（v1.5.0）：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
 - **CI 矩阵策略**：串行构建避免抢 runner 超时，只在推送 `v*` tag 时触发。
-- **测试**：424 个测试用例，覆盖 API、代理传输、诊断报告、下载管道、历史检索/分页/导出、对话框、CLI、版本检查和主窗口结构等。
+- **测试**：432 个测试用例，覆盖 API、代理传输、诊断报告、下载管道、历史检索/分页/导出、对话框、CLI、版本检查和主窗口行为等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。
 迭代路线见 [ROADMAP.md](./ROADMAP.md)。
@@ -32,8 +33,8 @@
 - 下载：支持选择目录、重命名、格式选择（`mp3/m4a/wav/flac/aac`）
 - 歌词：`--lyric` 下载 `.lrc` 文件并嵌入音频标签
 - 下载管理：每页 50 条历史，支持状态与多关键词组合筛选、页码导航、失败重试、打开目录、删除记录及全部筛选结果 CSV 导出
-- 搜索下载：直接搜索歌名/歌手名下载
-- 用户歌单：登录后浏览歌单一键下载
+- 搜索下载：直接搜索歌名/歌手名，选中后立即进入单曲检测
+- 用户歌单：登录后浏览歌单，选中后立即进入批量下载
 - 依赖降级：未安装 `ffmpeg` 时自动回退 `mp3` 并限制转码选项
 - 主题：Material Design 浅色/深色主题切换
 - 系统托盘：最小化到托盘，下载完成通知
@@ -111,8 +112,8 @@ python3 build.py --clean
 推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows + macOS 版本并上传到 GitHub Release：
 
 ```bash
-git tag v1.13.0
-git push origin v1.13.0
+git tag v1.14.0
+git push origin v1.14.0
 ```
 
 ## 5. 错误码
@@ -133,7 +134,7 @@ git push origin v1.13.0
 
 | 路径 | 职责 |
 | --- | --- |
-| `music_fetch/main.py` | GUI 主入口，负责登录态检查、主窗口、单曲流程入口和批量页入口。 |
+| `music_fetch/main.py` | GUI 主入口，负责登录态检查、输入分析、搜索/歌单快捷路由、单曲流程和批量页入口。 |
 | `music_fetch/dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验。 |
 | `music_fetch/batch_dialogs.py` | 批量识别与批量下载界面，包含失败项重试、CSV 导出和并发下载调度。 |
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
@@ -169,7 +170,7 @@ git push origin v1.13.0
 | `start_mac.command` | macOS 双击启动 GUI 脚本。 |
 | `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
 | `pyproject.toml` | Python 项目元数据、依赖声明（`PySide6`、`mutagen`、`qt-material`、`requests[socks]`）。 |
-| `tests/` | 424 个单元/回归测试。 |
+| `tests/` | 432 个单元/回归测试。 |
 | `CHANGELOG.md` | 唯一版本历史来源。 |
 | `ROADMAP.md` | 版本规划与后续技术债方向。 |
 

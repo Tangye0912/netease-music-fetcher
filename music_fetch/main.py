@@ -671,8 +671,14 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted and dialog.selected_result:
             result = dialog.selected_result
             logger.info("Search selected song_id=%s name=%s", result.song_id, result.song_name)
-            self.url_input.setPlainText(result.song_id)
-            self._on_detect_clicked()
+            self._submit_selected_input(result.song_id)
+
+    def _submit_selected_input(self, value: str) -> None:
+        """Analyze and submit an input selected from another GUI surface."""
+        self.url_input.setPlainText(value)
+        self.input_analyze_timer.stop()
+        self._analyze_input_after_delay()
+        self._on_detect_clicked()
 
     def _open_playlists(self) -> None:
         from music_fetch.playlist_dialog import PlaylistDialog
@@ -685,8 +691,7 @@ class MainWindow(QMainWindow):
             pl = dialog.selected_playlist
             logger.info("Playlist selected. id=%s name=%s", pl.playlist_id, pl.name)
             playlist_url = f"https://music.163.com/#/playlist?id={pl.playlist_id}"
-            self.url_input.setPlainText(playlist_url)
-            self._on_detect_clicked()
+            self._submit_selected_input(playlist_url)
 
     def _open_batch_download(self, input_text: str = "", auto_detect_on_open: bool = False) -> None:
         from music_fetch.batch_dialogs import BatchDownloadDialog

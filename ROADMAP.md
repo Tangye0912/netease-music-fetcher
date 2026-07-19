@@ -7,11 +7,10 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v1.13.0)
+## Current Backlog (after v1.14.0)
 
 ### Type Safety and Tests
 
-- [ ] 为 `MainWindow` 的检测、批量路由、设置切换和下载结果流程补行为级测试。
 - [ ] 收紧 `music_fetch/__init__.py` 的公开 API，并用更明确的结构类型替换 `BatchResultRow` Protocol。
 - [ ] 重新测量覆盖率并逐步提升到 95% 以上，避免仅依赖测试数量判断质量。
 
