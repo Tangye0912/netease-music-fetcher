@@ -59,6 +59,7 @@ from music_fetch.gui_styles import (
 from music_fetch.dialog_login import LoginDialog, build_cookie_from_fields, WEB_ENGINE_AVAILABLE
 from music_fetch.dialog_progress import DownloadProgressDialog
 from music_fetch.dialog_manager import DownloadManagerDialog
+from music_fetch.dialog_diagnostics import DiagnosticsDialog
 
 try:
     from PySide6.QtCore import Qt
@@ -93,7 +94,7 @@ BATCH_ROUTE_MIN_COUNT = 2
 
 
 
-__all__ = ['BATCH_ROUTE_MIN_COUNT', 'WEB_ENGINE_AVAILABLE', 'LoginDialog', 'SongConfirmDialog', 'DownloadOptionsDialog', 'DownloadProgressDialog', 'DependencyManagerDialog', 'DownloadManagerDialog', 'UiSettingsDialog', 'apply_app_style', 'clamp_ui_font_size', 'clear_embedded_login_state', 'build_cookie_from_fields', 'load_avatar_icon', 'validate_song_input']
+__all__ = ['BATCH_ROUTE_MIN_COUNT', 'WEB_ENGINE_AVAILABLE', 'LoginDialog', 'SongConfirmDialog', 'DownloadOptionsDialog', 'DownloadProgressDialog', 'DependencyManagerDialog', 'DownloadManagerDialog', 'DiagnosticsDialog', 'UiSettingsDialog', 'apply_app_style', 'clamp_ui_font_size', 'clear_embedded_login_state', 'build_cookie_from_fields', 'load_avatar_icon', 'validate_song_input']
 def load_avatar_icon(url: str) -> Optional[QIcon]:
     if not url:
         return None

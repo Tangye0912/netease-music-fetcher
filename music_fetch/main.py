@@ -44,7 +44,7 @@ from music_fetch.download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADI
 from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, check_login_status, fetch_account_profile, parse_input_resource
 from music_fetch.audio import is_ffmpeg_available
 from music_fetch.error_texts import user_error_message
-from music_fetch.network import ProxyConfigError, configure_proxy
+from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config
 import music_fetch.ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
@@ -60,6 +60,7 @@ from music_fetch.dialogs import (
     DownloadProgressDialog,
     DependencyManagerDialog,
     DownloadManagerDialog,
+    DiagnosticsDialog,
     UiSettingsDialog,
     clear_embedded_login_state,
     load_avatar_icon,
@@ -202,6 +203,9 @@ class MainWindow(QMainWindow):
         self.dependency_button = QPushButton(T.BTN_DEPENDENCY_MANAGER)
         self.dependency_button.clicked.connect(self._open_dependency_manager)
         toolbar_row.addWidget(self.dependency_button)
+        self.diagnostics_button = QPushButton(T.BTN_DIAGNOSTICS)
+        self.diagnostics_button.clicked.connect(self._open_diagnostics)
+        toolbar_row.addWidget(self.diagnostics_button)
         self.settings_button = QPushButton(T.BTN_UI_SETTINGS)
         self.settings_button.clicked.connect(self._open_ui_settings)
         toolbar_row.addWidget(self.settings_button)
@@ -301,13 +305,15 @@ class MainWindow(QMainWindow):
         self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
         self.dependency_button.setAccessibleName(T.ACC_BTN_DEP_MANAGER)
         self.manager_button.setAccessibleName(T.ACC_BTN_DOWNLOAD_MANAGER)
+        self.diagnostics_button.setAccessibleName(T.ACC_BTN_DIAGNOSTICS)
         self.settings_button.setAccessibleName(T.ACC_BTN_UI_SETTINGS)
         self.setTabOrder(self.url_input, self.detect_button)
         self.setTabOrder(self.detect_button, self.search_button)
         self.setTabOrder(self.search_button, self.playlist_button)
         self.setTabOrder(self.playlist_button, self.manager_button)
         self.setTabOrder(self.manager_button, self.dependency_button)
-        self.setTabOrder(self.dependency_button, self.settings_button)
+        self.setTabOrder(self.dependency_button, self.diagnostics_button)
+        self.setTabOrder(self.diagnostics_button, self.settings_button)
 
 
     def _restore_window_geometry(self) -> None:
@@ -638,6 +644,23 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self._refresh_ffmpeg_status()
 
+    def _open_diagnostics(self) -> None:
+        logger.info("Open diagnostics center.")
+        proxy = get_proxy_config()
+        dialog = DiagnosticsDialog(
+            log_path=default_log_path(),
+            cookie=self.session.cookie,
+            proxy_type=proxy.proxy_type,
+            proxy_host=proxy.host,
+            proxy_port=proxy.port,
+            proxy_username=proxy.username,
+            proxy_password=proxy.password,
+            ffmpeg_available=self.ffmpeg_available,
+            latest_task=self.latest_download_task,
+            parent=self,
+        )
+        dialog.exec()
+
     def _open_search(self) -> None:
         from music_fetch.search_dialog import SearchDialog
         logger.info("Open search dialog.")
@@ -942,7 +965,7 @@ def ensure_session_with_login(session_store: SessionStore) -> Optional[AppSessio
 
 
 def main() -> int:
-    log_path = setup_logging(default_log_path(), level=logging.INFO)
+    log_path = setup_logging(default_log_path(), level=logging.WARNING)
     app = QApplication(sys.argv)
     logger.info("GUI app started. log_path=%s", log_path)
     session_store = SessionStore(SESSION_FILE)

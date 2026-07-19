@@ -1,4 +1,5 @@
 import os
+import logging
 import subprocess
 import sys
 import importlib
@@ -15,6 +16,7 @@ import music_fetch.main
 import music_fetch.workers
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, SessionStore
 from music_fetch.batch_dialogs import BatchDownloadDialog
+from music_fetch.download_tasks import DownloadTaskSnapshot
 from music_fetch.network import ProxyConfig, ProxyConfigError
 
 
@@ -59,9 +61,78 @@ class EntryPointTests(unittest.TestCase):
             self.assertIsNotNone(window.findChild(QFrame, "toolbarPanel"))
             self.assertIsNotNone(window.findChild(QFrame, "inputPanel"))
             self.assertGreaterEqual(window.url_input.minimumHeight(), 96)
+            self.assertEqual(window.diagnostics_button.accessibleName(), "诊断中心按钮")
             window.close()
             window.deleteLater()
             _app.processEvents()
+
+    def test_diagnostics_entrypoint_passes_runtime_context(self):
+        captured = {}
+
+        class FakeDiagnosticsDialog:
+            def __init__(self, **kwargs) -> None:
+                captured.update(kwargs)
+
+            def exec(self) -> int:
+                return QDialog.Rejected
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            session = AppSession(
+                cookie="",
+                proxy_type="http",
+                proxy_host="proxy.local",
+                proxy_port=8080,
+                proxy_username="user",
+                proxy_password="secret",
+            )
+            with (
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon"),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer"),
+            ):
+                window = music_fetch.main.MainWindow(
+                    SessionStore(base / "session.json"),
+                    DownloadHistoryStore(base / "history.json"),
+                    session,
+                )
+            session.cookie = "MUSIC_U=current"
+            window.latest_download_task = DownloadTaskSnapshot(
+                task_id="42-1",
+                song_id="42",
+                output_path="/tmp/song.mp3",
+                state="failed",
+                error_code="DOWNLOAD_FAILED",
+            )
+            active_proxy = ProxyConfig("http", "active.proxy", 8888, "active-user", "active-secret")
+            with (
+                mock.patch.object(music_fetch.main, "DiagnosticsDialog", FakeDiagnosticsDialog),
+                mock.patch.object(music_fetch.main, "get_proxy_config", return_value=active_proxy),
+            ):
+                window._open_diagnostics()
+
+            self.assertEqual(captured["cookie"], "MUSIC_U=current")
+            self.assertEqual(captured["proxy_type"], "http")
+            self.assertEqual(captured["proxy_host"], "active.proxy")
+            self.assertEqual(captured["proxy_port"], 8888)
+            self.assertEqual(captured["proxy_password"], "active-secret")
+            self.assertIs(captured["latest_task"], window.latest_download_task)
+            self.assertIs(captured["parent"], window)
+            window.close()
+            window.deleteLater()
+            _app.processEvents()
+
+    def test_gui_main_uses_warning_log_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "music-fetch.log"
+            with (
+                mock.patch.object(music_fetch.main, "default_log_path", return_value=log_path),
+                mock.patch.object(music_fetch.main, "setup_logging", return_value=log_path) as setup,
+                mock.patch.object(music_fetch.main, "QApplication"),
+                mock.patch.object(music_fetch.main, "ensure_session_with_login", return_value=None),
+            ):
+                result = music_fetch.main.main()
+            self.assertEqual(result, 0)
+            setup.assert_called_once_with(log_path, level=logging.WARNING)
 
 
 class EnsureSessionTests(unittest.TestCase):
