@@ -7,7 +7,12 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v1.14.0)
+## Current Backlog (after v2.0.0)
+
+### User Experience
+
+- [ ] 用真实账号对“粘贴/搜索/歌单入口 → 检测 → 下载完成”做发布前冒烟，覆盖浅色/深色主题、无 ffmpeg 和取消下载。
+- [ ] 观察批量下载入口的使用反馈；只有主窗口/批量页切换仍明显打断流程时，再评估标签页化。
 
 ### Type Safety and Tests
 

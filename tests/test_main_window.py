@@ -19,12 +19,20 @@ from music_fetch.download_tasks import (
 _app = QApplication.instance() or QApplication(["test"])
 
 
+def _noop_main_window_method(self, *_args, **_kwargs) -> None:
+    return None
+
+
 class _FakeSignal:
     def __init__(self) -> None:
         self.callbacks = []
 
     def connect(self, callback) -> None:
         self.callbacks.append(callback)
+
+    def emit(self, *args) -> None:
+        for callback in list(self.callbacks):
+            callback(*args)
 
 
 class _FakeInspectWorker:
@@ -47,6 +55,39 @@ class _FakeInspectWorker:
         pass
 
 
+class _FakeDownloadWorker:
+    instances = []
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.output_path = kwargs["output_path"]
+        self.progress = _FakeSignal()
+        self.succeeded = _FakeSignal()
+        self.failed = _FakeSignal()
+        self.canceled = _FakeSignal()
+        self.finished = _FakeSignal()
+        self.started = False
+        self.pause_requested = False
+        self.resume_requested = False
+        self.cancel_requested = False
+        self.instances.append(self)
+
+    def start(self) -> None:
+        self.started = True
+
+    def request_pause(self) -> None:
+        self.pause_requested = True
+
+    def request_resume(self) -> None:
+        self.resume_requested = True
+
+    def request_cancel(self) -> None:
+        self.cancel_requested = True
+
+    def deleteLater(self) -> None:
+        pass
+
+
 class MainWindowBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.TemporaryDirectory()
@@ -56,9 +97,9 @@ class MainWindowBehaviorTests(unittest.TestCase):
         self.history_store = DownloadHistoryStore(self.base / "history.json")
         self.session = AppSession(cookie="MUSIC_U=test", ui_font_size=16)
         self.patchers = [
-            mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon"),
-            mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer"),
-            mock.patch.object(music_fetch.main.MainWindow, "_refresh_account_profile"),
+            mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon", new=_noop_main_window_method),
+            mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer", new=_noop_main_window_method),
+            mock.patch.object(music_fetch.main.MainWindow, "_refresh_account_profile", new=_noop_main_window_method),
             mock.patch.object(music_fetch.main, "is_ffmpeg_available", return_value=True),
         ]
         for patcher in self.patchers:
@@ -71,6 +112,7 @@ class MainWindowBehaviorTests(unittest.TestCase):
         )
         self.addCleanup(self._close_window)
         _FakeInspectWorker.instances.clear()
+        _FakeDownloadWorker.instances.clear()
 
     def _close_window(self) -> None:
         self.window.close()
@@ -96,43 +138,25 @@ class MainWindowBehaviorTests(unittest.TestCase):
         *,
         error_code: str = "",
     ) -> tuple[Path, mock.MagicMock]:
-        output_path = self.base / "downloads" / "test-song.mp3"
-        if state == TASK_STATE_SUCCESS:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(b"audio")
-
-        class FakeConfirmDialog:
-            def __init__(self, _result: SongDetectionResult) -> None:
-                pass
-
-            def exec(self) -> int:
-                return QDialog.Accepted
-
-        class FakeOptionsDialog:
-            def __init__(self, _result: SongDetectionResult, *, last_download_dir: str) -> None:
-                self.output_path = output_path
-                self.selected_format = "mp3"
-
-            def exec(self) -> int:
-                return QDialog.Accepted
-
-        class FakeProgressDialog:
-            def __init__(self, **_kwargs) -> None:
-                self.output_path = output_path if state == TASK_STATE_SUCCESS else None
-                self.result_state = state
-                self.error_code = error_code
-
-            def exec(self) -> int:
-                return QDialog.Accepted if state == TASK_STATE_SUCCESS else QDialog.Rejected
-
         with (
-            mock.patch.object(music_fetch.main, "SongConfirmDialog", FakeConfirmDialog),
-            mock.patch.object(music_fetch.main, "DownloadOptionsDialog", FakeOptionsDialog),
-            mock.patch.object(music_fetch.main, "DownloadProgressDialog", FakeProgressDialog),
-            mock.patch.object(self.window, "_refresh_ffmpeg_status"),
+            mock.patch.object(music_fetch.main, "DownloadWorker", _FakeDownloadWorker),
             mock.patch.object(self.window, "_show_tray_notification") as notify,
         ):
             self.window._on_detect_succeeded(self._result())
+            self.window.single_dir_input.setText(str(self.base / "downloads"))
+            self.window.single_name_input.setText("test-song")
+            self.window._start_inline_download()
+            worker = _FakeDownloadWorker.instances[-1]
+            output_path = worker.output_path
+            if state == TASK_STATE_SUCCESS:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"audio")
+                worker.succeeded.emit(str(output_path), 5)
+            elif state == TASK_STATE_FAILED:
+                worker.failed.emit(error_code, "failed")
+            else:
+                worker.canceled.emit()
+            worker.finished.emit()
         return output_path, notify
 
     def test_search_selection_is_analyzed_and_starts_detection(self) -> None:
@@ -194,6 +218,85 @@ class MainWindowBehaviorTests(unittest.TestCase):
         self.assertIs(self.window.inspect_worker, worker)
         self.assertTrue(self.window._detect_busy)
         self.assertFalse(self.window.detect_button.isEnabled())
+
+    def test_detection_success_shows_inline_result_without_single_dialogs(self) -> None:
+        with (
+            mock.patch.object(music_fetch.main, "SongConfirmDialog") as confirm,
+            mock.patch.object(music_fetch.main, "DownloadOptionsDialog") as options,
+            mock.patch.object(music_fetch.main, "DownloadProgressDialog") as progress,
+        ):
+            self.window._on_detect_succeeded(self._result())
+
+        self.assertFalse(self.window.single_panel.isHidden())
+        self.assertIsNotNone(self.window.current_detection)
+        self.assertEqual(self.window.single_song_label.text(), "Test Song")
+        self.assertIn("Artist", self.window.single_artist_label.text())
+        self.assertTrue(self.window.single_download_button.isEnabled())
+        confirm.assert_not_called()
+        options.assert_not_called()
+        progress.assert_not_called()
+
+    def test_inline_download_button_starts_worker_without_single_dialogs(self) -> None:
+        with (
+            mock.patch.object(music_fetch.main, "SongConfirmDialog") as confirm,
+            mock.patch.object(music_fetch.main, "DownloadOptionsDialog") as options,
+            mock.patch.object(music_fetch.main, "DownloadProgressDialog") as progress,
+            mock.patch.object(music_fetch.main, "DownloadWorker", _FakeDownloadWorker),
+        ):
+            self.window._on_detect_succeeded(self._result())
+            self.window.single_dir_input.setText(str(self.base / "downloads"))
+            self.window.single_name_input.setText("test-song")
+            self.window.single_download_button.click()
+
+        self.assertEqual(len(_FakeDownloadWorker.instances), 1)
+        worker = _FakeDownloadWorker.instances[0]
+        self.assertTrue(worker.started)
+        self.assertEqual(worker.kwargs["song_id"], "42")
+        self.assertEqual(worker.kwargs["target_format"], "mp3")
+        confirm.assert_not_called()
+        options.assert_not_called()
+        progress.assert_not_called()
+
+    def test_ffmpeg_missing_locks_inline_format_to_mp3(self) -> None:
+        with mock.patch.object(music_fetch.main, "is_ffmpeg_available", return_value=False):
+            self.window._on_detect_succeeded(self._result())
+
+        self.assertEqual(self.window.single_format_combo.currentText(), "MP3")
+        m4a_index = self.window.single_format_combo.findText("M4A")
+        m4a_item = self.window.single_format_combo.model().item(m4a_index)
+        self.assertIsNotNone(m4a_item)
+        self.assertFalse(m4a_item.isEnabled())
+        self.window.single_format_combo.setCurrentText("FLAC")
+        self.assertEqual(self.window.single_format_combo.currentText(), "MP3")
+
+    def test_new_input_clears_inline_result(self) -> None:
+        self.window._on_detect_succeeded(self._result())
+        self.assertIsNotNone(self.window.current_detection)
+
+        self.window.url_input.setPlainText("43")
+
+        self.assertIsNone(self.window.current_detection)
+        self.assertTrue(self.window.single_panel.isHidden())
+
+    def test_active_inline_download_blocks_new_detection_until_finished(self) -> None:
+        with mock.patch.object(music_fetch.main, "DownloadWorker", _FakeDownloadWorker):
+            self.window._on_detect_succeeded(self._result())
+            self.window.single_dir_input.setText(str(self.base / "downloads"))
+            self.window.single_name_input.setText("test-song")
+            self.window._start_inline_download()
+            worker = _FakeDownloadWorker.instances[-1]
+
+            self.window.url_input.setPlainText("43")
+            self.window._analyze_input_after_delay()
+            with mock.patch.object(music_fetch.main, "InspectWorker", _FakeInspectWorker):
+                self.window._on_detect_clicked()
+
+            self.assertEqual(_FakeInspectWorker.instances, [])
+            self.assertFalse(self.window.detect_button.isEnabled())
+            worker.finished.emit()
+
+        self.assertIsNone(self.window.current_detection)
+        self.assertTrue(self.window.detect_button.isEnabled())
 
     def test_multiple_inputs_route_to_batch_without_starting_worker(self) -> None:
         raw = "123456\n654321"

@@ -22,14 +22,18 @@ from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtNetwork import QNetworkProxy
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSystemTrayIcon,
     QToolButton,
@@ -38,18 +42,19 @@ from PySide6.QtWidgets import (
 )
 
 from music_fetch.app_logging import default_log_path, get_logger, setup_logging
-from music_fetch.app_settings import APP_VERSION, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, SESSION_FILE
+from music_fetch.app_settings import APP_VERSION, DEFAULT_DOWNLOAD_DIR, DEFAULT_GUI_TARGET_FORMAT, DOWNLOAD_HISTORY_FILE, PROJECT_GITHUB_URL, SESSION_FILE, SUPPORTED_AUDIO_FORMATS
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.download_tasks import TASK_STATE_CANCELED, TASK_STATE_DOWNLOADING, TASK_STATE_FAILED, TASK_STATE_PENDING, TASK_STATE_SUCCESS, DownloadTaskSnapshot, build_task_id, next_task_snapshot
 from music_fetch.api import AccountProfile, MusicFetchError, SongDetectionResult, check_login_status, fetch_account_profile, parse_input_resource
-from music_fetch.audio import is_ffmpeg_available
+from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
+from music_fetch.batch_models import format_bytes, format_duration
 from music_fetch.error_texts import user_error_message
 from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config
 import music_fetch.ui_texts as T
 
 # Re-export all names from extracted modules for backward compatibility.
 from music_fetch.batch_models import BatchDetectRow
-from music_fetch.workers import InspectWorker
+from music_fetch.workers import DownloadWorker, InspectWorker
 from music_fetch.gui_styles import apply_app_style, clamp_ui_font_size, set_button_role, set_label_state
 from music_fetch.dialogs import (
     BATCH_ROUTE_MIN_COUNT,
@@ -96,6 +101,15 @@ class MainWindow(QMainWindow):
         self.session = session
         self.ffmpeg_available = is_ffmpeg_available()
         self.inspect_worker: Optional[InspectWorker] = None
+        self.download_worker: Optional[DownloadWorker] = None
+        self.current_detection: Optional[SongDetectionResult] = None
+        self._download_paused = False
+        self._inline_format_guard = False
+        self._inline_download_output_path: Optional[Path] = None
+        self._inline_result_input = ""
+        self._normal_input_height = 112
+        self._compact_input_height = 64
+        self._detect_button_width = 120
         self.account_profile: Optional[AccountProfile] = None
         self._avatar_error_notified = False
         self._detect_busy = False
@@ -128,6 +142,7 @@ class MainWindow(QMainWindow):
 
         hero_panel = QFrame()
         hero_panel.setObjectName("heroPanel")
+        hero_panel.setMaximumHeight(150)
         hero_row = QHBoxLayout(hero_panel)
         hero_row.setContentsMargins(22, 18, 18, 18)
         hero_row.setSpacing(20)
@@ -181,6 +196,7 @@ class MainWindow(QMainWindow):
 
         toolbar_panel = QFrame()
         toolbar_panel.setObjectName("toolbarPanel")
+        toolbar_panel.setMaximumHeight(72)
         toolbar_row = QHBoxLayout(toolbar_panel)
         toolbar_row.setContentsMargins(16, 10, 12, 10)
         toolbar_row.setSpacing(8)
@@ -211,18 +227,18 @@ class MainWindow(QMainWindow):
         toolbar_row.addWidget(self.settings_button)
         layout.addWidget(toolbar_panel)
 
-        input_panel = QFrame()
-        input_panel.setObjectName("inputPanel")
-        input_layout = QVBoxLayout(input_panel)
-        input_layout.setContentsMargins(22, 19, 22, 18)
-        input_layout.setSpacing(9)
-        input_title = QLabel(T.HOME_INPUT_TITLE)
-        input_title.setObjectName("sectionTitle")
-        input_layout.addWidget(input_title)
-        input_description = QLabel(T.HOME_INPUT_DESC)
-        input_description.setObjectName("sectionSubtitle")
-        input_description.setWordWrap(True)
-        input_layout.addWidget(input_description)
+        self.input_panel = QFrame()
+        self.input_panel.setObjectName("inputPanel")
+        self.input_layout = QVBoxLayout(self.input_panel)
+        self.input_layout.setContentsMargins(22, 19, 22, 18)
+        self.input_layout.setSpacing(9)
+        self.input_title = QLabel(T.HOME_INPUT_TITLE)
+        self.input_title.setObjectName("sectionTitle")
+        self.input_layout.addWidget(self.input_title)
+        self.input_description = QLabel(T.HOME_INPUT_DESC)
+        self.input_description.setObjectName("sectionSubtitle")
+        self.input_description.setWordWrap(True)
+        self.input_layout.addWidget(self.input_description)
 
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -237,18 +253,142 @@ class MainWindow(QMainWindow):
         self.detect_button.clicked.connect(self._on_detect_clicked)
         set_button_role(self.detect_button, "primary")
         row.addWidget(self.detect_button)
-        input_layout.addLayout(row)
+        self.input_layout.addLayout(row)
 
         self.input_hint_label = QLabel(T.INPUT_MULTI_HINT)
         self.input_hint_label.setWordWrap(True)
         set_label_state(self.input_hint_label, "muted")
-        input_layout.addWidget(self.input_hint_label)
+        self.input_layout.addWidget(self.input_hint_label)
 
         self.input_feedback_label = QLabel("")
         self.input_feedback_label.setWordWrap(True)
         set_label_state(self.input_feedback_label, "muted")
-        input_layout.addWidget(self.input_feedback_label)
-        layout.addWidget(input_panel, stretch=1)
+        self.input_layout.addWidget(self.input_feedback_label)
+        layout.addWidget(self.input_panel)
+
+        self.single_panel = QFrame()
+        self.single_panel.setObjectName("singlePanel")
+        self.single_panel.setVisible(False)
+        single_layout = QVBoxLayout(self.single_panel)
+        single_layout.setContentsMargins(22, 18, 22, 18)
+        single_layout.setSpacing(10)
+
+        single_title = QLabel(T.HOME_SINGLE_TITLE)
+        single_title.setObjectName("sectionTitle")
+        single_layout.addWidget(single_title)
+        single_description = QLabel(T.HOME_SINGLE_DESC)
+        single_description.setObjectName("sectionSubtitle")
+        single_description.setWordWrap(True)
+        single_layout.addWidget(single_description)
+
+        self.single_body_widget = QWidget()
+        single_body_row = QHBoxLayout(self.single_body_widget)
+        single_body_row.setContentsMargins(0, 0, 0, 0)
+        single_body_row.setSpacing(18)
+
+        self.single_content_widget = QWidget()
+        single_content_row = QHBoxLayout(self.single_content_widget)
+        single_content_row.setContentsMargins(0, 0, 0, 0)
+        single_content_row.setSpacing(14)
+        self.single_cover_label = QLabel("封面")
+        self.single_cover_label.setObjectName("singleCover")
+        self.single_cover_label.setAlignment(Qt.AlignCenter)
+        self.single_cover_label.setScaledContents(True)
+        single_content_row.addWidget(self.single_cover_label)
+
+        single_info_layout = QVBoxLayout()
+        single_info_layout.setSpacing(4)
+        self.single_song_label = QLabel("")
+        self.single_song_label.setObjectName("singleSongName")
+        self.single_song_label.setWordWrap(True)
+        self.single_artist_label = QLabel("")
+        self.single_album_label = QLabel("")
+        self.single_duration_label = QLabel("")
+        self.single_availability_label = QLabel("")
+        for label in (
+            self.single_artist_label,
+            self.single_album_label,
+            self.single_duration_label,
+            self.single_availability_label,
+        ):
+            label.setObjectName("singleMeta")
+            label.setWordWrap(True)
+        single_info_layout.addWidget(self.single_song_label)
+        single_info_layout.addWidget(self.single_artist_label)
+        single_info_layout.addWidget(self.single_album_label)
+        single_info_layout.addWidget(self.single_duration_label)
+        single_info_layout.addWidget(self.single_availability_label)
+        single_content_row.addLayout(single_info_layout, stretch=1)
+        single_body_row.addWidget(self.single_content_widget, stretch=0)
+
+        self.single_controls_widget = QWidget()
+        single_controls_layout = QVBoxLayout(self.single_controls_widget)
+        single_controls_layout.setContentsMargins(0, 0, 0, 0)
+        single_controls_layout.setSpacing(10)
+
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(8)
+        dir_row.addWidget(QLabel(T.INLINE_DOWNLOAD_DIR))
+        self.single_dir_input = QLineEdit()
+        self.single_dir_input.textChanged.connect(self._refresh_inline_download_preview)
+        dir_row.addWidget(self.single_dir_input, stretch=1)
+        self.single_dir_button = QPushButton(T.INLINE_DOWNLOAD_PICK_DIR)
+        self.single_dir_button.clicked.connect(self._pick_inline_download_dir)
+        dir_row.addWidget(self.single_dir_button)
+        single_controls_layout.addLayout(dir_row)
+
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_row.addWidget(QLabel(T.INLINE_DOWNLOAD_NAME))
+        self.single_name_input = QLineEdit()
+        self.single_name_input.textChanged.connect(self._refresh_inline_download_preview)
+        name_row.addWidget(self.single_name_input, stretch=1)
+        name_row.addWidget(QLabel(T.INLINE_DOWNLOAD_FORMAT))
+        self.single_format_combo = QComboBox()
+        self.single_format_combo.addItems([fmt.upper() for fmt in SUPPORTED_AUDIO_FORMATS])
+        self.single_format_combo.setCurrentText(DEFAULT_GUI_TARGET_FORMAT.upper())
+        self.single_format_combo.currentTextChanged.connect(self._on_inline_format_changed)
+        name_row.addWidget(self.single_format_combo)
+        single_controls_layout.addLayout(name_row)
+
+        self.single_preview_label = QLabel("")
+        self.single_preview_label.setWordWrap(True)
+        set_label_state(self.single_preview_label, "muted")
+        single_controls_layout.addWidget(self.single_preview_label)
+
+        self.single_progress_bar = QProgressBar()
+        self.single_progress_bar.setRange(0, 100)
+        self.single_progress_bar.setValue(0)
+        self.single_progress_bar.setVisible(False)
+        single_controls_layout.addWidget(self.single_progress_bar)
+        progress_meta_row = QHBoxLayout()
+        self.single_download_status_label = QLabel("")
+        self.single_download_status_label.setWordWrap(True)
+        set_label_state(self.single_download_status_label, "muted")
+        self.single_speed_label = QLabel("")
+        set_label_state(self.single_speed_label, "muted")
+        progress_meta_row.addWidget(self.single_download_status_label, stretch=1)
+        progress_meta_row.addWidget(self.single_speed_label)
+        single_controls_layout.addLayout(progress_meta_row)
+
+        single_button_row = QHBoxLayout()
+        single_button_row.addStretch(1)
+        self.single_pause_button = QPushButton(T.DOWNLOAD_PROGRESS_PAUSE)
+        self.single_pause_button.clicked.connect(self._toggle_inline_download_pause)
+        self.single_pause_button.setVisible(False)
+        single_button_row.addWidget(self.single_pause_button)
+        self.single_cancel_button = QPushButton(T.DOWNLOAD_PROGRESS_CANCEL)
+        self.single_cancel_button.clicked.connect(self._cancel_inline_download)
+        self.single_cancel_button.setVisible(False)
+        single_button_row.addWidget(self.single_cancel_button)
+        self.single_download_button = QPushButton(T.BTN_START_DOWNLOAD)
+        self.single_download_button.clicked.connect(self._start_inline_download)
+        set_button_role(self.single_download_button, "primary")
+        single_button_row.addWidget(self.single_download_button)
+        single_controls_layout.addLayout(single_button_row)
+        single_body_row.addWidget(self.single_controls_widget, stretch=1)
+        single_layout.addWidget(self.single_body_widget)
+        layout.addWidget(self.single_panel)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
@@ -297,18 +437,56 @@ class MainWindow(QMainWindow):
         self.avatar_button.setFixedSize(avatar_size, avatar_size)
         self.avatar_button.setIconSize(QSize(avatar_size - 12, avatar_size - 12))
         input_height = max(96, min(132, int(font_size * 7.2)))
-        self.url_input.setMinimumHeight(input_height)
-        self.detect_button.setMinimumSize(max(112, int(font_size * 7.4)), input_height)
+        self._normal_input_height = input_height
+        self._compact_input_height = max(56, min(72, int(font_size * 4.2)))
+        self._detect_button_width = max(112, int(font_size * 7.4))
+        self._apply_input_density(self.single_panel.isVisible())
+        cover_size = max(88, min(112, int(font_size * 6)))
+        self.single_cover_label.setFixedSize(cover_size, cover_size)
+        self.single_content_widget.setMinimumWidth(max(330, int(font_size * 21)))
+        self.single_body_widget.setMinimumHeight(cover_size + 44)
+        self.single_panel.setMinimumHeight(max(260, int(font_size * 16)))
+        self.single_download_button.setMinimumSize(max(112, int(font_size * 7.4)), max(36, int(font_size * 2.4)))
+
+    def _apply_input_density(self, compact: bool) -> None:
+        input_height = self._compact_input_height if compact else self._normal_input_height
+        self.url_input.setFixedHeight(input_height)
+        self.detect_button.setFixedSize(self._detect_button_width, input_height)
+        self.input_panel.setMaximumHeight(input_height + (52 if compact else 180))
+        if compact:
+            self.input_layout.setContentsMargins(22, 11, 22, 11)
+        else:
+            self.input_layout.setContentsMargins(22, 19, 22, 18)
+        self.input_layout.setSpacing(6 if compact else 9)
+        self.input_title.setVisible(not compact)
+        self.input_description.setVisible(not compact)
+        self.input_hint_label.setVisible(not compact)
+        self.input_feedback_label.setVisible(not compact)
 
     def _setup_accessibility(self) -> None:
         self.url_input.setAccessibleName(T.ACC_INPUT_SONG_LINK)
         self.detect_button.setAccessibleName(T.ACC_BTN_DETECT)
+        self.single_panel.setAccessibleName(T.ACC_SINGLE_RESULT)
+        self.single_dir_input.setAccessibleName(T.ACC_SINGLE_DIR)
+        self.single_dir_button.setAccessibleName(T.ACC_SINGLE_PICK_DIR)
+        self.single_name_input.setAccessibleName(T.ACC_SINGLE_NAME)
+        self.single_format_combo.setAccessibleName(T.ACC_SINGLE_FORMAT)
+        self.single_download_button.setAccessibleName(T.ACC_SINGLE_DOWNLOAD)
+        self.single_pause_button.setAccessibleName(T.ACC_SINGLE_PAUSE)
+        self.single_cancel_button.setAccessibleName(T.ACC_SINGLE_CANCEL)
         self.dependency_button.setAccessibleName(T.ACC_BTN_DEP_MANAGER)
         self.manager_button.setAccessibleName(T.ACC_BTN_DOWNLOAD_MANAGER)
         self.diagnostics_button.setAccessibleName(T.ACC_BTN_DIAGNOSTICS)
         self.settings_button.setAccessibleName(T.ACC_BTN_UI_SETTINGS)
         self.setTabOrder(self.url_input, self.detect_button)
-        self.setTabOrder(self.detect_button, self.search_button)
+        self.setTabOrder(self.detect_button, self.single_dir_input)
+        self.setTabOrder(self.single_dir_input, self.single_dir_button)
+        self.setTabOrder(self.single_dir_button, self.single_name_input)
+        self.setTabOrder(self.single_name_input, self.single_format_combo)
+        self.setTabOrder(self.single_format_combo, self.single_download_button)
+        self.setTabOrder(self.single_download_button, self.single_pause_button)
+        self.setTabOrder(self.single_pause_button, self.single_cancel_button)
+        self.setTabOrder(self.single_cancel_button, self.search_button)
         self.setTabOrder(self.search_button, self.playlist_button)
         self.setTabOrder(self.playlist_button, self.manager_button)
         self.setTabOrder(self.manager_button, self.dependency_button)
@@ -468,6 +646,8 @@ class MainWindow(QMainWindow):
 
     def _on_url_input_changed(self, *_args: object) -> None:
         raw = self.url_input.toPlainText().strip()
+        if self.download_worker is None:
+            self._clear_inline_single_result()
         self._input_analysis_ready = False
         self._analysis_candidate_count = 0
         self._analysis_valid_candidate_count = 0
@@ -519,6 +699,9 @@ class MainWindow(QMainWindow):
 
     def _sync_detect_button_state(self) -> None:
         if not self._input_analysis_ready:
+            self.detect_button.setEnabled(False)
+            return
+        if self.download_worker is not None:
             self.detect_button.setEnabled(False)
             return
         if self._analysis_candidate_count >= BATCH_ROUTE_MIN_COUNT:
@@ -779,6 +962,9 @@ class MainWindow(QMainWindow):
 
         if self._detect_busy:
             return
+        if self.download_worker is not None:
+            self._set_status(T.STATUS_DOWNLOADING, "warning")
+            return
         if not self._input_analysis_ready:
             return
         song_input = self.url_input.toPlainText().strip()
@@ -798,6 +984,7 @@ class MainWindow(QMainWindow):
                 continue
         if len(candidates) >= BATCH_ROUTE_MIN_COUNT or has_playlist_resource:
             logger.info("Detect routed to batch flow. candidate_count=%s", len(candidates))
+            self._set_status(T.STATUS_BATCH_ROUTE, "warning")
             self._open_batch_download(input_text=song_input, auto_detect_on_open=True)
             return
         song_url = candidates[0] if candidates else song_input
@@ -814,6 +1001,8 @@ class MainWindow(QMainWindow):
             return
         self._set_detect_busy(True)
         self._set_status(T.STATUS_DETECTING, "warning")
+        if self.download_worker is None:
+            self._clear_inline_single_result()
         logger.info("Detection started from GUI.")
         self.inspect_worker = InspectWorker(song_url=song_url, cookie=self.session.cookie, timeout=self.session.detect_timeout_sec)
         self.inspect_worker.failed.connect(self._on_detect_failed)
@@ -842,57 +1031,325 @@ class MainWindow(QMainWindow):
         record = DownloadRecord(song_id=song_id, song_name=song_name or f"song-{song_id}", output_path=str(output_path), size_bytes=size_bytes, downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), status=status, error_code=error_code)
         self.history_store.add(record)
 
+    def _clear_inline_single_result(self) -> None:
+        self.current_detection = None
+        self._inline_download_output_path = None
+        self._inline_result_input = ""
+        self._download_paused = False
+        self.single_panel.setVisible(False)
+        self.single_cover_label.clear()
+        self.single_cover_label.setText("封面")
+        self.single_song_label.setText("")
+        self.single_artist_label.setText("")
+        self.single_album_label.setText("")
+        self.single_duration_label.setText("")
+        self.single_availability_label.setText("")
+        self.single_preview_label.setText("")
+        self.single_download_status_label.setText("")
+        self.single_speed_label.setText("")
+        self.single_progress_bar.setVisible(False)
+        self.single_progress_bar.setRange(0, 100)
+        self.single_progress_bar.setValue(0)
+        self._apply_input_density(False)
+        self._set_inline_download_active(False)
+
+    def _show_inline_single_result(self, result: SongDetectionResult) -> None:
+        self.current_detection = result
+        self._inline_download_output_path = None
+        self._inline_result_input = self.url_input.toPlainText().strip()
+        self._download_paused = False
+        self.single_panel.setVisible(True)
+        self._apply_input_density(True)
+        self.single_progress_bar.setVisible(False)
+        self.single_progress_bar.setRange(0, 100)
+        self.single_progress_bar.setValue(0)
+        self.single_speed_label.setText("")
+        self.single_download_status_label.setText("")
+        set_label_state(self.single_download_status_label, "muted")
+
+        self.single_cover_label.clear()
+        self.single_cover_label.setText("封面")
+        if result.cover_url:
+            cover_icon = load_avatar_icon(result.cover_url)
+            if cover_icon:
+                self.single_cover_label.setPixmap(cover_icon.pixmap(self.single_cover_label.size()))
+                self.single_cover_label.setText("")
+
+        song_name = result.song_name or f"song-{result.song_id}"
+        self.single_song_label.setText(song_name)
+        self.single_artist_label.setText(f"{T.SONG_CONFIRM_ARTIST}：{result.artist or T.MSG_UNKNOWN}")
+        self.single_album_label.setText(f"{T.SONG_CONFIRM_ALBUM}：{result.album_name or T.MSG_UNKNOWN}")
+        self.single_duration_label.setText(f"{T.SONG_CONFIRM_DURATION}：{format_duration(result.duration_ms)}")
+        if result.can_download:
+            self.single_availability_label.setText(T.SONG_CONFIRM_CAN_DOWNLOAD)
+            set_label_state(self.single_availability_label, "success")
+        else:
+            reason = result.unavailable_reason or T.MSG_UNKNOWN
+            self.single_availability_label.setText(T.INLINE_DOWNLOAD_UNAVAILABLE.format(reason=reason))
+            set_label_state(self.single_availability_label, "error")
+
+        self.single_dir_input.setText(self.session.last_download_dir or DEFAULT_DOWNLOAD_DIR)
+        self.single_name_input.setText(sanitize_filename(f"{song_name}-{result.song_id}"))
+        self._refresh_ffmpeg_status()
+        self._apply_inline_ffmpeg_constraints()
+        self._set_inline_download_active(False)
+        self._refresh_inline_download_preview()
+
+    def _pick_inline_download_dir(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            T.DOWNLOAD_DIR_PICKER_TITLE,
+            self.single_dir_input.text().strip() or DEFAULT_DOWNLOAD_DIR,
+        )
+        if selected:
+            self.single_dir_input.setText(selected)
+
+    def _inline_selected_format(self) -> str:
+        return self.single_format_combo.currentText().lower().strip() or DEFAULT_GUI_TARGET_FORMAT
+
+    def _set_inline_format_safely(self, value: str) -> None:
+        self._inline_format_guard = True
+        try:
+            self.single_format_combo.setCurrentText(value)
+        finally:
+            self._inline_format_guard = False
+
+    def _apply_inline_ffmpeg_constraints(self) -> None:
+        model = self.single_format_combo.model()
+        for idx, fmt in enumerate(SUPPORTED_AUDIO_FORMATS):
+            item_getter = getattr(model, "item", None)
+            item = item_getter(idx) if item_getter else None
+            if item is None:
+                continue
+            enabled = self.ffmpeg_available or fmt == "mp3"
+            item.setEnabled(enabled)
+            item.setToolTip("" if enabled else T.MSG_FFMPEG_NEED_INSTALL)
+        if not self.ffmpeg_available and self._inline_selected_format() != "mp3":
+            self._set_inline_format_safely("MP3")
+
+    def _on_inline_format_changed(self, value: str) -> None:
+        if self._inline_format_guard:
+            return
+        if not self.ffmpeg_available and value.lower().strip() != "mp3":
+            self._set_inline_format_safely("MP3")
+            self.single_download_status_label.setText(T.MSG_FFMPEG_NEED_INSTALL)
+            set_label_state(self.single_download_status_label, "warning")
+        self._refresh_inline_download_preview()
+
+    def _inline_preview_path(self) -> Optional[Path]:
+        raw_dir = self.single_dir_input.text().strip()
+        rename = self.single_name_input.text().strip()
+        if not raw_dir or not rename:
+            return None
+        return Path(raw_dir).expanduser() / f"{sanitize_filename(rename)}.{self._inline_selected_format()}"
+
+    def _refresh_inline_download_preview(self, *_args: object) -> None:
+        result = self.current_detection
+        if result is None:
+            self.single_download_button.setEnabled(False)
+            return
+        preview_path = self._inline_preview_path()
+        if not result.can_download:
+            reason = result.unavailable_reason or T.MSG_UNKNOWN
+            self.single_preview_label.setText(T.INLINE_DOWNLOAD_UNAVAILABLE.format(reason=reason))
+            set_label_state(self.single_preview_label, "error")
+            self.single_download_button.setEnabled(False)
+            return
+        if preview_path is None:
+            self.single_preview_label.setText(T.DOWNLOAD_OPTIONS_HINT_PICK_DIR if not self.single_dir_input.text().strip() else T.DOWNLOAD_OPTIONS_HINT_RENAME)
+            set_label_state(self.single_preview_label, "error")
+            self.single_download_button.setEnabled(False)
+            return
+        self.single_preview_label.setText(T.INLINE_DOWNLOAD_PREVIEW.format(path=preview_path))
+        set_label_state(self.single_preview_label, "muted")
+        self.single_download_button.setEnabled(self.download_worker is None)
+
+    def _set_inline_download_active(self, active: bool) -> None:
+        for widget in (
+            self.single_dir_input,
+            self.single_dir_button,
+            self.single_name_input,
+            self.single_format_combo,
+        ):
+            widget.setEnabled(not active)
+        self.single_download_button.setVisible(not active)
+        self.single_pause_button.setVisible(active)
+        self.single_cancel_button.setVisible(active)
+        self.single_pause_button.setEnabled(active)
+        self.single_cancel_button.setEnabled(active)
+        if active:
+            self.single_pause_button.setText(T.DOWNLOAD_PROGRESS_PAUSE)
+            self.single_progress_bar.setVisible(True)
+            return
+        self._download_paused = False
+        self.single_pause_button.setText(T.DOWNLOAD_PROGRESS_PAUSE)
+        self._refresh_inline_download_preview()
+
+    def _start_inline_download(self) -> None:
+        result = self.current_detection
+        if result is None or self.download_worker is not None:
+            return
+        if not result.can_download:
+            self._refresh_inline_download_preview()
+            return
+        raw_dir = self.single_dir_input.text().strip()
+        rename = self.single_name_input.text().strip()
+        if not raw_dir or not rename:
+            self._refresh_inline_download_preview()
+            return
+        selected_format = self._inline_selected_format()
+        if selected_format not in SUPPORTED_AUDIO_FORMATS:
+            self.single_download_status_label.setText(T.MSG_UNSUPPORTED_FORMAT.format(fmt=selected_format))
+            set_label_state(self.single_download_status_label, "error")
+            return
+        if not self.ffmpeg_available and selected_format != "mp3":
+            self._set_inline_format_safely("MP3")
+            selected_format = "mp3"
+        out_dir = Path(raw_dir).expanduser()
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            output_path = resolve_output_path(
+                out_dir=out_dir,
+                song_id=result.song_id,
+                song_name=result.song_name,
+                rename=rename,
+                out_format=selected_format,
+            )
+        except OSError as err:
+            self.single_download_status_label.setText(str(err))
+            set_label_state(self.single_download_status_label, "error")
+            return
+
+        self._inline_download_output_path = output_path
+        self.session.last_download_dir = str(out_dir)
+        self.session_store.save(self.session)
+        self._set_latest_task_state(result.song_id, output_path, TASK_STATE_PENDING)
+        self._set_latest_task_state(result.song_id, output_path, TASK_STATE_DOWNLOADING)
+        task_id = self.latest_download_task.task_id if self.latest_download_task else build_task_id(result.song_id)
+        worker = DownloadWorker(
+            task_id=task_id,
+            song_id=result.song_id,
+            output_path=output_path,
+            cookie=self.session.cookie,
+            target_format=selected_format,
+            timeout=self.session.download_timeout_sec,
+            retry_count=self.session.download_retry_count,
+            tags={
+                "title": result.song_name or "",
+                "artist": result.artist,
+                "album": result.album_name,
+                "cover_url": result.cover_url,
+            },
+        )
+        self.download_worker = worker
+        worker.progress.connect(self._on_inline_download_progress)
+        worker.succeeded.connect(self._on_inline_download_succeeded)
+        worker.failed.connect(self._on_inline_download_failed)
+        worker.canceled.connect(self._on_inline_download_canceled)
+        worker.finished.connect(self._on_inline_download_finished)
+        worker.finished.connect(worker.deleteLater)
+        self.single_download_status_label.setText(T.DOWNLOAD_PROGRESS_INIT)
+        set_label_state(self.single_download_status_label, "warning")
+        self.single_speed_label.setText(T.DOWNLOAD_PROGRESS_SPEED)
+        self._set_inline_download_active(True)
+        self._set_status(T.STATUS_DOWNLOADING, "warning")
+        logger.info("Inline download started. task_id=%s song_id=%s output=%s", task_id, result.song_id, output_path)
+        worker.start()
+
+    def _on_inline_download_progress(self, downloaded: int, total: int, speed: float) -> None:
+        if total <= 0:
+            self.single_progress_bar.setRange(0, 0)
+            self.single_download_status_label.setText(T.DOWNLOAD_PROGRESS_TEXT_SIMPLE.format(downloaded=format_bytes(downloaded)))
+        else:
+            self.single_progress_bar.setRange(0, total)
+            self.single_progress_bar.setValue(min(downloaded, total))
+            self.single_download_status_label.setText(
+                T.DOWNLOAD_PROGRESS_TEXT_FULL.format(downloaded=format_bytes(downloaded), total=format_bytes(total))
+            )
+        set_label_state(self.single_download_status_label, "warning")
+        self.single_speed_label.setText(T.speed_text(format_bytes(int(speed))))
+
+    def _inline_result_and_path(self) -> tuple[Optional[SongDetectionResult], Optional[Path]]:
+        return self.current_detection, self._inline_download_output_path
+
+    def _on_inline_download_succeeded(self, output_path: str, file_size: int) -> None:
+        result, _requested_path = self._inline_result_and_path()
+        if result is None:
+            return
+        final_path = Path(output_path)
+        self._inline_download_output_path = final_path
+        self._record_download_result(result.song_id, result.song_name or "", final_path, file_size, TASK_STATE_SUCCESS)
+        self._set_latest_task_state(result.song_id, final_path, TASK_STATE_SUCCESS)
+        self.single_progress_bar.setRange(0, max(file_size, 1))
+        self.single_progress_bar.setValue(max(file_size, 1))
+        status_text = T.status_download_done(final_path.name)
+        self.single_download_status_label.setText(status_text)
+        set_label_state(self.single_download_status_label, "success")
+        self._set_status(status_text, "success")
+        self._show_tray_notification(T.TRAY_DOWNLOAD_DONE, T.TRAY_DOWNLOAD_DONE_BODY.format(name=final_path.name))
+        logger.info("Inline download succeeded. output=%s size=%s", final_path, file_size)
+
+    def _on_inline_download_failed(self, code: str, message: str) -> None:
+        result, output_path = self._inline_result_and_path()
+        if result is None or output_path is None:
+            return
+        mapped = user_error_message(code, message)
+        self._record_download_result(result.song_id, result.song_name or "", output_path, 0, TASK_STATE_FAILED, error_code=code)
+        self._set_latest_task_state(result.song_id, output_path, TASK_STATE_FAILED, error_code=code)
+        self.single_download_status_label.setText(T.code_message(code, mapped))
+        set_label_state(self.single_download_status_label, "error")
+        self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
+        self._show_tray_notification(T.TRAY_DOWNLOAD_FAILED, code)
+        logger.warning("Inline download failed. song_id=%s code=%s", result.song_id, code)
+
+    def _on_inline_download_canceled(self) -> None:
+        result, output_path = self._inline_result_and_path()
+        if result is None or output_path is None:
+            return
+        self._record_download_result(result.song_id, result.song_name or "", output_path, 0, TASK_STATE_CANCELED)
+        self._set_latest_task_state(result.song_id, output_path, TASK_STATE_CANCELED)
+        self.single_download_status_label.setText(T.MSG_DOWNLOAD_CANCELED)
+        set_label_state(self.single_download_status_label, "warning")
+        self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
+        logger.info("Inline download canceled. song_id=%s", result.song_id)
+
+    def _on_inline_download_finished(self) -> None:
+        self.download_worker = None
+        if self.url_input.toPlainText().strip() != self._inline_result_input:
+            self._clear_inline_single_result()
+        else:
+            self._set_inline_download_active(False)
+        self._sync_detect_button_state()
+
+    def _toggle_inline_download_pause(self) -> None:
+        if self.download_worker is None:
+            return
+        if self._download_paused:
+            self.download_worker.request_resume()
+            self._download_paused = False
+            self.single_pause_button.setText(T.DOWNLOAD_PROGRESS_PAUSE)
+            self.single_download_status_label.setText(T.DOWNLOAD_PROGRESS_RESUMING)
+            set_label_state(self.single_download_status_label, "warning")
+            return
+        self.download_worker.request_pause()
+        self._download_paused = True
+        self.single_pause_button.setText(T.DOWNLOAD_PROGRESS_RESUME)
+        self.single_download_status_label.setText(T.INLINE_DOWNLOAD_PAUSED)
+        set_label_state(self.single_download_status_label, "warning")
+
+    def _cancel_inline_download(self) -> None:
+        if self.download_worker is None:
+            return
+        self.single_cancel_button.setEnabled(False)
+        self.single_pause_button.setEnabled(False)
+        self.single_download_status_label.setText(T.INLINE_DOWNLOAD_CANCELING)
+        set_label_state(self.single_download_status_label, "warning")
+        self.download_worker.request_cancel()
+
     def _on_detect_succeeded(self, result: SongDetectionResult) -> None:
         logger.info("Detection succeeded. song_id=%s", result.song_id)
         self._set_status(T.STATUS_DETECT_DONE, "success")
-        confirm = SongConfirmDialog(result)
-        if confirm.exec() != QDialog.Accepted:
-            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
-            return
-        self._refresh_ffmpeg_status()
-        if not self.ffmpeg_available:
-            answer = QMessageBox.question(self, T.TITLE_DEP_MISSING, f"{T.MSG_FFMPEG_CONFIRM_MP3}\n\n{T.MSG_FFMPEG_INSTALL_GUIDE}", QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-            if answer != QMessageBox.Yes:
-                self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
-                logger.info("Download canceled before options because ffmpeg is missing.")
-                return
-        options = DownloadOptionsDialog(result, last_download_dir=self.session.last_download_dir)
-        if options.exec() != QDialog.Accepted or not options.output_path:
-            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
-            return
-        self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_PENDING)
-        self.session.last_download_dir = str(options.output_path.parent)
-        self.session_store.save(self.session)
-        self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_DOWNLOADING)
-        task_id = self.latest_download_task.task_id if self.latest_download_task and self.latest_download_task.song_id == result.song_id else build_task_id(result.song_id)
-        logger.info("Download task started from detect flow. task_id=%s song_id=%s", task_id, result.song_id)
-        self._set_status(T.STATUS_DOWNLOADING, "warning")
-        progress = DownloadProgressDialog(
-            task_id=task_id, song_id=result.song_id, output_path=options.output_path,
-            cookie=self.session.cookie, target_format=options.selected_format,
-            timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
-            tags={"title": result.song_name or "", "artist": getattr(result, "artist", None), "album": getattr(result, "album_name", None), "cover_url": getattr(result, "cover_url", None)},
-        )
-        if progress.exec() == QDialog.Accepted and progress.output_path:
-            size_bytes = progress.output_path.stat().st_size if progress.output_path.exists() else 0
-            self._record_download_result(song_id=result.song_id, song_name=result.song_name or "", output_path=progress.output_path, size_bytes=size_bytes, status=TASK_STATE_SUCCESS)
-            self._set_latest_task_state(result.song_id, progress.output_path, TASK_STATE_SUCCESS)
-            status_text = T.status_download_done(progress.output_path.name)
-            self._set_status(status_text, "success")
-            self._show_tray_notification(T.TRAY_DOWNLOAD_DONE, T.TRAY_DOWNLOAD_DONE_BODY.format(name=progress.output_path.name))
-            logger.info("GUI flow finished successfully. task_id=%s output=%s", task_id, progress.output_path)
-        else:
-            if progress.result_state == TASK_STATE_FAILED:
-                self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_FAILED, error_code=progress.error_code)
-                self._record_download_result(song_id=result.song_id, song_name=result.song_name or "", output_path=options.output_path, size_bytes=0, status=TASK_STATE_FAILED, error_code=progress.error_code)
-                self._show_tray_notification(T.TRAY_DOWNLOAD_FAILED, progress.error_code)
-                logger.warning("GUI flow finished with failed task. task_id=%s code=%s", task_id, progress.error_code)
-            else:
-                self._set_latest_task_state(result.song_id, options.output_path, TASK_STATE_CANCELED)
-                self._record_download_result(song_id=result.song_id, song_name=result.song_name or "", output_path=options.output_path, size_bytes=0, status=TASK_STATE_CANCELED)
-                logger.info("GUI flow finished with canceled task. task_id=%s", task_id)
-            self._set_status(T.STATUS_DOWNLOAD_NOT_DONE, "warning")
-            logger.info("GUI flow ended without completed download. task_id=%s", task_id)
+        self._show_inline_single_result(result)
 
 
 def apply_session_proxy(session: AppSession) -> bool:

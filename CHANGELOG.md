@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v2.0.0 (2026-08-06)
+
+### Added
+
+- 单曲检测成功后在主窗口内联展示结果与下载面板，包含封面、歌名、歌手、专辑、时长、保存目录、文件名、格式、进度、速度、暂停/恢复、取消和完成状态。
+- 新增主窗口行为覆盖：内联结果展示、单曲下载不再实例化旧弹窗、成功/失败/取消历史记录、ffmpeg 缺失格式限制、新输入清空旧结果。
+- 新增大歌单分页回归测试，覆盖超过 1000 首时继续请求后续分页。
+
+### Changed
+
+- 单曲主流程改为“检测 → 主窗口内联确认与下载”，保留旧 `SongConfirmDialog`、`DownloadOptionsDialog`、`DownloadProgressDialog` 代码但正常路径不再使用。
+- 多链接和歌单仍进入现有批量下载页，主窗口只补充批量路由状态提示。
+- GitHub Actions 构建产物保留期调整为 3 天，降低 Actions storage 占用。
+
+### Fixed
+
+- 避免 PySide6 主窗口测试通过 class-level `MagicMock` patch Qt 方法时触发访问冲突。
+
+### QA
+
+- 回归测试：`python -m pytest tests/ -q`（437 通过，1 跳过，10 个参数化子测试通过）。
+- 类型检查：`python -m mypy music_fetch/ --strict`（32 个源文件零错误）。
+
 ## v1.14.0 (2026-07-19)
 
 ### Added

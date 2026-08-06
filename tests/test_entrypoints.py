@@ -20,6 +20,10 @@ from music_fetch.download_tasks import DownloadTaskSnapshot
 from music_fetch.network import ProxyConfig, ProxyConfigError
 
 
+def _noop_main_window_method(self, *_args, **_kwargs) -> None:
+    return None
+
+
 class EntryPointTests(unittest.TestCase):
     def test_music_fetch_module_runs_cli_help(self):
         import importlib
@@ -48,8 +52,8 @@ class EntryPointTests(unittest.TestCase):
             base = Path(tmp)
             session = AppSession(cookie="", ui_font_size=16)
             with (
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon"),
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer"),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon", new=_noop_main_window_method),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer", new=_noop_main_window_method),
             ):
                 window = music_fetch.main.MainWindow(
                     SessionStore(base / "session.json"),
@@ -60,8 +64,10 @@ class EntryPointTests(unittest.TestCase):
             self.assertIsNotNone(window.findChild(QFrame, "heroPanel"))
             self.assertIsNotNone(window.findChild(QFrame, "toolbarPanel"))
             self.assertIsNotNone(window.findChild(QFrame, "inputPanel"))
+            self.assertIsNotNone(window.findChild(QFrame, "singlePanel"))
             self.assertGreaterEqual(window.url_input.minimumHeight(), 96)
             self.assertEqual(window.diagnostics_button.accessibleName(), "诊断中心按钮")
+            self.assertEqual(window.single_download_button.accessibleName(), "单曲开始下载按钮")
             window.close()
             window.deleteLater()
             _app.processEvents()
@@ -87,8 +93,8 @@ class EntryPointTests(unittest.TestCase):
                 proxy_password="secret",
             )
             with (
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon"),
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer"),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon", new=_noop_main_window_method),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer", new=_noop_main_window_method),
             ):
                 window = music_fetch.main.MainWindow(
                     SessionStore(base / "session.json"),
@@ -280,8 +286,8 @@ class ProxyApplicationTests(unittest.TestCase):
             store = SessionStore(base / "session.json")
             session = AppSession(cookie="")
             with (
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon"),
-                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer"),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_tray_icon", new=_noop_main_window_method),
+                mock.patch.object(music_fetch.main.MainWindow, "_setup_clipboard_timer", new=_noop_main_window_method),
             ):
                 window = music_fetch.main.MainWindow(
                     store,

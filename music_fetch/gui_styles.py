@@ -87,7 +87,7 @@ QMainWindow, QDialog, QWidget#appRoot {{
     color: {colors['text']};
 }}
 
-QFrame#heroPanel, QFrame#toolbarPanel, QFrame#inputPanel {{
+QFrame#heroPanel, QFrame#toolbarPanel, QFrame#inputPanel, QFrame#singlePanel {{
     background-color: {colors['surface']};
     border: 1px solid {colors['border']};
     border-radius: 14px;
@@ -121,6 +121,23 @@ QLabel#sectionTitle {{
     color: {colors['text']};
     font-size: 17px;
     font-weight: 700;
+}}
+
+QLabel#singleSongName {{
+    color: {colors['text']};
+    font-size: 18px;
+    font-weight: 700;
+}}
+
+QLabel#singleMeta {{
+    color: {colors['muted']};
+}}
+
+QLabel#singleCover {{
+    background-color: {colors['surface_alt']};
+    color: {colors['muted']};
+    border: 1px solid {colors['border']};
+    border-radius: 8px;
 }}
 
 QLabel#accountName {{

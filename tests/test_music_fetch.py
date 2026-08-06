@@ -91,6 +91,23 @@ class PlayerApiTests(unittest.TestCase):
         self.assertEqual(result, ["1", "2"])
 
     @mock.patch("music_fetch.api.perform_json_get")
+    def test_fetch_playlist_song_ids_paginates_large_playlist(self, get_mock):
+        first_page = [{"id": idx} for idx in range(1, 1001)]
+        second_page = [{"id": 1001}, {"id": 1002}]
+        get_mock.side_effect = [
+            (200, {"code": 200, "playlist": {"trackIds": first_page}}),
+            (200, {"code": 200, "playlist": {"trackIds": second_page}}),
+        ]
+
+        result = music_fetch.fetch_playlist_song_ids("123", "MUSIC_U=abc", timeout=5)
+
+        self.assertEqual(result[0], "1")
+        self.assertEqual(result[-1], "1002")
+        self.assertEqual(len(result), 1002)
+        self.assertEqual(get_mock.call_count, 2)
+        self.assertIn("s=1000", get_mock.call_args_list[1].args[0])
+
+    @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_playlist_song_ids_empty(self, get_mock):
         get_mock.return_value = (200, {"code": 200, "playlist": {"trackIds": []}})
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
