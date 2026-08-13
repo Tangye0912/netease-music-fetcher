@@ -72,5 +72,25 @@ class BatchResultsTests(unittest.TestCase):
         self.assertEqual(parsed[0]["selected"], "true")
 
 
+class BatchCsvSafetyTests(unittest.TestCase):
+    def test_csv_neutralizes_spreadsheet_formulas(self):
+        row = BatchDetectRow(
+            raw_input="=HYPERLINK(\"http://evil\")",
+            source_type="song",
+            source_label="=1+1",
+            song_id="42",
+            song_name="+SUM(A1:A2)",
+            status="download_failed",
+            message="@payload",
+            media_size_bytes=0,
+            selected=True,
+        )
+        parsed = list(csv.DictReader(io.StringIO(build_batch_results_csv([row]))))[0]
+        self.assertEqual(parsed["raw_input"], "'=HYPERLINK(\"http://evil\")")
+        self.assertEqual(parsed["source_label"], "'=1+1")
+        self.assertEqual(parsed["song_name"], "'+SUM(A1:A2)")
+        self.assertEqual(parsed["message"], "'@payload")
+
+
 if __name__ == "__main__":
     unittest.main()

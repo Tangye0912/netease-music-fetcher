@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Iterable, Protocol
 if TYPE_CHECKING:
     from music_fetch.batch_models import BatchDetectRow
 
+from music_fetch.csv_utils import safe_csv_text
 import music_fetch.ui_texts as T
 
 
@@ -93,16 +94,16 @@ def build_batch_results_csv(rows: Iterable[BatchResultRow]) -> str:
     for row in rows:
         writer.writerow(
             {
-                "source_type": row.source_type,
-                "source_label": row.source_label,
-                "raw_input": row.raw_input,
-                "song_id": row.song_id,
-                "song_name": row.song_name,
-                "status": row.status,
-                "status_text": T.batch_detect_status_text(row.status),
-                "message": row.message,
+                "source_type": safe_csv_text(row.source_type),
+                "source_label": safe_csv_text(row.source_label),
+                "raw_input": safe_csv_text(row.raw_input),
+                "song_id": safe_csv_text(row.song_id),
+                "song_name": safe_csv_text(row.song_name),
+                "status": safe_csv_text(row.status),
+                "status_text": safe_csv_text(T.batch_detect_status_text(row.status)),
+                "message": safe_csv_text(row.message),
                 "media_size_bytes": row.media_size_bytes,
-                "selected": str(bool(row.selected)).lower(),
+                "selected": safe_csv_text(str(bool(row.selected)).lower()),
             }
         )
     return output.getvalue()

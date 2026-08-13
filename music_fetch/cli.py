@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -29,7 +30,11 @@ from music_fetch.api import (
     parse_song_id,
 )
 from music_fetch.app_logging import default_log_path, setup_logging
-from music_fetch.app_settings import SUPPORTED_AUDIO_FORMATS
+from music_fetch.app_settings import (
+    DEFAULT_CLI_CONCURRENCY,
+    MAX_CLI_CONCURRENCY,
+    SUPPORTED_AUDIO_FORMATS,
+)
 from music_fetch.audio import resolve_output_path
 from music_fetch.pipeline import run_download_pipeline
 from music_fetch.network import ProxyConfigError, configure_proxy
@@ -93,22 +98,27 @@ def run_playlist_download(
     out_format: str = "mp3",
     retry_count: int = 1,
     download_lyric: bool = False,
+    concurrency: int = DEFAULT_CLI_CONCURRENCY,
 ) -> list[DownloadResult]:
     _, playlist_id = parse_input_resource(playlist_url)
     cookie = load_cookie(cookie_file)
     song_ids = fetch_playlist_song_ids(playlist_id, cookie, timeout=timeout)
+    total = len(song_ids)
+    max_workers = max(1, min(int(concurrency), MAX_CLI_CONCURRENCY))
     logger.info(
-        "Playlist download started. playlist_id=%s song_count=%s format=%s retry=%s",
+        "Playlist download started. playlist_id=%s song_count=%s format=%s retry=%s concurrency=%s",
         playlist_id,
-        len(song_ids),
+        total,
         out_format,
         retry_count,
+        max_workers,
     )
-    results: list[DownloadResult] = []
-    for idx, song_id in enumerate(song_ids, start=1):
-        print(f"[{idx}/{len(song_ids)}] Downloading song {song_id} ...")
+
+    def download_one(index_and_song: tuple[int, str]) -> Optional[DownloadResult]:
+        idx, song_id = index_and_song
+        print(f"[{idx}/{total}] Downloading song {song_id} ...")
         try:
-            song_name, meta_duration, _cover, _artist, _album = fetch_song_metadata(song_id, cookie, timeout=timeout)
+            song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
             output_path = resolve_output_path(
                 out_dir=out_dir,
                 song_id=song_id,
@@ -123,6 +133,8 @@ def run_playlist_download(
                 target_format=out_format,
                 timeout=timeout,
                 retry_count=retry_count,
+                tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
+                download_lyric=download_lyric,
             )
             actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
             if actual_format and actual_format != out_format.lower():
@@ -137,8 +149,8 @@ def run_playlist_download(
                 size_bytes=pipeline_result.file_size,
                 duration_ms=meta_duration,
             )
-            results.append(result)
             print(f"  SUCCESS path={result.output_path}")
+            return result
         except MusicFetchError as err:
             print(f"  {err.code}: {err.message}", file=sys.stderr)
             logger.warning(
@@ -147,11 +159,20 @@ def run_playlist_download(
                 err.code,
                 err.message,
             )
+            return None
+
+    if max_workers <= 1:
+        ordered = [download_one(item) for item in enumerate(song_ids, start=1)]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            ordered = list(pool.map(download_one, enumerate(song_ids, start=1)))
+
+    results = [result for result in ordered if result is not None]
     logger.info(
         "Playlist download completed. total=%s success=%s failed=%s",
-        len(song_ids),
+        total,
         len(results),
-        len(song_ids) - len(results),
+        total - len(results),
     )
     return results
 
@@ -180,6 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retry", type=int, default=1, dest="retry_count",
         help="Download retry count on network failure (default: 1).",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CLI_CONCURRENCY, dest="concurrency",
+        help=f"Parallel playlist downloads, 1-{MAX_CLI_CONCURRENCY} (default: {DEFAULT_CLI_CONCURRENCY}).",
     )
     parser.add_argument(
         "--format", dest="out_format", default="mp3",
@@ -255,6 +280,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 out_format=args.out_format,
                 retry_count=args.retry_count,
                 download_lyric=args.lyric,
+                concurrency=args.concurrency,
             )
             if results:
                 print(f"\nDownloaded {len(results)} songs.")

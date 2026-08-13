@@ -48,6 +48,14 @@ class BuildParserTests(unittest.TestCase):
         self.assertEqual(args.proxy_port, 1080)
         self.assertEqual(args.proxy_username, "user")
 
+    def test_concurrency_argument_parsed(self):
+        parser = music_fetch.cli.build_parser()
+        args = parser.parse_args(["--url", "42", "--concurrency", "4"])
+        self.assertEqual(args.concurrency, 4)
+        # Default stays at 1.
+        defaults = parser.parse_args(["--url", "42"])
+        self.assertEqual(defaults.concurrency, 1)
+
 
 class RunDownloadTests(unittest.TestCase):
     @mock.patch("music_fetch.cli.run_download_pipeline")
@@ -202,6 +210,85 @@ class RunPlaylistDownloadTests(unittest.TestCase):
                 timeout=10,
             )
             self.assertEqual(len(results), 1)
+
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.fetch_playlist_song_ids")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_playlist_download_forwards_tags_and_lyric(self, _cookie_mock, ids_mock, meta_mock, pipeline_mock):
+        from music_fetch.pipeline import DownloadPipelineResult
+        ids_mock.return_value = ["1"]
+        meta_mock.return_value = ("Song", 120000, "https://cover/x.jpg", "Artist", "Album")
+        pipeline_mock.return_value = DownloadPipelineResult(
+            output_path=Path("out/Song-1.mp3"),
+            file_size=4,
+            candidate=music_fetch.PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000, level="standard", encode_type="mp3",
+            ),
+            source_format="mp3",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            results = music_fetch.cli.run_playlist_download(
+                playlist_url="https://music.163.com/playlist?id=123",
+                out_dir=Path(tmp) / "out", cookie_file=cookie_file,
+                timeout=10, download_lyric=True,
+            )
+            self.assertEqual(len(results), 1)
+            kwargs = pipeline_mock.call_args.kwargs
+            self.assertTrue(kwargs["download_lyric"])
+            self.assertEqual(
+                kwargs["tags"],
+                {"title": "Song", "artist": "Artist", "album": "Album", "cover_url": "https://cover/x.jpg"},
+            )
+
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.fetch_playlist_song_ids")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_playlist_download_respects_concurrency(self, _cookie_mock, ids_mock, meta_mock):
+        import threading
+        import time
+        from music_fetch.pipeline import DownloadPipelineResult
+
+        ids_mock.return_value = [str(i) for i in range(1, 7)]
+        meta_mock.return_value = ("Song", 120000, None, None, None)
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, tags=None, download_lyric=False):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.1)
+            with lock:
+                active -= 1
+            return DownloadPipelineResult(
+                output_path=output_path,
+                file_size=4,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/song.mp3",
+                    duration_ms=120000, level="standard", encode_type="mp3",
+                ),
+                source_format="mp3",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            with mock.patch("music_fetch.cli.run_download_pipeline", new=fake_pipeline):
+                results = music_fetch.cli.run_playlist_download(
+                    playlist_url="https://music.163.com/playlist?id=123",
+                    out_dir=Path(tmp) / "out", cookie_file=cookie_file,
+                    timeout=10, concurrency=3,
+                )
+            self.assertEqual(len(results), 6)
+            self.assertGreater(max_active, 1)
+            self.assertLessEqual(max_active, 3)
 
 
 class MainTests(unittest.TestCase):

@@ -3,10 +3,11 @@
 网易云音乐单曲下载工具。
 当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
 
-## 1. 版本概览（v2.0.0）
+## 1. 版本概览（v2.1.0）
 
 ### 1.1 近期更新（v1.4.2 → 当前版本）
 
+- **歌单并行下载与导出安全**（v2.1.0）：CLI 新增 `--concurrency` 并行下载大歌单；歌单下载与单曲保持一致写入音频标签与歌词；批量 CSV 导出补齐公式注入防护。
 - **主流程内联体验**（v2.0.0）：单曲检测成功后直接在主窗口展示封面、歌名、歌手、专辑、时长、保存目录、文件名、格式和下载进度，不再打断式弹出确认/设置/进度窗口。
 - **快捷入口可靠性**（v1.14.0）：搜索结果和用户歌单选中后会立即完成输入分析，并分别进入单曲检测或批量下载流程；新增主窗口行为级回归覆盖。
 - **历史检索与安全导出**（v1.13.0）：下载管理支持多关键词与状态组合筛选，可导出全部筛选结果；CSV 兼容中文 Excel，并防止表格公式注入。
@@ -19,7 +20,7 @@
 - **macOS CI 构建**（v1.6.0）：GitHub Actions 双平台（Windows + macOS）自动打包。
 - **mypy strict mode**（v1.5.0）：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
 - **CI 矩阵策略**：串行构建避免抢 runner 超时，只在推送 `v*` tag 时触发。
-- **测试**：437 个测试用例，覆盖 API、代理传输、诊断报告、下载管道、历史检索/分页/导出、对话框、CLI、版本检查和主窗口行为等。
+- **测试**：446 个测试用例，覆盖 API、代理传输、诊断报告、下载管道、历史检索/分页/导出、CSV 安全、对话框、CLI（含歌单并行下载）、版本检查和主窗口行为等。
 
 详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。
 迭代路线见 [ROADMAP.md](./ROADMAP.md)。
@@ -82,6 +83,7 @@ music-fetch \
   --rename "自定义文件名" \
   --retry 3 \
   --timeout 30 \
+  --concurrency 4 \
   --lyric \
   --verbose
 ```
@@ -113,8 +115,13 @@ python3 build.py --clean
 推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows + macOS 版本并上传到 GitHub Release：
 
 ```bash
+<<<<<<< HEAD
 git tag v2.0.0
 git push origin v2.0.0
+=======
+git tag v1.15.0
+git push origin v1.15.0
+>>>>>>> 9576023 (feat: release v1.15.0 with CLI playlist concurrency and CSV safety)
 ```
 
 ## 5. 错误码
@@ -139,6 +146,7 @@ git push origin v2.0.0
 | `music_fetch/dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验。 |
 | `music_fetch/batch_dialogs.py` | 批量识别与批量下载界面，包含失败项重试、CSV 导出和并发下载调度。 |
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
+| `music_fetch/csv_utils.py` | 共享 CSV 安全工具：电子表格公式注入防护（历史与批量导出复用）。 |
 | `music_fetch/workers.py` | 后台 QThread：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
 | `music_fetch/api.py` | 网易云接口层：链接解析、cookie 处理、登录校验、歌曲/歌单/账号/歌词 API。 |
 | `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码、歌词嵌入。 |

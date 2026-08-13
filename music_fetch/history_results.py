@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from music_fetch.app_stores import DownloadRecord
+from music_fetch.csv_utils import safe_csv_text
 import music_fetch.ui_texts as T
 
 HISTORY_CSV_FIELDS = (
@@ -55,15 +56,6 @@ def filter_download_history(
     return filtered
 
 
-def _safe_csv_text(value: object) -> str:
-    """Prevent spreadsheet formula execution when a CSV is opened."""
-    text = str(value or "")
-    candidate = text.lstrip(" \t\r\n")
-    if candidate.startswith(("=", "+", "-", "@")):
-        return "'" + text
-    return text
-
-
 def build_download_history_csv(records: Iterable[DownloadRecord]) -> str:
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=HISTORY_CSV_FIELDS, lineterminator="\n")
@@ -71,15 +63,15 @@ def build_download_history_csv(records: Iterable[DownloadRecord]) -> str:
     for record in records:
         writer.writerow(
             {
-                "song_id": _safe_csv_text(record.song_id),
-                "song_name": _safe_csv_text(record.song_name),
-                "filename": _safe_csv_text(Path(record.output_path).name),
-                "output_path": _safe_csv_text(record.output_path),
+                "song_id": safe_csv_text(record.song_id),
+                "song_name": safe_csv_text(record.song_name),
+                "filename": safe_csv_text(Path(record.output_path).name),
+                "output_path": safe_csv_text(record.output_path),
                 "size_bytes": record.size_bytes,
-                "downloaded_at": _safe_csv_text(record.downloaded_at),
-                "status": _safe_csv_text(record.status),
-                "status_text": _safe_csv_text(T.manager_status_text(record.status)),
-                "error_code": _safe_csv_text(record.error_code),
+                "downloaded_at": safe_csv_text(record.downloaded_at),
+                "status": safe_csv_text(record.status),
+                "status_text": safe_csv_text(T.manager_status_text(record.status)),
+                "error_code": safe_csv_text(record.error_code),
             }
         )
     return output.getvalue()
