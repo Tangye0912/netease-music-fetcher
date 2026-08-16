@@ -17,11 +17,11 @@ if not defined PY_CMD (
   exit /b 1
 )
 
-%PY_CMD% music_fetch/main.py
+%PY_CMD% -m music_fetch.app
 
 if errorlevel 1 (
   echo.
-  echo 启动失败，请确认已安装 Python 3 和 PySide6。
+  echo 启动失败，请确认已安装 Python 3 和项目依赖。
   pause
 )
 

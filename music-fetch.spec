@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for music-fetch standalone single-file executable."""
+"""PyInstaller spec for the music-fetch terminal app (single-file executable)."""
 
 import sys
 from pathlib import Path
@@ -7,7 +7,7 @@ from pathlib import Path
 block_cipher = None
 
 a = Analysis(
-    ['music_fetch/main.py'],
+    ['music_fetch/app.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -17,21 +17,25 @@ a = Analysis(
         'mutagen.mp3',
         'mutagen.mp4',
         'mutagen.flac',
-        'qt_material',
-        'qt_material.resources',
-        # Project modules imported lazily inside functions (PyInstaller can't
-        # detect them via static analysis).
-        'music_fetch.search_dialog',
-        'music_fetch.playlist_dialog',
-        'music_fetch.batch_inputs',
-        'music_fetch.batch_dialogs',
+        # Prompt_toolkit loads many submodules lazily; pin the important ones.
+        'prompt_toolkit',
+        'prompt_toolkit.formatted_text',
+        'prompt_toolkit.layout',
+        'prompt_toolkit.shortcuts',
+        'prompt_toolkit.styles',
+        'prompt_toolkit.key_binding',
+        'prompt_toolkit.renderer',
+        'prompt_toolkit.lexers',
+        'prompt_toolkit.completion',
+        'prompt_toolkit.history',
+        'prompt_toolkit.filters',
+        'prompt_toolkit.cursor_shapes',
+        # QR code rendering for terminal login.
+        'qrcode',
         # Proxy support loads Requests and its SOCKS transport at runtime.
         'requests',
         'socks',
         'urllib3.contrib.socks',
-        # PySide6 WebEngine — imported in try/except blocks, may be skipped.
-        'PySide6.QtWebEngineCore',
-        'PySide6.QtWebEngineWidgets',
     ],
     hookspath=[],
     hooksconfig={},
@@ -56,6 +60,6 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    console=False,
+    console=True,
     icon=None,
 )

@@ -48,6 +48,11 @@ from music_fetch.api import (
     # Lyrics
     fetch_lyric,
     LyricResult,
+    # QR login
+    fetch_qr_unikey,
+    build_qr_login_url,
+    poll_qr_login_status,
+    QrLoginPollResult,
     # Constants
     SUPPORTED_GUI_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,
@@ -76,6 +81,18 @@ from music_fetch.network import (
     get_proxy_config,
     normalize_proxy_config,
     open_url,
+)
+
+from music_fetch.download_runner import (
+    DownloadJob,
+    DownloadJobResult,
+    DownloadProgressSnapshot,
+)
+from music_fetch.batch_inspect import run_batch_detect
+from music_fetch.batch_download import (
+    BatchDownloadCounters,
+    BatchDownloadSession,
+    format_speed,
 )
 
 from music_fetch.cli import (
@@ -132,6 +149,19 @@ __all__ = [
     "search_songs",
     "fetch_user_playlists",
     "fetch_lyric",
+    # QR login
+    "fetch_qr_unikey",
+    "build_qr_login_url",
+    "poll_qr_login_status",
+    "QrLoginPollResult",
+    # Download runner / batch (TUI-era)
+    "DownloadJob",
+    "DownloadJobResult",
+    "DownloadProgressSnapshot",
+    "run_batch_detect",
+    "BatchDownloadCounters",
+    "BatchDownloadSession",
+    "format_speed",
     # Audio helpers
     "sanitize_filename",
     "dedupe_path",

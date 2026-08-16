@@ -19,6 +19,7 @@ __all__ = [
     "detect_song", "normalize_media_url",
     "search_songs", "SearchResult",
     "fetch_user_playlists", "UserPlaylist",
+    "fetch_qr_unikey", "build_qr_login_url", "poll_qr_login_status", "QrLoginPollResult",
     "SUPPORTED_GUI_AUDIO_FORMATS",
     "USER_AGENT", "OUTER_MEDIA_URL_API", "DEFAULT_OUT_DIR", "DEFAULT_COOKIE_FILE",
     "PLAYABLE_REQUEST_PROFILES",
@@ -745,3 +746,77 @@ def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
     tlyric = str(body.get("tlyric", {}).get("lyric") or "")
     logger.info("Fetched lyric. song_id=%s lyric_len=%s translated_len=%s", song_id, len(lrc), len(tlyric))
     return LyricResult(lyric=lrc, translated_lyric=tlyric)
+
+# ── QR code login ───────────────────────────────────────────────
+
+QR_UNIKEY_API = "https://music.163.com/api/login/qrcode/unikey"
+QR_LOGIN_URL_TEMPLATE = "https://music.163.com/login?codekey={unikey}"
+QR_CHECK_API = "https://music.163.com/api/login/qrcode/client/login"
+
+QR_STATUS_WAITING = "waiting"
+QR_STATUS_SCANNED = "scanned"
+QR_STATUS_SUCCESS = "success"
+QR_STATUS_EXPIRED = "expired"
+QR_STATUS_ERROR = "error"
+
+
+@dataclass
+class QrLoginPollResult:
+    """One poll of the QR login check endpoint."""
+    status: str  # waiting | scanned | confirming | success | expired | error
+    cookie: str = ""
+    message: str = ""
+
+
+def fetch_qr_unikey(timeout: int = 10) -> str:
+    """Request a fresh QR-login unikey from NetEase."""
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Referer": "https://music.163.com/",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    status, body = perform_json_post(QR_UNIKEY_API, {"type": "1"}, headers, timeout=timeout)
+    if status != 200 or body.get("code") != 200:
+        raise MusicFetchError(
+            ErrorCode.NETWORK_ERROR,
+            f"Failed to create QR login session: HTTP {status}, code={body.get('code')}",
+        )
+    unikey = str(body.get("unikey") or "").strip()
+    if not unikey:
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, "QR login session created without a unikey.")
+    logger.info("QR login unikey created. unikey=%s", unikey)
+    return unikey
+
+
+def build_qr_login_url(unikey: str) -> str:
+    """Build the music.163.com QR login URL for a unikey."""
+    return QR_LOGIN_URL_TEMPLATE.format(unikey=unikey)
+
+
+def poll_qr_login_status(unikey: str, timeout: int = 10) -> QrLoginPollResult:
+    """Poll the QR login status endpoint once.
+
+    Verified against the live API: 800 expired, 801 waiting for scan,
+    802 scanned and awaiting confirmation, 803 success (cookie included).
+    """
+    url = f"{QR_CHECK_API}?key={parse.quote(unikey)}&type=1"
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/"}
+    try:
+        status, body = perform_json_get(url, headers, timeout=timeout)
+    except MusicFetchError as err:
+        logger.warning("QR login check failed. unikey=%s code=%s message=%s", unikey, err.code, err.message)
+        return QrLoginPollResult(status=QR_STATUS_ERROR, message=err.message)
+    if status != 200:
+        return QrLoginPollResult(status=QR_STATUS_ERROR, message=f"HTTP {status}")
+    code = body.get("code")
+    message = str(body.get("message") or "").strip()
+    if code == 803:
+        cookie = str(body.get("cookie") or "").strip()
+        return QrLoginPollResult(status=QR_STATUS_SUCCESS, cookie=cookie, message=message)
+    if code == 802:
+        return QrLoginPollResult(status=QR_STATUS_SCANNED, message=message)
+    if code == 801:
+        return QrLoginPollResult(status=QR_STATUS_WAITING, message=message)
+    if code == 800:
+        return QrLoginPollResult(status=QR_STATUS_EXPIRED, message=message or "二维码不存在或已过期")
+    return QrLoginPollResult(status=QR_STATUS_ERROR, message=f"code={code} {message}".strip())

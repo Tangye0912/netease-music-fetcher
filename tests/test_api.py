@@ -6,7 +6,13 @@ from urllib import error
 from music_fetch.api import (
     MusicFetchError,
     ErrorCode,
+    QR_STATUS_ERROR,
+    QR_STATUS_EXPIRED,
+    QR_STATUS_SCANNED,
+    QR_STATUS_SUCCESS,
+    QR_STATUS_WAITING,
     build_cookie_string,
+    build_qr_login_url,
     extract_csrf,
     extract_url_from_input,
     is_netease_music_host,
@@ -463,6 +469,69 @@ class DetectSongTests(unittest.TestCase):
         with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [empty_resp] * 5):
             result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
         self.assertFalse(result.can_download)
+
+
+class QrLoginTests(unittest.TestCase):
+    def test_build_qr_login_url_embeds_unikey(self):
+        self.assertEqual(
+            build_qr_login_url("abc123"),
+            "https://music.163.com/login?codekey=abc123",
+        )
+
+    @mock.patch("music_fetch.api.perform_json_post")
+    def test_fetch_qr_unikey_success(self, post_mock):
+        post_mock.return_value = (200, {"code": 200, "unikey": "key-1"})
+        from music_fetch.api import fetch_qr_unikey
+        self.assertEqual(fetch_qr_unikey(timeout=5), "key-1")
+
+    @mock.patch("music_fetch.api.perform_json_post")
+    def test_fetch_qr_unikey_rejects_non_200(self, post_mock):
+        post_mock.return_value = (502, {"code": 502})
+        from music_fetch.api import fetch_qr_unikey
+        with self.assertRaises(MusicFetchError) as ctx:
+            fetch_qr_unikey(timeout=5)
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    @mock.patch("music_fetch.api.perform_json_post")
+    def test_fetch_qr_unikey_rejects_missing_unikey(self, post_mock):
+        post_mock.return_value = (200, {"code": 200})
+        from music_fetch.api import fetch_qr_unikey
+        with self.assertRaises(MusicFetchError) as ctx:
+            fetch_qr_unikey(timeout=5)
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    @mock.patch("music_fetch.api.perform_json_get")
+    def test_poll_status_mapping(self, get_mock):
+        from music_fetch.api import poll_qr_login_status
+        cases = [
+            ((200, {"code": 800, "message": "二维码已过期"}), QR_STATUS_EXPIRED),
+            ((200, {"code": 801, "message": "等待扫码"}), QR_STATUS_WAITING),
+            ((200, {"code": 802, "message": "等待确认"}), QR_STATUS_SCANNED),
+            ((200, {"code": 804, "message": "bad"}), QR_STATUS_ERROR),
+        ]
+        for payload, expected_status in cases:
+            with self.subTest(payload=payload):
+                get_mock.return_value = payload
+                result = poll_qr_login_status("key-1", timeout=5)
+                self.assertEqual(result.status, expected_status)
+
+    @mock.patch("music_fetch.api.perform_json_get")
+    def test_poll_status_success_returns_cookie(self, get_mock):
+        from music_fetch.api import poll_qr_login_status
+        get_mock.return_value = (
+            200,
+            {"code": 803, "message": "授权成功", "cookie": "MUSIC_U=abc; __csrf=def"},
+        )
+        result = poll_qr_login_status("key-1", timeout=5)
+        self.assertEqual(result.status, QR_STATUS_SUCCESS)
+        self.assertEqual(result.cookie, "MUSIC_U=abc; __csrf=def")
+
+    @mock.patch("music_fetch.api.perform_json_get", side_effect=MusicFetchError("NETWORK_ERROR", "timeout"))
+    def test_poll_status_network_error_becomes_error_status(self, _get_mock):
+        from music_fetch.api import poll_qr_login_status
+        result = poll_qr_login_status("key-1", timeout=5)
+        self.assertEqual(result.status, QR_STATUS_ERROR)
+        self.assertIn("timeout", result.message)
 
 
 if __name__ == "__main__":

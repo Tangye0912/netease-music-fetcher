@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "2.1.0"
+APP_VERSION = "3.0.0"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"
@@ -38,7 +38,7 @@ MAX_DOWNLOAD_RETRY_COUNT = 5
 DEFAULT_DOWNLOAD_CONCURRENCY = 1
 MIN_DOWNLOAD_CONCURRENCY = 1
 MAX_DOWNLOAD_CONCURRENCY = 3
-# CLI playlist downloads may use more parallel workers than the GUI (no UI overhead).
+# CLI playlist downloads may use more parallel workers than the TUI download session.
 DEFAULT_CLI_CONCURRENCY = 1
 MAX_CLI_CONCURRENCY = 8
 DOWNLOAD_HISTORY_PAGE_SIZE = 50

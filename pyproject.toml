@@ -4,22 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "2.1.0"
-description = "网易云音乐单曲下载工具"
+version = "3.0.0"
+description = "网易云音乐单曲下载工具（终端 TUI + CLI）"
 requires-python = ">=3.10"
 dependencies = [
-    "PySide6>=6.5,<7.0",
     "mutagen>=1.45",
-    "qt-material>=2.14",
+    "prompt-toolkit>=3.0,<4.0",
+    "qrcode>=7.4,<9.0",
     "requests[socks]>=2.31,<3.0",
 ]
 
 [project.optional-dependencies]
-webengine = ["PySide6-Addons>=6.5"]
 dev = ["pyinstaller>=6.0", "pytest>=8.0", "mypy>=1.10"]
 
 [project.scripts]
-music-fetch = "music_fetch.cli:main"
+music-fetch = "music_fetch.app:main"
 
 [project.urls]
 Homepage = "https://github.com/Tangye0912/netease-music-fetcher"
@@ -28,21 +27,16 @@ Homepage = "https://github.com/Tangye0912/netease-music-fetcher"
 packages = ["music_fetch"]
 
 [tool.mypy]
-# PySide6 stubs don't perfectly match Qt override signatures (e.g. resizeEvent,
-# showEvent).  Silence the [override] error globally instead of per-line.
-# Also, PySide6 enum/flag members (Qt.Checked, QHeaderView.Fixed, etc.) are
-# accessed as class attributes but the stubs don't always expose them, causing
-# [attr-defined] errors in strict mode.
+# Qt-era PySide6 stubs are gone, but keep these defensive disables so strict
+# mode stays green across third-party stubs.
 disable_error_code = ["override", "attr-defined", "call-overload", "no-any-return", "no-untyped-call", "no-untyped-def", "truthy-function", "import-untyped"]
-# Use the strictest settings we can without breaking on PySide6 stubs:
+# Use the strictest settings we can without breaking on third-party stubs:
 strict = true
-# These modules have incomplete stubs — don't check them for untyped defs:
+# These modules have incomplete stubs — don't check them:
 [[tool.mypy.overrides]]
 module = [
     "mutagen.*",
-    "PySide6.*",
-    "shiboken6.*",
-    "qt_material",
-    "qt_material.*",
+    "qrcode",
+    "qrcode.*",
 ]
 ignore_errors = true

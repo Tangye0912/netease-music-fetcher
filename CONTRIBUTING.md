@@ -42,7 +42,7 @@ python3 -m compileall -q music_fetch
 git diff --check
 ```
 
-涉及依赖、GUI 入口或打包配置时，额外执行：
+涉及依赖、入口或打包配置时，额外执行：
 
 ```bash
 python3 build.py --clean

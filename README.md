@@ -1,72 +1,70 @@
 # music-fetch
 
-网易云音乐单曲下载工具。
-当前版本以 GUI 为主流程，默认输出格式为 `mp3`。
+网易云音乐单曲/歌单下载工具。v3.0 起为**纯终端应用**：打开即进入键盘交互界面（TUI），也可以继续用参数化的命令行脚本模式。
 
-## 1. 版本概览（v2.1.0）
+## 1. 版本概览（v3.0.0）
 
-### 1.1 近期更新（v1.4.2 → 当前版本）
+### 1.1 v3.0.0 重大变更
 
-- **歌单并行下载与导出安全**（v2.1.0）：CLI 新增 `--concurrency` 并行下载大歌单；歌单下载与单曲保持一致写入音频标签与歌词；批量 CSV 导出补齐公式注入防护。
-- **主流程内联体验**（v2.0.0）：单曲检测成功后直接在主窗口展示封面、歌名、歌手、专辑、时长、保存目录、文件名、格式和下载进度，不再打断式弹出确认/设置/进度窗口。
-- **快捷入口可靠性**（v1.14.0）：搜索结果和用户歌单选中后会立即完成输入分析，并分别进入单曲检测或批量下载流程；新增主窗口行为级回归覆盖。
-- **历史检索与安全导出**（v1.13.0）：下载管理支持多关键词与状态组合筛选，可导出全部筛选结果；CSV 兼容中文 Excel，并防止表格公式注入。
-- **诊断中心**（v1.12.0）：GUI 可查看脱敏运行环境与 WARNING/ERROR 日志，异步检测网易云 API/CDN 连通性，并导出不含 Cookie/代理密码的排障报告。
-- **下载历史分页**（v1.11.0）：下载管理器每页只渲染 50 条记录，支持状态筛选、页码导航与刷新后的有效页回退；历史在运行期间也严格限制为最新 1000 条。
-- **统一代理支持**（v1.10.0）：GUI/CLI 支持 HTTP、SOCKS5、可选认证和远程 DNS，API、短链、头像、音频、封面及版本检查共用同一传输层。
-- **批量识别可取消**（v1.9.0）：识别大歌单时可随时取消，保留已完成结果并支持直接下载或重新识别。
-- **Material Design UI**（v1.9.0）：在浅色/深色主题基础上加入卡片式主界面、语义状态色和统一控件细节。
-- **歌词下载**（v1.7.0）：`--lyric` 参数，下载 `.lrc` 歌词文件并嵌入音频标签（MP3/M4A/FLAC）。
-- **macOS CI 构建**（v1.6.0）：GitHub Actions 双平台（Windows + macOS）自动打包。
-- **mypy strict mode**（v1.5.0）：28 个源文件零类型错误，`pyproject.toml` 启用 `strict = true`。
-- **CI 矩阵策略**：串行构建避免抢 runner 超时，只在推送 `v*` tag 时触发。
-- **测试**：446 个测试用例，覆盖 API、代理传输、诊断报告、下载管道、历史检索/分页/导出、CSV 安全、对话框、CLI（含歌单并行下载）、版本检查和主窗口行为等。
+- **全面 TUI 化**：移除 PySide6 GUI（约 6000 行 Qt 代码与 WebEngine 依赖），所有交互都在终端完成。
+- **终端扫码登录**：调用网易云 QR 登录接口，在终端渲染二维码（ASCII 方块），扫码后自动轮询登录状态并保存凭证。
+- **键盘多选下载**：批量识别结果用勾选式列表选择（空格勾选、回车确认），下载中支持 `p` 暂停/继续、`r` 恢复、`c` 取消。
+- **体积锐减**：单文件产物从约 185MB（含 WebEngine）降至约 13MB，跨平台打包与启动都更快。
+- **保留脚本模式**：`music-fetch --url ...` 等参数化 CLI 原样保留（含 `--concurrency` 歌单并行下载）。
 
-详细发布记录见 [CHANGELOG.md](./CHANGELOG.md)。
-迭代路线见 [ROADMAP.md](./ROADMAP.md)。
+### 1.2 核心能力
 
-### 1.2 当前核心能力
-
-- 登录：内嵌网页扫码登录（自动提取登录凭证）
-- 主界面：展示账号头像、昵称、会员状态
-- 链接检测：支持长链、短链（`163cn.tv`）、整段分享文案
-- 资源类型：支持单曲链接与歌单链接
-- 批量流程：多条输入解析、结果去重、识别取消与部分结果保留、并发下载、取消/暂停/恢复
-- 下载：单曲在主窗口内联选择目录、重命名、格式（`mp3/m4a/wav/flac/aac`）并显示进度；批量页支持批量选择、并发、暂停/恢复和取消
-- 歌词：`--lyric` 下载 `.lrc` 文件并嵌入音频标签
-- 下载管理：每页 50 条历史，支持状态与多关键词组合筛选、页码导航、失败重试、打开目录、删除记录及全部筛选结果 CSV 导出
-- 搜索下载：直接搜索歌名/歌手名，选中后立即进入单曲检测
-- 用户歌单：登录后浏览歌单，选中后立即进入批量下载
-- 依赖降级：未安装 `ffmpeg` 时自动回退 `mp3` 并限制转码选项
-- 主题：Material Design 浅色/深色主题切换
-- 系统托盘：最小化到托盘，下载完成通知
-- 剪贴板检测：自动检测剪贴板中的网易云链接
-- 窗口记忆：主窗口位置和大小持久化
-- 日志与诊断：GUI 默认记录 WARNING 以上信息；诊断中心支持日志预览、API/CDN 检测、打开日志目录和脱敏报告导出
-- CLI 日志：默认 WARNING，支持 `--verbose`/`--debug` 按需输出详细信息
-- 网络代理：软件设置支持 HTTP/SOCKS5 与可选认证；SOCKS5 默认由代理端解析域名
+- 登录：终端 ASCII 二维码扫码登录，自动保存 MUSIC_U 凭证
+- 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词选项 → 进度条下载（p 暂停 c 取消）
+- 搜索：按歌名/歌手名搜索并直接下载
+- 我的歌单：登录后浏览歌单，选中即进入批量流程
+- 批量：多行粘贴 → 并发识别（歌单自动展开、去重）→ 键盘多选 → 并发下载（p 全部暂停 / r 恢复 / c 取消）→ 失败项重试
+- 歌词：下载 `.lrc` 并嵌入 MP3/M4A/FLAC 标签
+- 下载历史：分页浏览、状态筛选、关键词搜索、失败重试、打开目录、删除、筛选结果 CSV 导出（防公式注入）
+- 设置：下载目录、检测/下载超时、重试次数、并发上限、HTTP/SOCKS5 代理
+- 诊断：API/CDN 连通性检测、脱敏日志、诊断报告导出；主菜单可检查新版本
+- 格式：mp3/m4a/wav/flac/aac；未安装 ffmpeg 时自动回退保存源格式
 
 ## 2. 环境准备
 
-建议开发环境：`Python 3.10+`
+建议 Python 3.10+。
 
 ```bash
 python3 -m pip install -e ".[dev]"
 ```
 
-如果要做格式转换（例如 `m4a -> mp3/wav/flac`），还需要安装 `ffmpeg`。
-
-## 3. 启动方式
-
-### GUI
+如需格式转换（如 m4a → mp3/wav/flac）还需安装 ffmpeg：
 
 ```bash
-python3 -m music_fetch.main
+# macOS
+brew install ffmpeg
+# Windows
+winget install Gyan.FFmpeg
 ```
 
-或双击 `start_windows.bat`（Windows）/ `start_mac.command`（macOS）。
+## 3. 使用方式
 
-### CLI
+### 交互界面（TUI）
+
+```bash
+python3 -m music_fetch.app
+# 或安装后直接：
+music-fetch
+```
+
+进入主菜单后按数字选择功能，常用按键：
+
+| 场景 | 按键 |
+| --- | --- |
+| 下载中 | `p` 暂停/继续，`c` 取消 |
+| 批量下载中 | `p` 全部暂停，`r` 全部恢复，`c` 取消 |
+| 批量多选 | `空格` 勾选，`回车` 确认，`Esc` 取消 |
+| 多行粘贴 | 粘贴后按 `Esc` + `回车` 提交 |
+| 任意界面 | `Ctrl+C` 返回/退出 |
+
+登录时终端会显示二维码，用网易云音乐 App 扫码并在手机上确认即可；若终端显示异常，也可以打开提示中给出的链接扫码。
+
+### 脚本模式（CLI）
 
 ```bash
 music-fetch --url "https://music.163.com/song?id=33894312"
@@ -88,7 +86,7 @@ music-fetch \
   --verbose
 ```
 
-CLI 代理示例（密码通过环境变量传入，避免出现在进程参数中）：
+CLI 代理示例（密码通过环境变量传入）：
 
 ```bash
 MUSIC_FETCH_PROXY_PASSWORD="proxy-password" music-fetch \
@@ -115,13 +113,8 @@ python3 build.py --clean
 推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows + macOS 版本并上传到 GitHub Release：
 
 ```bash
-<<<<<<< HEAD
-git tag v2.0.0
-git push origin v2.0.0
-=======
-git tag v1.15.0
-git push origin v1.15.0
->>>>>>> 9576023 (feat: release v1.15.0 with CLI playlist concurrency and CSV safety)
+git tag v3.0.0
+git push origin v3.0.0
 ```
 
 ## 5. 错误码
@@ -142,59 +135,45 @@ git push origin v1.15.0
 
 | 路径 | 职责 |
 | --- | --- |
-| `music_fetch/main.py` | GUI 主入口，负责登录态检查、输入分析、搜索/歌单快捷路由、单曲流程和批量页入口。 |
-| `music_fetch/dialogs.py` | 通用 GUI 对话框（单曲确认、下载选项、依赖管理、软件设置）和输入校验。 |
-| `music_fetch/batch_dialogs.py` | 批量识别与批量下载界面，包含失败项重试、CSV 导出和并发下载调度。 |
-| `music_fetch/batch_results.py` | 批量结果纯逻辑：失败项筛选、状态汇总、失败原因聚合、CSV 文本生成。 |
-| `music_fetch/csv_utils.py` | 共享 CSV 安全工具：电子表格公式注入防护（历史与批量导出复用）。 |
-| `music_fetch/workers.py` | 后台 QThread：单曲识别、批量识别、下载执行（含暂停/恢复/取消）。 |
-| `music_fetch/api.py` | 网易云接口层：链接解析、cookie 处理、登录校验、歌曲/歌单/账号/歌词 API。 |
+| `music_fetch/app.py` | 入口路由：无参数进入 TUI，带参数走脚本模式 CLI。 |
+| `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/批量/历史/设置/诊断。 |
+| `music_fetch/tui_utils.py` | TUI 组件：菜单、确认、键盘多选、二维码渲染、表格与进度辅助。 |
+| `music_fetch/download_runner.py` | 线程下载任务：进度快照、暂停/恢复/取消（替换原 QThread worker）。 |
+| `music_fetch/batch_inspect.py` | 批量识别纯逻辑：混合输入解析、歌单展开、去重、并发检测与取消。 |
+| `music_fetch/batch_download.py` | 批量下载调度：并发上限、逐行状态、历史记录、全部暂停/恢复/取消与结果摘要。 |
+| `music_fetch/api.py` | 网易云接口层：链接解析、cookie、登录校验、歌曲/歌单/账号/搜索/歌词/QR 登录 API。 |
 | `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码、歌词嵌入。 |
-| `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，GUI 和 CLI 共享。 |
-| `music_fetch/cli.py` | CLI 命令行入口，支持单曲/播放列表下载、`--lyric`/`--verbose`/`--debug`。 |
-| `music_fetch/__init__.py` | 包外观层，重新导出公共 API。 |
-| `music_fetch/batch_models.py` | 批量数据模型（`BatchDetectRow`）和格式化工具。 |
-| `music_fetch/gui_styles.py` | 基于 qt-material 的应用级浅/深色设计系统，统一卡片、控件、按钮角色和状态反馈。 |
-| `music_fetch/dialog_login.py` | 登录对话框：内嵌网页扫码登录、cookie 提取与校验，以及 WebEngine 生命周期清理。 |
-| `music_fetch/dialog_progress.py` | 单曲下载进度对话框：进度条、暂停/恢复、取消。 |
-| `music_fetch/dialog_manager.py` | 下载管理对话框：历史检索/分页、CSV 导出、文件操作、失败重试。 |
-| `music_fetch/dialog_batch_settings.py` | 批量运行时设置对话框：超时/重试/并发参数调整。 |
-| `music_fetch/version_check.py` | GitHub API 版本检查：获取最新 release/tag。 |
-| `music_fetch/combo_utils.py` | `QComboBox` 构建、取值和就近选择辅助。 |
-| `music_fetch/app_settings.py` | 全局常量：版本号、默认路径、超时/重试/并发范围、URL 匹配规则。 |
+| `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，TUI 和 CLI 共享。 |
+| `music_fetch/cli.py` | 脚本模式 CLI：单曲/歌单下载、`--lyric`/`--concurrency`/代理/日志参数。 |
+| `music_fetch/network.py` | 统一网络传输：直连、HTTP/SOCKS5 代理、认证、远程 DNS。 |
+| `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、去重。 |
+| `music_fetch/batch_models.py` | 批量数据模型与格式化工具。 |
+| `music_fetch/batch_results.py` | 批量结果纯逻辑：失败筛选、状态汇总、失败原因聚合、安全 CSV 生成。 |
 | `music_fetch/app_stores.py` | 本地持久化：登录会话、下载历史。 |
-| `music_fetch/app_logging.py` | 日志路径、日志初始化和敏感值脱敏。 |
-| `music_fetch/diagnostics.py` | 诊断核心：日志尾部读取、二次脱敏、API/CDN 探针和报告生成。 |
-| `music_fetch/dialog_diagnostics.py` | GUI 诊断中心：异步网络检测、日志预览、目录打开和报告导出。 |
-| `music_fetch/network.py` | 统一网络传输：直连、HTTP/SOCKS5 代理、认证、远程 DNS 和 urllib 兼容响应。 |
-| `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、歌单/歌曲来源提示和去重。 |
-| `music_fetch/download_tasks.py` | 下载任务状态模型与最新任务快照。 |
-| `music_fetch/download_retry.py` | 下载管理中失败任务重试的状态判断和目标格式推断。 |
-| `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、安全 CSV 字段生成与公式注入防护。 |
-| `music_fetch/error_texts.py` | 错误码到用户友好提示的映射。 |
-| `music_fetch/ui_texts.py` | GUI 用户可见文案集中管理。 |
-| `music_fetch/search_dialog.py` | 搜索对话框：按关键词搜索歌曲并下载。 |
-| `music_fetch/playlist_dialog.py` | 用户歌单对话框：浏览登录用户的歌单并一键下载。 |
-| `music-fetch` | macOS/Linux CLI 包装脚本。 |
-| `start_mac.command` | macOS 双击启动 GUI 脚本。 |
-| `start_windows.bat` | Windows 双击启动 GUI 脚本。 |
-| `pyproject.toml` | Python 项目元数据、依赖声明（`PySide6`、`mutagen`、`qt-material`、`requests[socks]`）。 |
-| `tests/` | 437 个单元/回归测试。 |
-| `CHANGELOG.md` | 唯一版本历史来源。 |
-| `ROADMAP.md` | 版本规划与后续技术债方向。 |
+| `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、分页、安全 CSV 导出。 |
+| `music_fetch/download_tasks.py` / `download_retry.py` | 任务状态模型与失败重试判断。 |
+| `music_fetch/diagnostics.py` | 诊断核心：日志尾部、脱敏、API/CDN 探针与报告生成。 |
+| `music_fetch/version_check.py` | GitHub API 版本检查。 |
+| `music_fetch/app_settings.py` / `app_logging.py` | 全局常量与日志体系。 |
+| `music_fetch/ui_texts.py` / `error_texts.py` | 共享文案与错误码到用户提示的映射。 |
+| `music-fetch` | macOS/Linux CLI 包装脚本（无参数进入 TUI）。 |
+| `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
+| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`qrcode`、`requests[socks]`）。 |
+| `tests/` | 322 个单元/回归测试（全部可在无显示环境运行）。 |
+| `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 
 ## 7. 测试
 
 ```bash
 python3 -m pytest tests/ -q
+python3 -m mypy music_fetch/ --strict
 ```
 
 ## 8. 日志与排障
 
 - 默认日志：`~/.config/music-fetch/logs/music-fetch.log`
-- GUI 和 CLI 共用日志体系；GUI 默认 WARNING，CLI 可通过 `--verbose`/`--debug` 调整
-- 日志不会打印完整 `MUSIC_U` 值（已脱敏）
-- 主界面“诊断中心”可查看最近 WARNING/ERROR、运行网络检测并导出脱敏报告
+- 日志不会打印完整 `MUSIC_U` 值与代理密码（已脱敏）
+- 主菜单“诊断中心”可查看运行环境、API/CDN 连通性、最近告警并导出脱敏报告
 
 ## 9. 合规说明
 

@@ -10,9 +10,9 @@ elif command -v python3 >/dev/null 2>&1; then
 fi
 
 if [[ -z "${PYTHON_BIN}" ]]; then
-  echo "Python 3 is required to run music-fetch CLI." >&2
+  echo "Python 3 is required to run music-fetch." >&2
   exit 1
 fi
 
 cd "$SCRIPT_DIR"
-exec "$PYTHON_BIN" -m music_fetch.cli "$@"
+exec "$PYTHON_BIN" -m music_fetch.app "$@"

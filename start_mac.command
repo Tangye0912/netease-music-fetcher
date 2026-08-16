@@ -17,8 +17,8 @@ if [[ -z "${PYTHON_BIN}" ]]; then
   exit 1
 fi
 
-if ! "$PYTHON_BIN" music_fetch/main.py; then
+if ! "$PYTHON_BIN" -m music_fetch.app; then
   echo
-  echo "启动失败，请检查依赖后重试（例如：$PYTHON_BIN -m pip install PySide6）。"
+  echo "启动失败，请检查依赖后重试（例如：$PYTHON_BIN -m pip install -e .）。"
   read -r -p "按回车键退出..."
 fi

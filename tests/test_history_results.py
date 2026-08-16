@@ -7,6 +7,7 @@ from music_fetch.history_results import (
     HISTORY_CSV_FIELDS,
     build_download_history_csv,
     filter_download_history,
+    paginate_download_history,
 )
 
 
@@ -72,6 +73,38 @@ class HistoryCsvTests(unittest.TestCase):
         self.assertEqual(parsed["song_name"], "'+SUM(A1:A2)")
         self.assertEqual(parsed["filename"], "'@payload.mp3")
         self.assertEqual(parsed["error_code"], "'-cmd")
+
+
+class PaginationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.records = [_record(str(i), f"Song {i}", f"/tmp/song-{i}.mp3") for i in range(125)]
+
+    def test_first_page_returns_first_50(self):
+        page_records, total_pages, clamped = paginate_download_history(self.records, 0)
+        self.assertEqual(len(page_records), 50)
+        self.assertEqual(total_pages, 3)
+        self.assertEqual(clamped, 0)
+        self.assertEqual(page_records[0].song_id, "0")
+
+    def test_last_page_has_25_records(self):
+        page_records, total_pages, clamped = paginate_download_history(self.records, 2)
+        self.assertEqual(len(page_records), 25)
+        self.assertEqual(total_pages, 3)
+        self.assertEqual(clamped, 2)
+
+    def test_out_of_range_page_clamps_to_last_page(self):
+        _page_records, _total_pages, clamped = paginate_download_history(self.records, 99)
+        self.assertEqual(clamped, 2)
+
+    def test_negative_page_clamps_to_zero(self):
+        _page_records, _total_pages, clamped = paginate_download_history(self.records, -5)
+        self.assertEqual(clamped, 0)
+
+    def test_empty_records_returns_zero_pages(self):
+        page_records, total_pages, clamped = paginate_download_history([], 0)
+        self.assertEqual(page_records, [])
+        self.assertEqual(total_pages, 0)
+        self.assertEqual(clamped, 0)
 
 
 if __name__ == "__main__":

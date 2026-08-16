@@ -6,8 +6,9 @@ from __future__ import annotations
 import csv
 from io import StringIO
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
+from music_fetch.app_settings import DOWNLOAD_HISTORY_PAGE_SIZE
 from music_fetch.app_stores import DownloadRecord
 from music_fetch.csv_utils import safe_csv_text
 import music_fetch.ui_texts as T
@@ -56,6 +57,27 @@ def filter_download_history(
     return filtered
 
 
+def paginate_download_history(
+    records: Sequence[DownloadRecord],
+    page: int,
+    page_size: int = DOWNLOAD_HISTORY_PAGE_SIZE,
+) -> tuple[list[DownloadRecord], int, int]:
+    """Return (page_records, total_pages, clamped_page) for a 0-based page.
+
+    The page is clamped into the last valid page so callers can safely render
+    after a refresh/deletion shrinks the result set.
+    """
+    size = max(1, int(page_size))
+    total_records = len(records)
+    total_pages = (total_records + size - 1) // size
+    if total_pages:
+        clamped = min(max(int(page), 0), total_pages - 1)
+    else:
+        clamped = 0
+    start = clamped * size
+    return list(records[start:start + size]), total_pages, clamped
+
+
 def build_download_history_csv(records: Iterable[DownloadRecord]) -> str:
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=HISTORY_CSV_FIELDS, lineterminator="\n")
@@ -81,4 +103,5 @@ __all__ = [
     "HISTORY_CSV_FIELDS",
     "build_download_history_csv",
     "filter_download_history",
+    "paginate_download_history",
 ]

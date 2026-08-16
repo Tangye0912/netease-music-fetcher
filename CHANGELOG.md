@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## v3.0.0 (2026-08-16)
+
+### Added
+
+- **纯终端应用（TUI）**：新增 `music_fetch/app.py` 入口路由与 `music_fetch/tui.py` 交互界面——无参数启动进入键盘菜单，覆盖单曲、搜索、歌单、批量、历史、设置、诊断与版本检查。
+- **终端扫码登录**：`api.py` 新增 `fetch_qr_unikey`/`build_qr_login_url`/`poll_qr_login_status`，TUI 用 ASCII 二维码展示并轮询登录状态；已对真实网易云接口验证 800/801/802/803 状态码映射。
+- **键盘多选与进度控制**：批量识别结果用勾选式列表多选（空格/回车/Esc）；单曲与批量下载进度条支持 `p` 暂停、`r` 恢复、`c` 取消。
+- 新增 `download_runner.py`（线程下载任务，替换 QThread `DownloadWorker`）、`batch_inspect.py`（批量识别纯逻辑）、`batch_download.py`（批量下载调度）、`tui_utils.py`（TUI 组件）。
+- `history_results.py` 新增 `paginate_download_history` 分页纯函数。
+
+### Changed
+
+- **移除 Qt 层**：删除 `main.py`、`dialogs.py`、`batch_dialogs.py`、`dialog_*.py`、`search_dialog.py`、`playlist_dialog.py`、`gui_styles.py`、`workers.py`、`combo_utils.py` 等 13 个模块及 12 个 Qt 测试文件，共约 6000 行。
+- 依赖改为 `mutagen`、`prompt-toolkit`、`qrcode`、`requests[socks]`；移除 PySide6、qt-material、WebEngine。
+- 入口脚本：`music-fetch`（无参数进 TUI、带参数走 CLI）、`start_mac.command`/`start_windows.bat` 改为启动 TUI；`pyproject.toml` 入口指向 `music_fetch.app:main`。
+- `ui_texts.py` 精简为剩余模块实际使用的文案；`music_fetch/__init__.py` 公开 API 补入 QR 登录与下载运行器。
+- PyInstaller spec：入口改为 `music_fetch/app.py`、`console=True`，hiddenimports 更新为 prompt_toolkit/qrcode。
+
+### Fixed
+
+- 修复 v2.1.0 发布时 README.md 残留 3 行 git 冲突标记（`<<<<<<<`/`=======`/`>>>>>>>`）的问题（本次 README 整体重写）。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（322 通过，14 个参数化子测试通过）——全部测试可在无显示环境运行。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（26 个源文件零错误）。
+- 打包验证：PyInstaller 单文件产物 185MB → 13MB，冻结二进制完成 CLI 帮助与 TUI 主菜单冒烟。
+- 交互冒烟：pty 下验证主菜单、下载历史、单曲检测未登录提示等流程。
+
 ## v2.1.0 (2026-08-06)
 
 ### Added

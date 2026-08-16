@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Pure data models and formatting helpers shared by batch workers, dialogs, and tests.
-
-Extracted from music_fetch.workers.py to reduce module size and break import cycles.
+Pure data models and formatting helpers shared by the batch detect/download
+flow, the TUI, and tests.
 """
 
 from __future__ import annotations
