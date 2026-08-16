@@ -775,7 +775,9 @@ def fetch_qr_unikey(timeout: int = 10) -> str:
         "Referer": "https://music.163.com/",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    status, body = perform_json_post(QR_UNIKEY_API, {"type": "1"}, headers, timeout=timeout)
+    # type=3 is the modern client type; type=1 sessions get rejected with
+    # code 8821 once the user confirms the scan on their phone.
+    status, body = perform_json_post(QR_UNIKEY_API, {"type": "3"}, headers, timeout=timeout)
     if status != 200 or body.get("code") != 200:
         raise MusicFetchError(
             ErrorCode.NETWORK_ERROR,
@@ -796,13 +798,19 @@ def build_qr_login_url(unikey: str) -> str:
 def poll_qr_login_status(unikey: str, timeout: int = 10) -> QrLoginPollResult:
     """Poll the QR login status endpoint once.
 
-    Verified against the live API: 800 expired, 801 waiting for scan,
-    802 scanned and awaiting confirmation, 803 success (cookie included).
+    Uses the modern client flow (POST, type=3), verified against the live
+    API: 800 expired, 801 waiting for scan, 802 scanned and awaiting
+    confirmation, 803 success (cookie included).
     """
-    url = f"{QR_CHECK_API}?key={parse.quote(unikey)}&type=1"
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/"}
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Referer": "https://music.163.com/",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
     try:
-        status, body = perform_json_get(url, headers, timeout=timeout)
+        status, body = perform_json_post(
+            QR_CHECK_API, {"key": unikey, "type": "3"}, headers, timeout=timeout,
+        )
     except MusicFetchError as err:
         logger.warning("QR login check failed. unikey=%s code=%s message=%s", unikey, err.code, err.message)
         return QrLoginPollResult(status=QR_STATUS_ERROR, message=err.message)
