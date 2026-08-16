@@ -28,12 +28,16 @@ class AppRoutingTests(unittest.TestCase):
 
 
 class RenderQrAsciiTests(unittest.TestCase):
-    def test_renders_block_art_with_border(self):
+    def test_renders_compact_half_block_art(self):
         art = render_qr_ascii("https://music.163.com/login?codekey=abc123")
         lines = art.splitlines()
-        self.assertGreater(len(lines), 20)
-        self.assertIn("██", art)
-        # Every line must be the same width (block chars are 2 columns each).
+        # Half-block rendering: two module rows per line — must fit a
+        # normal 80-column terminal without resizing (bili-hardcore style).
+        self.assertLessEqual(len(lines), 20)
+        self.assertGreater(len(lines), 5)
+        self.assertLessEqual(len(lines[0]), 40)
+        self.assertTrue(any(char in art for char in ("▀", "▄", "█")))
+        # Every line must be the same width.
         widths = {len(line) for line in lines}
         self.assertEqual(len(widths), 1)
 

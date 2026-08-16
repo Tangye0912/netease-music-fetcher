@@ -141,16 +141,52 @@ def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "")
 
 
 def render_qr_ascii(text: str) -> str:
-    """Render a QR code as a block-character string (dark modules filled)."""
+    """Render a compact QR code that fits a normal terminal window.
+
+    Uses the same trick as bili-hardcore (Dense1x2): half-block characters
+    (▀▄█) squeeze two module rows into one line, with a minimal 1-module
+    quiet zone — a typical login QR is about 31 columns by 16 lines.
+
+    On a real terminal the QR gets a black background so it stays
+    scannable on both light and dark themes.
+    """
+    import sys
+
     import qrcode
 
-    qr = qrcode.QRCode(border=2)
+    qr = qrcode.QRCode(border=1)
     qr.add_data(text)
     qr.make(fit=True)
-    matrix = qr.get_matrix()
+    modcount = qr.modules_count
+    border = qr.border
+    tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    # Light module = white block on black background; dark module = black
+    # cell.  This keeps contrast correct on any terminal theme.
+    codes = ["█", "▄", "▀", " "] if tty else [" ", "▀", "▄", "█"]
+
+    def module_at(x: int, y: int) -> int:
+        if tty and border and max(x, y) >= modcount + border:
+            return 1
+        if min(x, y) < 0 or max(x, y) >= modcount:
+            return 0
+        return int(qr.modules[x][y])
+
     lines: list[str] = []
-    for row in matrix:
-        lines.append("".join("██" if cell else "  " for cell in row))
+    for row in range(-border, modcount + border, 2):
+        if tty:
+            if row < modcount + border - 1:
+                line = "\x1b[48;5;232m"
+            else:
+                line = ""
+            line += "\x1b[38;5;255m"
+        else:
+            line = ""
+        for col in range(-border, modcount + border):
+            pos = module_at(row, col) + (module_at(row + 1, col) << 1)
+            line += codes[pos]
+        if tty:
+            line += "\x1b[0m"
+        lines.append(line)
     return "\n".join(lines)
 
 
