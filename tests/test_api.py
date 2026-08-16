@@ -478,32 +478,33 @@ class QrLoginTests(unittest.TestCase):
             "https://music.163.com/login?codekey=abc123",
         )
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_fetch_qr_unikey_success(self, post_mock):
-        post_mock.return_value = (200, {"code": 200, "unikey": "key-1"})
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_fetch_qr_unikey_success(self, eapi_mock):
+        eapi_mock.return_value = (200, {"code": 200, "unikey": "key-1"})
         from music_fetch.api import fetch_qr_unikey
         self.assertEqual(fetch_qr_unikey(timeout=5), "key-1")
-        _url, payload, _headers = post_mock.call_args.args
+        path, payload = eapi_mock.call_args.args[0], eapi_mock.call_args.args[1]
+        self.assertEqual(path, "/api/login/qrcode/unikey")
         self.assertEqual(payload, {"type": "3"})
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_fetch_qr_unikey_rejects_non_200(self, post_mock):
-        post_mock.return_value = (502, {"code": 502})
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_fetch_qr_unikey_rejects_non_200(self, eapi_mock):
+        eapi_mock.return_value = (502, {"code": 502})
         from music_fetch.api import fetch_qr_unikey
         with self.assertRaises(MusicFetchError) as ctx:
             fetch_qr_unikey(timeout=5)
         self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_fetch_qr_unikey_rejects_missing_unikey(self, post_mock):
-        post_mock.return_value = (200, {"code": 200})
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_fetch_qr_unikey_rejects_missing_unikey(self, eapi_mock):
+        eapi_mock.return_value = (200, {"code": 200})
         from music_fetch.api import fetch_qr_unikey
         with self.assertRaises(MusicFetchError) as ctx:
             fetch_qr_unikey(timeout=5)
         self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_poll_status_mapping(self, post_mock):
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_poll_status_mapping(self, eapi_mock):
         from music_fetch.api import poll_qr_login_status
         cases = [
             ((200, {"code": 800, "message": "二维码已过期"}), QR_STATUS_EXPIRED),
@@ -513,22 +514,23 @@ class QrLoginTests(unittest.TestCase):
         ]
         for payload, expected_status in cases:
             with self.subTest(payload=payload):
-                post_mock.return_value = payload
+                eapi_mock.return_value = payload
                 result = poll_qr_login_status("key-1", timeout=5)
                 self.assertEqual(result.status, expected_status)
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_poll_status_uses_modern_type3_post(self, post_mock):
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_poll_status_uses_eapi_type3(self, eapi_mock):
         from music_fetch.api import poll_qr_login_status
-        post_mock.return_value = (200, {"code": 801, "message": "等待扫码"})
+        eapi_mock.return_value = (200, {"code": 801, "message": "等待扫码"})
         poll_qr_login_status("key-1", timeout=5)
-        _url, payload, _headers = post_mock.call_args.args
+        path, payload = eapi_mock.call_args.args[0], eapi_mock.call_args.args[1]
+        self.assertEqual(path, "/api/login/qrcode/client/login")
         self.assertEqual(payload, {"key": "key-1", "type": "3"})
 
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_poll_status_success_returns_cookie(self, post_mock):
+    @mock.patch("music_fetch.eapi.eapi_request")
+    def test_poll_status_success_returns_cookie(self, eapi_mock):
         from music_fetch.api import poll_qr_login_status
-        post_mock.return_value = (
+        eapi_mock.return_value = (
             200,
             {"code": 803, "message": "授权成功", "cookie": "MUSIC_U=abc; __csrf=def"},
         )
@@ -536,8 +538,8 @@ class QrLoginTests(unittest.TestCase):
         self.assertEqual(result.status, QR_STATUS_SUCCESS)
         self.assertEqual(result.cookie, "MUSIC_U=abc; __csrf=def")
 
-    @mock.patch("music_fetch.api.perform_json_post", side_effect=MusicFetchError("NETWORK_ERROR", "timeout"))
-    def test_poll_status_network_error_becomes_error_status(self, _post_mock):
+    @mock.patch("music_fetch.eapi.eapi_request", side_effect=MusicFetchError("NETWORK_ERROR", "timeout"))
+    def test_poll_status_network_error_becomes_error_status(self, _eapi_mock):
         from music_fetch.api import poll_qr_login_status
         result = poll_qr_login_status("key-1", timeout=5)
         self.assertEqual(result.status, QR_STATUS_ERROR)

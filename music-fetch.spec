@@ -32,6 +32,10 @@ a = Analysis(
         'prompt_toolkit.cursor_shapes',
         # QR code rendering for terminal login.
         'qrcode',
+        # eapi transport encryption (QR login status checks).
+        'Crypto',
+        'Crypto.Cipher',
+        'Crypto.Cipher.AES',
         # Proxy support loads Requests and its SOCKS transport at runtime.
         'requests',
         'socks',

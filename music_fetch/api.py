@@ -749,9 +749,12 @@ def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
 
 # ── QR code login ───────────────────────────────────────────────
 
-QR_UNIKEY_API = "https://music.163.com/api/login/qrcode/unikey"
+# Modern client flow: both calls go through the encrypted eapi transport.
+# The plain /api/ endpoints get rejected by risk control with code 8821
+# once the user confirms the scan.
+QR_UNIKEY_PATH = "/api/login/qrcode/unikey"
+QR_CHECK_PATH = "/api/login/qrcode/client/login"
 QR_LOGIN_URL_TEMPLATE = "https://music.163.com/login?codekey={unikey}"
-QR_CHECK_API = "https://music.163.com/api/login/qrcode/client/login"
 
 QR_STATUS_WAITING = "waiting"
 QR_STATUS_SCANNED = "scanned"
@@ -769,15 +772,12 @@ class QrLoginPollResult:
 
 
 def fetch_qr_unikey(timeout: int = 10) -> str:
-    """Request a fresh QR-login unikey from NetEase."""
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Referer": "https://music.163.com/",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
+    """Request a fresh QR-login unikey from NetEase (modern eapi flow)."""
+    from music_fetch.eapi import eapi_request
+
     # type=3 is the modern client type; type=1 sessions get rejected with
     # code 8821 once the user confirms the scan on their phone.
-    status, body = perform_json_post(QR_UNIKEY_API, {"type": "3"}, headers, timeout=timeout)
+    status, body = eapi_request(QR_UNIKEY_PATH, {"type": "3"}, timeout=timeout)
     if status != 200 or body.get("code") != 200:
         raise MusicFetchError(
             ErrorCode.NETWORK_ERROR,
@@ -798,19 +798,14 @@ def build_qr_login_url(unikey: str) -> str:
 def poll_qr_login_status(unikey: str, timeout: int = 10) -> QrLoginPollResult:
     """Poll the QR login status endpoint once.
 
-    Uses the modern client flow (POST, type=3), verified against the live
+    Uses the modern encrypted eapi client flow, verified against the live
     API: 800 expired, 801 waiting for scan, 802 scanned and awaiting
     confirmation, 803 success (cookie included).
     """
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Referer": "https://music.163.com/",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
+    from music_fetch.eapi import eapi_request
+
     try:
-        status, body = perform_json_post(
-            QR_CHECK_API, {"key": unikey, "type": "3"}, headers, timeout=timeout,
-        )
+        status, body = eapi_request(QR_CHECK_PATH, {"key": unikey, "type": "3"}, timeout=timeout)
     except MusicFetchError as err:
         logger.warning("QR login check failed. unikey=%s code=%s message=%s", unikey, err.code, err.message)
         return QrLoginPollResult(status=QR_STATUS_ERROR, message=err.message)
