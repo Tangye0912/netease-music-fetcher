@@ -7,15 +7,15 @@
 ### Added
 
 - **纯终端应用（TUI）**：新增 `music_fetch/app.py` 入口路由与 `music_fetch/tui.py` 交互界面——无参数启动进入键盘菜单，覆盖单曲、搜索、歌单、批量、历史、设置、诊断与版本检查。
-- **终端扫码登录**：`api.py` 新增 `fetch_qr_unikey`/`build_qr_login_url`/`poll_qr_login_status`，TUI 用 ASCII 二维码展示并轮询登录状态；已对真实网易云接口验证 800/801/802/803 状态码映射。
+- **终端扫码登录**：`api.py` 新增 `fetch_qr_unikey`/`build_qr_login_url`/`poll_qr_login_status`，TUI 用紧凑半块字符二维码展示（bili-hardcore 风格，约 35 列 x 18 行，无需调整终端窗口）并轮询登录状态；登录支持扫码与手动粘贴 Cookie 两种方式。
 - **键盘多选与进度控制**：批量识别结果用勾选式列表多选（空格/回车/Esc）；单曲与批量下载进度条支持 `p` 暂停、`r` 恢复、`c` 取消。
-- 新增 `download_runner.py`（线程下载任务，替换 QThread `DownloadWorker`）、`batch_inspect.py`（批量识别纯逻辑）、`batch_download.py`（批量下载调度）、`tui_utils.py`（TUI 组件）。
+- 新增 `download_runner.py`（线程下载任务，替换 QThread `DownloadWorker`）、`batch_inspect.py`（批量识别纯逻辑）、`batch_download.py`（批量下载调度）、`tui_utils.py`（TUI 组件）、`eapi.py`（AES-128-ECB 加密的 /eapi/ 传输层）。
 - `history_results.py` 新增 `paginate_download_history` 分页纯函数。
 
 ### Changed
 
 - **移除 Qt 层**：删除 `main.py`、`dialogs.py`、`batch_dialogs.py`、`dialog_*.py`、`search_dialog.py`、`playlist_dialog.py`、`gui_styles.py`、`workers.py`、`combo_utils.py` 等 13 个模块及 12 个 Qt 测试文件，共约 6000 行。
-- 依赖改为 `mutagen`、`prompt-toolkit`、`qrcode`、`requests[socks]`；移除 PySide6、qt-material、WebEngine。
+- 依赖改为 `mutagen`、`prompt-toolkit`、`pycryptodome`、`qrcode`、`requests[socks]`；移除 PySide6、qt-material、WebEngine。
 - 入口脚本：`music-fetch`（无参数进 TUI、带参数走 CLI）、`start_mac.command`/`start_windows.bat` 改为启动 TUI；`pyproject.toml` 入口指向 `music_fetch.app:main`。
 - `ui_texts.py` 精简为剩余模块实际使用的文案；`music_fetch/__init__.py` 公开 API 补入 QR 登录与下载运行器。
 - PyInstaller spec：入口改为 `music_fetch/app.py`、`console=True`，hiddenimports 更新为 prompt_toolkit/qrcode。
@@ -23,6 +23,8 @@
 ### Fixed
 
 - 修复 v2.1.0 发布时 README.md 残留 3 行 git 冲突标记（`<<<<<<<`/`=======`/`>>>>>>>`）的问题（本次 README 整体重写）。
+- 修复扫码确认后返回 8821 的问题：QR 登录改走加密 eapi 传输 + type=3（真机联调中发现并修正）；8821 风控拦截改为明确提示并引导手动 Cookie 登录。
+- 修复 TUI 默认值输入被追加拼接、二维码过大需调整终端窗口等问题（真机联调中发现）。
 
 ### QA
 

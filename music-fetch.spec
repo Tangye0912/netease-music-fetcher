@@ -4,6 +4,8 @@
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 a = Analysis(
@@ -40,7 +42,7 @@ a = Analysis(
         'requests',
         'socks',
         'urllib3.contrib.socks',
-    ],
+    ] + collect_submodules('prompt_toolkit.filters'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
