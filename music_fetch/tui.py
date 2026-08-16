@@ -26,6 +26,7 @@ from music_fetch.api import (
     MusicFetchError,
     QR_STATUS_ERROR,
     QR_STATUS_EXPIRED,
+    QR_STATUS_REJECTED,
     QR_STATUS_SCANNED,
     QR_STATUS_SUCCESS,
     QR_STATUS_WAITING,
@@ -207,7 +208,18 @@ class TuiApp:
     # ── login ─────────────────────────────────────────────────────
 
     def _screen_login(self) -> None:
-        U.print_header("登录")
+        while True:
+            U.print_header("登录")
+            options = ["扫码登录（终端显示二维码）", "手动粘贴 Cookie（浏览器登录后复制）", "返回"]
+            choice = U.menu("登录方式", options)
+            if choice == len(options):
+                return
+            if choice == 1:
+                self._login_with_qr()
+                return
+            self._login_with_cookie()
+
+    def _login_with_qr(self) -> None:
         try:
             unikey = fetch_qr_unikey(timeout=self.session.detect_timeout_sec)
         except MusicFetchError as err:
@@ -227,23 +239,15 @@ class TuiApp:
                 U.print_warning("已取消登录。")
                 return
             if poll.status == QR_STATUS_SUCCESS:
-                cookie = normalize_cookie(poll.cookie)
-                if "MUSIC_U=" not in cookie:
-                    U.print_error("登录返回的数据里没有 MUSIC_U 凭证，请重试。")
-                    return
-                self.session.cookie = cookie
-                self.session.remember_login = True
-                self.session_store.save(self.session)
-                self._nickname = ""
-                try:
-                    profile = fetch_account_profile(cookie, timeout=self.session.detect_timeout_sec)
-                    self._nickname = profile.nickname
-                except MusicFetchError:
-                    pass
-                U.print_success(f"登录成功：{self._nickname or '已登录'}")
+                self._accept_cookie(poll.cookie)
                 return
             if poll.status == QR_STATUS_EXPIRED:
                 U.print_error("二维码已过期，请重新发起登录。")
+                return
+            if poll.status == QR_STATUS_REJECTED:
+                U.print_error("登录被网易云风控拦截（8821）：该账号暂不支持此扫码登录方式。")
+                U.print_info("建议改用“手动粘贴 Cookie”登录：在浏览器打开 music.163.com 登录后，")
+                U.print_info("从开发者工具里复制 MUSIC_U cookie，粘贴到本工具即可。")
                 return
             if poll.status == QR_STATUS_ERROR:
                 U.print_warning(f"网络异常：{poll.message}，继续等待...")
@@ -255,6 +259,37 @@ class TuiApp:
                 last_status = poll.status
             time.sleep(2)
         U.print_error("登录超时，请重新发起。")
+
+    def _login_with_cookie(self) -> None:
+        U.print_info("获取方法：浏览器打开 https://music.163.com 并登录，然后：")
+        U.print_info("  Chrome/Edge：F12 → Application → Cookies → music.163.com → 复制 MUSIC_U 的值")
+        U.print_info("  Safari：偏好设置 → 高级 → 显示开发者菜单 → 开发 → 显示网页检查器 → 储存 → Cookie")
+        U.print_info("粘贴完整 Cookie 内容（MUSIC_U=xxx; __csrf=yyy）也可以。")
+        raw = U.ask("粘贴 Cookie（回车返回）")
+        if not raw:
+            return
+        cookie = normalize_cookie(raw)
+        if "MUSIC_U=" not in cookie:
+            U.print_error("Cookie 里没有 MUSIC_U 凭证，请检查后重试。")
+            return
+        self._accept_cookie(cookie)
+
+    def _accept_cookie(self, cookie: str) -> None:
+        cookie = normalize_cookie(cookie)
+        if "MUSIC_U=" not in cookie:
+            U.print_error("登录返回的数据里没有 MUSIC_U 凭证，请重试。")
+            return
+        U.print_info("校验登录状态...")
+        try:
+            profile = fetch_account_profile(cookie, timeout=self.session.detect_timeout_sec)
+        except MusicFetchError as err:
+            U.print_error(f"登录校验失败：{user_error_message(err.code, err.message)}")
+            return
+        self.session.cookie = cookie
+        self.session.remember_login = True
+        self.session_store.save(self.session)
+        self._nickname = profile.nickname
+        U.print_success(f"登录成功：{self._nickname or '已登录'}")
 
     def _require_login(self) -> bool:
         if self.session.cookie:

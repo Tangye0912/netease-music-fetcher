@@ -8,6 +8,7 @@ from music_fetch.api import (
     ErrorCode,
     QR_STATUS_ERROR,
     QR_STATUS_EXPIRED,
+    QR_STATUS_REJECTED,
     QR_STATUS_SCANNED,
     QR_STATUS_SUCCESS,
     QR_STATUS_WAITING,
@@ -511,6 +512,7 @@ class QrLoginTests(unittest.TestCase):
             ((200, {"code": 801, "message": "等待扫码"}), QR_STATUS_WAITING),
             ((200, {"code": 802, "message": "等待确认"}), QR_STATUS_SCANNED),
             ((200, {"code": 804, "message": "bad"}), QR_STATUS_ERROR),
+            ((200, {"code": 8821, "message": "请切换其他登录方式或升级新版本再试"}), QR_STATUS_REJECTED),
         ]
         for payload, expected_status in cases:
             with self.subTest(payload=payload):

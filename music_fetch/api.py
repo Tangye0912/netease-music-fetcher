@@ -760,6 +760,7 @@ QR_STATUS_WAITING = "waiting"
 QR_STATUS_SCANNED = "scanned"
 QR_STATUS_SUCCESS = "success"
 QR_STATUS_EXPIRED = "expired"
+QR_STATUS_REJECTED = "rejected"
 QR_STATUS_ERROR = "error"
 
 
@@ -822,4 +823,8 @@ def poll_qr_login_status(unikey: str, timeout: int = 10) -> QrLoginPollResult:
         return QrLoginPollResult(status=QR_STATUS_WAITING, message=message)
     if code == 800:
         return QrLoginPollResult(status=QR_STATUS_EXPIRED, message=message or "二维码不存在或已过期")
+    if code == 8821:
+        # NetEase risk control: this login method was rejected for the
+        # account at confirmation time.  Surface it as a distinct status.
+        return QrLoginPollResult(status=QR_STATUS_REJECTED, message=message)
     return QrLoginPollResult(status=QR_STATUS_ERROR, message=f"code={code} {message}".strip())

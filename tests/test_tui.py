@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 import music_fetch.tui
+from music_fetch.api import MusicFetchError
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.tui import TuiApp
@@ -62,6 +63,28 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(TuiApp._filter_label("all"), "全部")
         self.assertEqual(TuiApp._filter_label("failed"), "失败")
         self.assertEqual(TuiApp._filter_label("weird"), "weird")
+
+    @mock.patch("music_fetch.tui.fetch_account_profile")
+    def test_accept_cookie_saves_session(self, profile_mock):
+        from music_fetch.api import AccountProfile
+        profile_mock.return_value = AccountProfile(
+            user_id=1, nickname="测试用户", avatar_url="", vip_type=0, is_vip=False,
+        )
+        self.app._accept_cookie("MUSIC_U=abc; __csrf=def")
+        self.assertIn("MUSIC_U=abc", self.app.session.cookie)
+        self.assertEqual(self.app._nickname, "测试用户")
+        self.assertIn("MUSIC_U=abc", self.session_store.load().cookie)
+
+    @mock.patch("music_fetch.tui.fetch_account_profile")
+    def test_accept_cookie_rejects_missing_music_u(self, profile_mock):
+        self.app._accept_cookie("__csrf=only")
+        profile_mock.assert_not_called()
+        self.assertEqual(self.app.session.cookie, "")
+
+    @mock.patch("music_fetch.tui.fetch_account_profile", side_effect=MusicFetchError("AUTH_EXPIRED", "expired"))
+    def test_accept_cookie_rejects_invalid_cookie(self, _profile_mock):
+        self.app._accept_cookie("MUSIC_U=bad")
+        self.assertEqual(self.app.session.cookie, "")
 
     def test_add_record_persists_history(self):
         self.app._add_record(
