@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 import music_fetch.tui
-from music_fetch.api import MusicFetchError
+from music_fetch.api import QR_STATUS_REJECTED, MusicFetchError, QrLoginPollResult
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.tui import TuiApp
@@ -67,6 +67,42 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(TuiApp._filter_label("all"), "全部")
         self.assertEqual(TuiApp._filter_label("failed"), "失败")
         self.assertEqual(TuiApp._filter_label("weird"), "weird")
+
+    @mock.patch("music_fetch.tui.U.menu")
+    @mock.patch("music_fetch.tui.U.print_header")
+    def test_login_menu_offers_only_qr_and_return(self, header_mock, menu_mock):
+        menu_mock.return_value = 2
+        self.app._screen_login()
+        header_mock.assert_called_once_with("登录")
+        menu_mock.assert_called_once_with("登录方式", ["扫码登录（终端显示二维码）", "返回"])
+        self.assertFalse(hasattr(self.app, "_login_with_browser"))
+        self.assertFalse(hasattr(self.app, "_login_with_cookie"))
+
+    @mock.patch("music_fetch.tui.U.menu")
+    @mock.patch("music_fetch.tui.U.print_header")
+    def test_login_menu_routes_to_qr(self, header_mock, menu_mock):
+        menu_mock.return_value = 1
+        with mock.patch.object(self.app, "_login_with_qr") as qr_mock:
+            self.app._screen_login()
+        qr_mock.assert_called_once_with()
+
+    @mock.patch("music_fetch.tui.poll_qr_login_status")
+    @mock.patch("music_fetch.tui.U.render_qr_ascii", return_value="<QR>")
+    @mock.patch("music_fetch.tui.build_qr_login_url", return_value="https://example.invalid/qr")
+    @mock.patch("music_fetch.tui.fetch_qr_unikey", return_value="unikey-1")
+    def test_qr_rejection_does_not_ask_for_browser_cookie(
+        self, unikey_mock, url_mock, qr_mock, poll_mock
+    ):
+        poll_mock.return_value = QrLoginPollResult(status=QR_STATUS_REJECTED, message="risk")
+        error_messages: list[str] = []
+        info_messages: list[str] = []
+        with mock.patch("music_fetch.tui.U.print_error", side_effect=error_messages.append), \
+             mock.patch("music_fetch.tui.U.print_info", side_effect=info_messages.append):
+            self.app._login_with_qr()
+        self.assertIn("风控", error_messages[0])
+        self.assertFalse(any("手动粘贴 Cookie" in text for text in info_messages))
+        self.assertFalse(any("开发者工具" in text for text in info_messages))
+        self.assertTrue(any("不会读取或要求你从浏览器复制 Cookie" in text for text in info_messages))
 
     @mock.patch("music_fetch.tui.fetch_account_profile")
     def test_accept_cookie_saves_session(self, profile_mock):

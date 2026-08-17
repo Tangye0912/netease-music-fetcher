@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- **登录只保留扫码入口**：移除“从浏览器导入 Cookie”和“手动粘贴 Cookie”两条路径。用户不需要提前登录网易云网页，也不要求从浏览器获取或复制任何 Cookie。
+- **CLI 复用 TUI 登录态**：脚本模式默认读取 `music-fetch` 扫码登录后保存的会话凭证，不再默认要求用户准备 `cookies.txt`；`--cookie-file` 仅作为显式覆盖保留。
+- **8821 风控提示修正**：扫码被网易云风控拦截时只提示稍后重试/更换网络，不再引导用户去浏览器取 Cookie。
+
+### Removed
+
+- 删除 `music_fetch/browser_cookies.py` 及 Chrome/Edge 本地 Cookie 解密逻辑。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（338 通过，15 个参数化子测试通过）。
+- 类型检查：`python3 -m mypy music_fetch/ --strict`（27 个源文件零错误）。
+
 ## v3.0.0 (2026-08-16)
 
 ### Added

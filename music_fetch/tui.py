@@ -208,16 +208,12 @@ class TuiApp:
     # ── login ─────────────────────────────────────────────────────
 
     def _screen_login(self) -> None:
-        while True:
-            U.print_header("登录")
-            options = ["扫码登录（终端显示二维码）", "手动粘贴 Cookie（浏览器登录后复制）", "返回"]
-            choice = U.menu("登录方式", options)
-            if choice == len(options):
-                return
-            if choice == 1:
-                self._login_with_qr()
-                return
-            self._login_with_cookie()
+        U.print_header("登录")
+        options = ["扫码登录（终端显示二维码）", "返回"]
+        choice = U.menu("登录方式", options)
+        if choice == 2:
+            return
+        self._login_with_qr()
 
     def _login_with_qr(self) -> None:
         try:
@@ -245,9 +241,8 @@ class TuiApp:
                 U.print_error("二维码已过期，请重新发起登录。")
                 return
             if poll.status == QR_STATUS_REJECTED:
-                U.print_error("登录被网易云风控拦截（8821）：该账号暂不支持此扫码登录方式。")
-                U.print_info("建议改用“手动粘贴 Cookie”登录：在浏览器打开 music.163.com 登录后，")
-                U.print_info("从开发者工具里复制 MUSIC_U cookie，粘贴到本工具即可。")
+                U.print_error("登录被网易云风控拦截（8821），当前账号暂时无法完成扫码登录。")
+                U.print_info("请稍后重试，或切换网络环境后再次扫码；本工具不会读取或要求你从浏览器复制 Cookie。")
                 return
             if poll.status == QR_STATUS_ERROR:
                 U.print_warning(f"网络异常：{poll.message}，继续等待...")
@@ -259,20 +254,6 @@ class TuiApp:
                 last_status = poll.status
             time.sleep(2)
         U.print_error("登录超时，请重新发起。")
-
-    def _login_with_cookie(self) -> None:
-        U.print_info("获取方法：浏览器打开 https://music.163.com 并登录，然后：")
-        U.print_info("  Chrome/Edge：F12 → Application → Cookies → music.163.com → 复制 MUSIC_U 的值")
-        U.print_info("  Safari：偏好设置 → 高级 → 显示开发者菜单 → 开发 → 显示网页检查器 → 储存 → Cookie")
-        U.print_info("粘贴完整 Cookie 内容（MUSIC_U=xxx; __csrf=yyy）也可以。")
-        raw = U.ask("粘贴 Cookie（回车返回）")
-        if not raw:
-            return
-        cookie = normalize_cookie(raw)
-        if "MUSIC_U=" not in cookie:
-            U.print_error("Cookie 里没有 MUSIC_U 凭证，请检查后重试。")
-            return
-        self._accept_cookie(cookie)
 
     def _accept_cookie(self, cookie: str) -> None:
         cookie = normalize_cookie(cookie)

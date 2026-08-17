@@ -14,7 +14,7 @@
 
 ### 1.2 核心能力
 
-- 登录：终端 ASCII 二维码扫码登录，自动保存 MUSIC_U 凭证
+- 登录：终端 ASCII 二维码扫码登录，自动保存凭证；不读取浏览器数据，也不需要提前登录网易云网页
 - 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词选项 → 进度条下载（p 暂停 c 取消）
 - 搜索：按歌名/歌手名搜索并直接下载
 - 我的歌单：登录后浏览歌单，选中即进入批量流程
@@ -62,9 +62,11 @@ music-fetch
 | 多行粘贴 | 粘贴后按 `Esc` + `回车` 提交 |
 | 任意界面 | `Ctrl+C` 返回/退出 |
 
-登录时终端会显示二维码，用网易云音乐 App 扫码并在手机上确认即可；若终端显示异常，也可以打开提示中给出的链接扫码。
+登录时终端会显示二维码，用网易云音乐 App 扫码并在手机上确认即可；若终端显示异常，也可以打开提示中给出的链接扫码。登录不依赖浏览器 Cookie，用户无需提前在网页登录网易云。
 
 ### 脚本模式（CLI）
+
+首次使用请先运行 `music-fetch`（不带参数）完成一次扫码登录；脚本模式会默认复用该登录状态，不需要准备 Cookie 文件。
 
 ```bash
 music-fetch --url "https://music.163.com/song?id=33894312"
@@ -76,7 +78,6 @@ music-fetch --url "https://music.163.com/song?id=33894312"
 music-fetch \
   --url "https://music.163.com/song?id=33894312" \
   --out "./downloads" \
-  --cookie-file "~/.config/music-fetch/cookies.txt" \
   --format mp3 \
   --rename "自定义文件名" \
   --retry 3 \
@@ -85,6 +86,8 @@ music-fetch \
   --lyric \
   --verbose
 ```
+
+`--cookie-file` 仍作为高级覆盖项保留；正常使用无需指定，CLI 会优先复用扫码登录保存的会话。
 
 CLI 代理示例（密码通过环境变量传入）：
 
@@ -144,12 +147,12 @@ git push origin v3.0.0
 | `music_fetch/api.py` | 网易云接口层：链接解析、cookie、登录校验、歌曲/歌单/账号/搜索/歌词/QR 登录 API。 |
 | `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码、歌词嵌入。 |
 | `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，TUI 和 CLI 共享。 |
-| `music_fetch/cli.py` | 脚本模式 CLI：单曲/歌单下载、`--lyric`/`--concurrency`/代理/日志参数。 |
+| `music_fetch/cli.py` | 脚本模式 CLI：默认复用 TUI 登录态，单曲/歌单下载、`--lyric`/`--concurrency`/代理/日志参数。 |
 | `music_fetch/network.py` | 统一网络传输：直连、HTTP/SOCKS5 代理、认证、远程 DNS。 |
 | `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、去重。 |
 | `music_fetch/batch_models.py` | 批量数据模型与格式化工具。 |
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败筛选、状态汇总、失败原因聚合、安全 CSV 生成。 |
-| `music_fetch/app_stores.py` | 本地持久化：登录会话、下载历史。 |
+| `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史；CLI 默认复用同一会话。 |
 | `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、分页、安全 CSV 导出。 |
 | `music_fetch/download_tasks.py` / `download_retry.py` | 任务状态模型与失败重试判断。 |
 | `music_fetch/diagnostics.py` | 诊断核心：日志尾部、脱敏、API/CDN 探针与报告生成。 |
@@ -159,7 +162,7 @@ git push origin v3.0.0
 | `music-fetch` | macOS/Linux CLI 包装脚本（无参数进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
 | `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`qrcode`、`requests[socks]`）。 |
-| `tests/` | 322 个单元/回归测试（全部可在无显示环境运行）。 |
+| `tests/` | 338 个单元/回归测试与 15 个参数化子测试（全部可在无显示环境运行）。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 
 ## 7. 测试

@@ -5,8 +5,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import music_fetch.cli
 import music_fetch
+import music_fetch.cli
+from music_fetch.app_settings import SESSION_FILE
+from music_fetch.app_stores import AppSession
 
 
 class BuildParserTests(unittest.TestCase):
@@ -55,6 +57,60 @@ class BuildParserTests(unittest.TestCase):
         # Default stays at 1.
         defaults = parser.parse_args(["--url", "42"])
         self.assertEqual(defaults.concurrency, 1)
+
+    def test_cookie_file_defaults_to_tui_session(self):
+        parser = music_fetch.cli.build_parser()
+        args = parser.parse_args(["--url", "42"])
+        self.assertIsNone(args.cookie_file)
+
+
+class CliSessionCookieTests(unittest.TestCase):
+    @mock.patch("music_fetch.cli.run_download_pipeline")
+    @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.SessionStore")
+    def test_run_download_reuses_tui_session(self, session_store_mock, meta_mock, pipeline_mock):
+        session_store_mock.return_value.load.return_value = AppSession(
+            cookie="MUSIC_U=session; __csrf=session-csrf"
+        )
+        from music_fetch.pipeline import DownloadPipelineResult
+
+        meta_mock.return_value = ("Session Song", 120000, None, None, None)
+        captured: dict[str, str] = {}
+
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
+            captured["cookie"] = cookie
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"data")
+            return DownloadPipelineResult(
+                output_path=output_path,
+                file_size=4,
+                candidate=music_fetch.PlayableCandidate(
+                    media_url="https://example.com/song.mp3",
+                    duration_ms=120000,
+                    level="standard",
+                    encode_type="mp3",
+                ),
+                source_format="mp3",
+            )
+
+        pipeline_mock.side_effect = fake_pipeline
+        with tempfile.TemporaryDirectory() as tmp:
+            result = music_fetch.cli.run_download(
+                song_url="https://music.163.com/song?id=42",
+                out_dir=Path(tmp) / "out",
+            )
+            self.assertTrue(result.output_path.exists())
+        self.assertEqual(captured["cookie"], "MUSIC_U=session; __csrf=session-csrf")
+        session_store_mock.assert_called_once_with(SESSION_FILE)
+
+    @mock.patch("music_fetch.cli.SessionStore")
+    def test_missing_session_tells_user_to_scan_first(self, session_store_mock):
+        session_store_mock.return_value.load.return_value = AppSession()
+        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+            music_fetch.cli._load_cli_cookie(None)
+        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+        self.assertIn("music-fetch（不带参数）", ctx.exception.message)
+        self.assertIn("扫码登录", ctx.exception.message)
 
 
 class RunDownloadTests(unittest.TestCase):

@@ -265,16 +265,16 @@ def _pick_first_digit(values: Optional[list[str]]) -> Optional[str]:
 def load_cookie(cookie_file: Path) -> str:
     logger.info("Loading cookie file from %s", cookie_file)
     if not cookie_file.exists():
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file not found: {cookie_file}. Please export a valid MUSIC_U cookie.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file not found: {cookie_file}. Run music-fetch without arguments to sign in with QR first.")
     try:
         raw = cookie_file.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file is corrupted (invalid encoding): {cookie_file}.")
     cookie = normalize_cookie(raw)
     if not cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file is empty. Please refresh your cookie.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file is empty. Run music-fetch without arguments to sign in with QR first.")
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file does not include MUSIC_U. Please re-export from browser.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file does not include MUSIC_U. Run music-fetch without arguments to sign in with QR first.")
     fields = parse_cookie_fields(cookie)
     logger.info("Cookie loaded. has_music_u=%s has_csrf=%s music_u_mask=%s", "MUSIC_U" in fields, "__csrf" in fields, mask_value(fields.get("MUSIC_U", "")))
     return cookie
@@ -381,12 +381,12 @@ def check_login_status(cookie: str, timeout: int = 10) -> bool:
 
 def fetch_account_profile(cookie: str, timeout: int = 10) -> AccountProfile:
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login cookie missing MUSIC_U.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login credential is missing MUSIC_U.")
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
     code = body.get("code")
     if status in (401, 403) or code in (301, 302, 401, 403):
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please login again.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
     if status != 200 or code != 200:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Unexpected account API response: status={status}, code={code}")
     profile = body.get("profile") or {}
@@ -427,13 +427,13 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
         status, body = perform_json_post(PLAYER_URL_API, payload, headers, timeout=timeout)
         logger.info("Requested playable url. song_id=%s level=%s encode=%s status=%s api_code=%s", song_id, level, encode_type, status, body.get("code"))
         if status in (401, 403):
-            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
         if status >= 500:
             last_network_message = f"Server error from NetEase: HTTP {status}."
             continue
         code = body.get("code")
         if code in (301, 302, 401, 403):
-            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
         if code != 200:
             last_network_message = str(body.get("message") or f"Unexpected API code={code}")
             continue
@@ -539,10 +539,10 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
         if first_page_body is None:
             first_page_body = body
         if status in (401, 403):
-            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
         code = body.get("code")
         if code in (301, 302, 401, 403):
-            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Please refresh cookie.")
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
         if status != 200 or code != 200:
             message = str(body.get("message") or f"Unexpected playlist API response: status={status}, code={code}")
             raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
@@ -686,7 +686,7 @@ class UserPlaylist:
 def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
     """Fetch the logged-in user's playlists."""
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login cookie missing MUSIC_U.")
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login credential is missing MUSIC_U.")
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     # First get user ID from account status
     status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)

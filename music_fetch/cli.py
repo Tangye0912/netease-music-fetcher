@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 from music_fetch.api import (
-    DEFAULT_COOKIE_FILE,
     DEFAULT_OUT_DIR,
     DownloadResult,
     MusicFetchError,
@@ -26,6 +25,7 @@ from music_fetch.api import (
     fetch_song_metadata,
     load_cookie,
     logger,
+    normalize_cookie,
     parse_input_resource,
     parse_song_id,
 )
@@ -33,17 +33,38 @@ from music_fetch.app_logging import default_log_path, setup_logging
 from music_fetch.app_settings import (
     DEFAULT_CLI_CONCURRENCY,
     MAX_CLI_CONCURRENCY,
+    SESSION_FILE,
     SUPPORTED_AUDIO_FORMATS,
 )
+from music_fetch.app_stores import SessionStore
 from music_fetch.audio import resolve_output_path
 from music_fetch.pipeline import run_download_pipeline
 from music_fetch.network import ProxyConfigError, configure_proxy
 
 
+def _load_cli_cookie(cookie_file: Optional[Path]) -> str:
+    """Load the CLI credential from an explicit cookie file or the TUI session.
+
+    The normal flow is: run `music-fetch` without arguments, scan the QR code
+    once in the TUI, then reuse that saved session in script mode.  Users
+    never need to visit the NetEase website or copy cookies from a browser.
+    """
+    if cookie_file is not None:
+        return load_cookie(cookie_file)
+    session = SessionStore(SESSION_FILE).load()
+    cookie = normalize_cookie(session.cookie)
+    if "MUSIC_U=" not in cookie:
+        raise MusicFetchError(
+            "AUTH_EXPIRED",
+            "尚未登录：请先运行 music-fetch（不带参数）完成扫码登录，登录状态会自动保存并供脚本模式复用。",
+        )
+    return cookie
+
+
 def run_download(
     song_url: str,
     out_dir: Path,
-    cookie_file: Path,
+    cookie_file: Optional[Path] = None,
     timeout: int = 30,
     out_format: str = "mp3",
     rename: Optional[str] = None,
@@ -52,7 +73,7 @@ def run_download(
 ) -> DownloadResult:
     logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
-    cookie = load_cookie(cookie_file)
+    cookie = _load_cli_cookie(cookie_file)
     song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
     output_path = resolve_output_path(
         out_dir=out_dir,
@@ -93,7 +114,7 @@ def run_download(
 def run_playlist_download(
     playlist_url: str,
     out_dir: Path,
-    cookie_file: Path,
+    cookie_file: Optional[Path] = None,
     timeout: int = 30,
     out_format: str = "mp3",
     retry_count: int = 1,
@@ -101,7 +122,7 @@ def run_playlist_download(
     concurrency: int = DEFAULT_CLI_CONCURRENCY,
 ) -> list[DownloadResult]:
     _, playlist_id = parse_input_resource(playlist_url)
-    cookie = load_cookie(cookie_file)
+    cookie = _load_cli_cookie(cookie_file)
     song_ids = fetch_playlist_song_ids(playlist_id, cookie, timeout=timeout)
     total = len(song_ids)
     max_workers = max(1, min(int(concurrency), MAX_CLI_CONCURRENCY))
@@ -191,8 +212,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Output directory (default: {DEFAULT_OUT_DIR}).",
     )
     parser.add_argument(
-        "--cookie-file", default=DEFAULT_COOKIE_FILE,
-        help=f"Cookie file path (default: {DEFAULT_COOKIE_FILE}).",
+        "--cookie-file", default=None,
+        help="Optional cookie file path. By default, reuse the session saved by TUI QR login.",
     )
     parser.add_argument(
         "--timeout", type=int, default=30,
@@ -269,7 +290,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         resource_type, resource_id = parse_input_resource(args.url)
         out_dir = Path(args.out).expanduser()
-        cookie_file = Path(args.cookie_file).expanduser()
+        cookie_file = Path(args.cookie_file).expanduser() if args.cookie_file else None
 
         if resource_type == "playlist":
             results = run_playlist_download(
