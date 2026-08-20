@@ -8,6 +8,10 @@ import shutil
 from typing import Optional, Sequence
 
 from prompt_toolkit import ANSI, prompt, print_formatted_text
+from prompt_toolkit.application import Application
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.shortcuts import checkboxlist_dialog
 from prompt_toolkit.styles import Style
 from wcwidth import wcswidth
@@ -216,6 +220,20 @@ def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> 
         print_warning(f"请输入 1-{len(options)} 之间的数字。")
 
 
+def _bind_escape_to_cancel(dialog: Application[list[str] | None]) -> None:
+    """Make Esc close a Prompt Toolkit multi-select with a canceled result."""
+    bindings = KeyBindings()
+
+    @bindings.add(Keys.Escape, eager=True)
+    def _cancel(event: KeyPressEvent) -> None:
+        event.app.exit(result=None)
+
+    if dialog.key_bindings is None:
+        dialog.key_bindings = bindings
+    else:
+        dialog.key_bindings = merge_key_bindings([dialog.key_bindings, bindings])
+
+
 def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "") -> list[int]:
     """Open a checkbox multi-select dialog; return the selected indexes.
 
@@ -228,7 +246,7 @@ def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "")
     labels = [label for label, _checked in entries]
     values: list[tuple[str, str]] = [(label, label) for label in labels]
     default_values = [label for label, checked in entries if checked]
-    selected: list[str] | None = checkboxlist_dialog(
+    dialog = checkboxlist_dialog(
         title=title,
         text=text,
         values=values,
@@ -236,7 +254,9 @@ def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "")
         ok_text="确定",
         cancel_text="取消",
         style=DIALOG_STYLE,
-    ).run()
+    )
+    _bind_escape_to_cancel(dialog)
+    selected: list[str] | None = dialog.run()
     if selected is None:
         return []
     return [index for index, label in enumerate(labels) if label in selected]

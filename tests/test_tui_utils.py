@@ -2,6 +2,10 @@ import re
 import unittest
 from unittest import mock
 
+from prompt_toolkit.application import Application
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
+
 from music_fetch import tui_utils
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -90,6 +94,31 @@ class ThemeRenderingTests(unittest.TestCase):
             tui_utils.print_warning("注意")
             tui_utils.print_error("失败")
         self.assertEqual([_plain(line) for line in captured], ["✓ 完成", "! 注意", "✕ 失败"])
+
+
+class MultiselectKeyBindingTests(unittest.TestCase):
+    def test_escape_exits_dialog_with_canceled_result(self) -> None:
+        dialog: Application[list[str] | None] = mock.Mock(spec=Application)
+        dialog.key_bindings = KeyBindings()
+        tui_utils._bind_escape_to_cancel(dialog)
+
+        bindings = dialog.key_bindings.get_bindings_for_keys((Keys.Escape,))
+        self.assertEqual(len(bindings), 1)
+        event = mock.Mock()
+        bindings[0].handler(event)
+        event.app.exit.assert_called_once_with(result=None)
+
+    def test_multiselect_installs_escape_binding_before_run(self) -> None:
+        dialog: Application[list[str] | None] = mock.Mock(spec=Application)
+        dialog.key_bindings = KeyBindings()
+        dialog.run.return_value = None
+        with mock.patch("music_fetch.tui_utils.checkboxlist_dialog", return_value=dialog):
+            self.assertEqual(tui_utils.multiselect("选择", [("歌曲", True)]), [])
+        self.assertEqual(
+            len(dialog.key_bindings.get_bindings_for_keys((Keys.Escape,))),
+            1,
+        )
+        dialog.run.assert_called_once_with()
 
 
 if __name__ == "__main__":
