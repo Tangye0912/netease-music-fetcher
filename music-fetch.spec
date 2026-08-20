@@ -42,6 +42,17 @@ a = Analysis(
         'requests',
         'socks',
         'urllib3.contrib.socks',
+        # Browser login (browser_login.py) lazily imports websocket-client.
+        'websocket',
+        'websocket._core',
+        'websocket._abnf',
+        'websocket._handshake',
+        'websocket._http',
+        'websocket._socket',
+        'websocket._url',
+        'websocket._utils',
+        # wcwidth (CJK-safe table alignment in the TUI).
+        'wcwidth',
     ] + collect_submodules('prompt_toolkit.filters'),
     hookspath=[],
     hooksconfig={},

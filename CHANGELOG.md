@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.1.2 (2026-08-20)
+
+### Fixed
+
+- **CI 构建修复**：`test_pick_format_cancel_returns_none` 改为确定性测试（mock ffmpeg 状态与警告输出），不再因 CI 环境未装 ffmpeg 触发 `NoConsoleScreenBufferError`。
+- **无控制台健壮性**：TUI 的 `print_*` 输出在无交互控制台（CI、管道重定向、无头环境）时回退为普通 `print`，不再崩溃。
+- **PyInstaller 打包修复**：`music-fetch.spec` 补充 `websocket`（浏览器登录取 cookie 用，延迟导入易被 PyInstaller 漏掉）与 `wcwidth`（中文表格对齐）的 hiddenimports。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（370 通过，1 跳过，15 个参数化子测试通过）。
+- 类型检查：`python3 -m mypy music_fetch/ tests/`（60 文件零错误）。
+
 ## v3.1.1 (2026-08-20)
 
 ### Fixed

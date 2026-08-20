@@ -126,8 +126,11 @@ class TuiAppHelperTests(unittest.TestCase):
         with mock.patch("music_fetch.tui.U.ask", return_value="我的输入"):
             self.assertEqual(self.app._ask_with_cancel("提示", default="默认值"), "我的输入")
 
+    @mock.patch("music_fetch.tui.U.print_warning")
+    @mock.patch("music_fetch.tui.is_ffmpeg_available", return_value=False)
     @mock.patch("music_fetch.tui.U.menu", return_value=6)
-    def test_pick_format_cancel_returns_none(self, _menu_mock):
+    def test_pick_format_cancel_returns_none(self, _menu_mock, _ffmpeg_mock, _warning_mock):
+        # Deterministic regardless of whether ffmpeg is installed / console exists.
         self.assertIsNone(self.app._pick_format())
 
     def test_add_record_persists_history(self):

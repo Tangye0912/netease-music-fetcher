@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from typing import Optional, Sequence
 
@@ -22,20 +23,34 @@ def _ansi(color: str, text: str) -> str:
     return f"{color}{text}{COLOR_RESET}"
 
 
+_ANSI_STRIP_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _safe_print_formatted(text: str) -> None:
+    """Render prompt_toolkit formatted text; fall back to plain print when no
+    interactive console is available (CI runners, piped stdout, headless)."""
+    try:
+        print_formatted_text(ANSI(text))
+    except Exception:
+        # Strip ANSI escape codes for the plain-text fallback.
+        plain = _ANSI_STRIP_RE.sub("", text)
+        print(plain)
+
+
 def print_info(text: str) -> None:
-    print_formatted_text(ANSI(text))
+    _safe_print_formatted(text)
 
 
 def print_success(text: str) -> None:
-    print_formatted_text(ANSI(_ansi(COLOR_GREEN, text)))
+    _safe_print_formatted(_ansi(COLOR_GREEN, text))
 
 
 def print_error(text: str) -> None:
-    print_formatted_text(ANSI(_ansi(COLOR_RED, text)))
+    _safe_print_formatted(_ansi(COLOR_RED, text))
 
 
 def print_warning(text: str) -> None:
-    print_formatted_text(ANSI(_ansi(COLOR_YELLOW, text)))
+    _safe_print_formatted(_ansi(COLOR_YELLOW, text))
 
 
 def print_header(text: str) -> None:
@@ -45,7 +60,7 @@ def print_header(text: str) -> None:
 
 
 def clear_screen() -> None:
-    print_formatted_text(ANSI("\x1b[2J\x1b[H"))
+    _safe_print_formatted("\x1b[2J\x1b[H")
 
 
 def ask(message: str, default: str = "") -> str:
