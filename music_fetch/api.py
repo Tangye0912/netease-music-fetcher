@@ -33,7 +33,7 @@ import re
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 from urllib import error, parse, request
 
 from music_fetch.app_logging import get_logger, mask_value
@@ -752,8 +752,18 @@ def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
 # Modern client flow: both calls go through the encrypted eapi transport.
 # The plain /api/ endpoints get rejected by risk control with code 8821
 # once the user confirms the scan.
-QR_UNIKEY_PATH = "/api/login/qrcode/unikey"
-QR_CHECK_PATH = "/api/login/qrcode/client/login"
+# QR login transport. eapi (mobile, type=3) is the only flow the live server
+# currently accepts — weapi (web, type=1) was tried and rejected server-side
+# (all /weapi/* paths return an empty body; /api/ + weapi returns 参数错误),
+# so it is kept only as an experimental, non-default option.
+QR_TRANSPORT = "eapi"  # "eapi" (mobile, type=3) or "weapi" (web, type=1)
+# QR login is the mobile-client flow (type=3); presenting a matching NetEase
+# mobile app User-Agent keeps the client identity consistent so risk control
+# is less likely to reject the login with 8821 at the confirm step.
+NETEASE_MOBILE_UA = "NeteaseMusic/9.1.5 (Android 13; HUAWEI ALN-AL10; zh-cn)"
+QR_USE_MOBILE_UA = True  # set False to fall back to the desktop User-Agent
+QR_UNIKEY_PATH = "/login/qrcode/unikey"
+QR_CHECK_PATH = "/login/qrcode/client/login"
 QR_LOGIN_URL_TEMPLATE = "https://music.163.com/login?codekey={unikey}"
 
 QR_STATUS_WAITING = "waiting"
@@ -772,13 +782,31 @@ class QrLoginPollResult:
     message: str = ""
 
 
-def fetch_qr_unikey(timeout: int = 10) -> str:
-    """Request a fresh QR-login unikey from NetEase (modern eapi flow)."""
+def _qr_request(path: str, payload: dict[str, Any], timeout: int) -> tuple[int, dict[str, Any]]:
+    """POST a QR-login request through the configured transport.
+
+    eapi uses the mobile endpoints /eapi/api{path} with type=3; weapi uses
+    the web endpoints /weapi{path} with type=1.  The transport-specific
+    client type is injected here so callers stay transport-agnostic.
+    """
+    if QR_TRANSPORT == "weapi":
+        from music_fetch.weapi import weapi_request
+
+        return weapi_request(path, {**payload, "type": 1}, timeout=timeout)
     from music_fetch.eapi import eapi_request
 
-    # type=3 is the modern client type; type=1 sessions get rejected with
-    # code 8821 once the user confirms the scan on their phone.
-    status, body = eapi_request(QR_UNIKEY_PATH, {"type": "3"}, timeout=timeout)
+    user_agent = NETEASE_MOBILE_UA if QR_USE_MOBILE_UA else None
+    return eapi_request(
+        f"/api{path}",
+        {**payload, "type": "3"},
+        timeout=timeout,
+        user_agent=user_agent,
+    )
+
+
+def fetch_qr_unikey(timeout: int = 10) -> str:
+    """Request a fresh QR-login unikey from NetEase (eapi mobile flow)."""
+    status, body = _qr_request(QR_UNIKEY_PATH, {}, timeout=timeout)
     if status != 200 or body.get("code") != 200:
         raise MusicFetchError(
             ErrorCode.NETWORK_ERROR,
@@ -799,14 +827,14 @@ def build_qr_login_url(unikey: str) -> str:
 def poll_qr_login_status(unikey: str, timeout: int = 10) -> QrLoginPollResult:
     """Poll the QR login status endpoint once.
 
-    Uses the modern encrypted eapi client flow, verified against the live
-    API: 800 expired, 801 waiting for scan, 802 scanned and awaiting
-    confirmation, 803 success (cookie included).
+    Uses the eapi mobile flow (type=3).  Codes: 800 expired, 801 waiting
+    for scan, 802 scanned and awaiting confirmation, 803 success (cookie
+    included), 8821 risk-control rejection.
     """
-    from music_fetch.eapi import eapi_request
-
     try:
-        status, body = eapi_request(QR_CHECK_PATH, {"key": unikey, "type": "3"}, timeout=timeout)
+        status, body = _qr_request(
+            QR_CHECK_PATH, {"key": unikey}, timeout=timeout
+        )
     except MusicFetchError as err:
         logger.warning("QR login check failed. unikey=%s code=%s message=%s", unikey, err.code, err.message)
         return QrLoginPollResult(status=QR_STATUS_ERROR, message=err.message)

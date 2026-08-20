@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 APP_NAME = "music-fetch"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 PROJECT_GITHUB_URL = "https://github.com/Tangye0912/netease-music-fetcher"
 PROJECT_RELEASE_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/releases/latest"
 PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetcher/tags?per_page=1"
@@ -43,6 +43,12 @@ DEFAULT_CLI_CONCURRENCY = 1
 MAX_CLI_CONCURRENCY = 8
 DOWNLOAD_HISTORY_PAGE_SIZE = 50
 MAX_DOWNLOAD_HISTORY_RECORDS = 1000
+
+# QR login anti-hammering: poll the login-status endpoint slowly, and after a
+# risk-control rejection (8821) block new attempts for a while so users do not
+# self-inflict NetEase's "频繁操作" lockout (which can last 24h+).
+QR_POLL_INTERVAL_SEC = 5
+QR_REJECT_COOLDOWN_SEC = 1800  # 30 minutes
 
 NETEASE_LOGIN_URL = "https://music.163.com/#/login"
 UNKNOWN_SONG_NAME = "未知歌曲"

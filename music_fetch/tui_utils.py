@@ -8,6 +8,7 @@ from typing import Optional, Sequence
 
 from prompt_toolkit import ANSI, prompt, print_formatted_text
 from prompt_toolkit.shortcuts import checkboxlist_dialog
+from wcwidth import wcswidth
 
 COLOR_RESET = "\x1b[0m"
 COLOR_RED = "\x1b[31m"
@@ -68,7 +69,7 @@ def ask_required(message: str, default: str = "") -> str:
 
 def input_multiline(message: str) -> str:
     """Prompt for multi-line text (paste-friendly); Esc+Enter submits."""
-    return prompt(f"{message}（粘贴多行内容，按 Esc 后回车提交）\n", multiline=True)
+    return prompt(f"{message}（粘贴多行内容，完成后按 Esc 再回车提交；留空直接回车返回）\n", multiline=True)
 
 
 def ask_int(message: str, default: int, minimum: int, maximum: int) -> int:
@@ -190,35 +191,67 @@ def render_qr_ascii(text: str) -> str:
     return "\n".join(lines)
 
 
+def _display_width(text: str) -> int:
+    """Terminal display width (CJK wide chars count as 2)."""
+    try:
+        width = wcswidth(text)
+    except Exception:  # pragma: no cover - defensive
+        width = -1
+    return width if width >= 0 else len(text)
+
+
+def _truncate_to_width(text: str, max_width: int) -> str:
+    """Truncate *text* so its display width fits within *max_width*."""
+    out = ""
+    used = 0
+    for ch in text:
+        ch_width = _display_width(ch)
+        if used + ch_width > max_width:
+            break
+        out += ch
+        used += ch_width
+    return out
+
+
 def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = 100) -> None:
-    """Print a simple aligned text table with truncated cells."""
+    """Print a simple aligned text table with truncated cells.
+
+    Uses wcwidth so CJK full-width characters align correctly in a terminal.
+    """
     width = min(shutil.get_terminal_size((80, 24)).columns, max_width)
     columns = len(headers)
-    header_widths = [len(str(h)) for h in headers]
+    header_widths = [_display_width(str(h)) for h in headers]
     cell_widths = list(header_widths)
     for row in rows:
         for index, cell in enumerate(row):
             if index < columns:
-                cell_widths[index] = max(cell_widths[index], len(str(cell)))
-    # Shrink the widest columns so the total fits the terminal.
-    total = sum(cell_widths) + (columns - 1) * 3 + 2
+                cell_widths[index] = max(cell_widths[index], _display_width(str(cell)))
+    # Shrink the widest columns so the total fits the terminal.  Columns are
+    # joined by two spaces, so the rendered width is sum(cell_widths) + 2*(n-1).
+    total = sum(cell_widths) + (columns - 1) * 2
     while total > width and max(cell_widths) > 8:
         widest = max(range(columns), key=lambda i: cell_widths[i])
         cell_widths[widest] -= 1
-        total = sum(cell_widths) + (columns - 1) * 3 + 2
+        total = sum(cell_widths) + (columns - 1) * 2
+
+    def fmt_cell(cell: str, col_width: int) -> str:
+        disp = _display_width(cell)
+        if disp <= col_width:
+            return cell + " " * (col_width - disp)
+        body = _truncate_to_width(cell, max(col_width - 1, 1))
+        return body + "…" + " " * (col_width - _display_width(body) - 1)
 
     def fmt_row(cells: Sequence[str]) -> str:
         parts = []
         for index, cell in enumerate(cells):
             if index >= columns:
                 break
-            text = str(cell)
-            if len(text) > cell_widths[index]:
-                text = text[: max(cell_widths[index] - 1, 1)] + "…"
-            parts.append(text.ljust(cell_widths[index]))
+            parts.append(fmt_cell(str(cell), cell_widths[index]))
         return "  ".join(parts).rstrip()
 
-    print_info(fmt_row(headers))
+    # Header row is drawn in cyan + bold so the table reads clearly even in a
+    # plain terminal.
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, fmt_row(headers)))
     print_info("─" * min(total, width))
     for row in rows:
         print_info(fmt_row(row))

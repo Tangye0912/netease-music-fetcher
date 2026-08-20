@@ -64,8 +64,18 @@ def decrypt_eapi_response(body: str) -> dict[str, Any]:
         return json.loads(body)
 
 
-def eapi_request(path: str, payload: dict[str, Any], timeout: int = 10) -> tuple[int, dict[str, Any]]:
-    """POST an encrypted eapi request; returns (http_status, parsed_body)."""
+def eapi_request(
+    path: str,
+    payload: dict[str, Any],
+    timeout: int = 10,
+    user_agent: str | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """POST an encrypted eapi request; returns (http_status, parsed_body).
+
+    *user_agent* overrides the shared desktop User-Agent when a request must
+    present a different client identity (e.g. the mobile app UA for the QR
+    login flow).
+    """
     # Avoid a circular import at module top.
     from music_fetch.api import _perform_request
 
@@ -75,7 +85,7 @@ def eapi_request(path: str, payload: dict[str, Any], timeout: int = 10) -> tuple
         url,
         data=body.encode("utf-8"),
         headers={
-            "User-Agent": USER_AGENT,
+            "User-Agent": user_agent or USER_AGENT,
             "Referer": "https://music.163.com/",
             "Content-Type": "application/x-www-form-urlencoded",
         },

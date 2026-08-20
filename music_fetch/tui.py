@@ -24,20 +24,11 @@ from prompt_toolkit.shortcuts.progress_bar.base import ProgressBarCounter
 
 from music_fetch.api import (
     MusicFetchError,
-    QR_STATUS_ERROR,
-    QR_STATUS_EXPIRED,
-    QR_STATUS_REJECTED,
-    QR_STATUS_SCANNED,
-    QR_STATUS_SUCCESS,
-    QR_STATUS_WAITING,
     SUPPORTED_GUI_AUDIO_FORMATS,
-    build_qr_login_url,
     detect_song,
     fetch_account_profile,
-    fetch_qr_unikey,
     fetch_user_playlists,
     normalize_cookie,
-    poll_qr_login_status,
     search_songs,
 )
 from music_fetch.app_logging import default_log_path, setup_logging
@@ -142,36 +133,57 @@ class TuiApp:
             return self._nickname
         return "已登录"
 
+    def _validate_session_login(self) -> bool:
+        """Return True when a usable login exists; clear expired cookies.
+
+        An expired/invalid session cookie must not silently keep the menu
+        unlocked — the user has to re-login through the browser flow.
+        """
+        if not self.session.cookie:
+            return False
+        try:
+            profile = fetch_account_profile(self.session.cookie, timeout=6)
+            self._nickname = profile.nickname
+            return True
+        except MusicFetchError as err:
+            self._nickname = ""
+            if err.code == "AUTH_EXPIRED":
+                return False
+            # Transient network failure: keep the session and let individual
+            # operations surface the error instead of wrongly logging out.
+            return bool(self.session.cookie)
+
     def run(self) -> int:
-        # Warm up the nickname display without blocking the menu.
-        if self.session.cookie:
-            try:
-                profile = fetch_account_profile(self.session.cookie, timeout=6)
-                self._nickname = profile.nickname
-            except MusicFetchError:
-                self._nickname = ""
+        # Validate an existing session; an expired cookie locks the menu to login.
+        if not self._validate_session_login():
+            self.session.cookie = ""
+            self.session_store.save(self.session)
         while True:
             try:
                 U.clear_screen()
             except Exception:  # pragma: no cover - clear may fail on exotic terminals
                 pass
             U.print_header(f"{APP_NAME} v{APP_VERSION}")
-            U.print_info(
-                f"  登录：{self._login_label()}    代理：{self._proxy_label}    "
-                f"目录：{self.session.last_download_dir}    ffmpeg：{'可用' if is_ffmpeg_available() else '未安装'}"
-            )
-            options = [
-                MENU_SINGLE,
-                MENU_SEARCH,
-                MENU_PLAYLISTS,
-                MENU_BATCH,
-                MENU_HISTORY,
-                MENU_SETTINGS,
-                MENU_DIAGNOSTICS,
-                MENU_UPDATE,
-                MENU_LOGOUT if self.session.cookie else MENU_LOGIN,
-                MENU_QUIT,
-            ]
+            if self.session.cookie:
+                U.print_info(
+                    f"  登录：{self._login_label()}    代理：{self._proxy_label}    "
+                    f"目录：{self.session.last_download_dir}    ffmpeg：{'可用' if is_ffmpeg_available() else '未安装'}"
+                )
+                options = [
+                    MENU_SINGLE,
+                    MENU_SEARCH,
+                    MENU_PLAYLISTS,
+                    MENU_BATCH,
+                    MENU_HISTORY,
+                    MENU_SETTINGS,
+                    MENU_DIAGNOSTICS,
+                    MENU_UPDATE,
+                    MENU_LOGOUT,
+                    MENU_QUIT,
+                ]
+            else:
+                U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
+                options = [MENU_LOGIN, MENU_QUIT]
             try:
                 choice = U.menu("主菜单", options)
             except (KeyboardInterrupt, EOFError):
@@ -180,6 +192,10 @@ class TuiApp:
             label = options[choice - 1]
             if label == MENU_QUIT:
                 return 0
+            if not self.session.cookie:
+                if label == MENU_LOGIN:
+                    self._screen_login()
+                continue
             if label == MENU_SINGLE:
                 self._screen_single()
             elif label == MENU_SEARCH:
@@ -196,64 +212,36 @@ class TuiApp:
                 self._screen_diagnostics()
             elif label == MENU_UPDATE:
                 self._screen_check_update()
-            elif label in (MENU_LOGOUT, MENU_LOGIN):
-                if label == MENU_LOGOUT and U.confirm("确定退出当前账号？", default=True):
+            elif label == MENU_LOGOUT:
+                if U.confirm("确定退出当前账号？", default=True):
                     self.session.cookie = ""
                     self._nickname = ""
                     self.session_store.save(self.session)
                     U.print_success("已退出登录。")
-                else:
-                    self._screen_login()
 
     # ── login ─────────────────────────────────────────────────────
 
     def _screen_login(self) -> None:
         U.print_header("登录")
-        options = ["扫码登录（终端显示二维码）", "返回"]
-        choice = U.menu("登录方式", options)
-        if choice == 2:
-            return
-        self._login_with_qr()
+        self._login_with_browser()
 
-    def _login_with_qr(self) -> None:
+    def _login_with_browser(self) -> None:
+        from music_fetch.browser_login import BrowserLoginError, run_official_login
+
+        U.print_info("即将打开网易云音乐官网登录页（浏览器）...")
         try:
-            unikey = fetch_qr_unikey(timeout=self.session.detect_timeout_sec)
-        except MusicFetchError as err:
-            U.print_error(f"创建登录二维码失败：{user_error_message(err.code, err.message)}")
+            cookie = run_official_login(
+                timeout=300,
+                reuse_existing=False,
+                on_status=lambda message: U.print_info(message),
+            )
+        except BrowserLoginError as err:
+            U.print_error(str(err))
             return
-        url = build_qr_login_url(unikey)
-        U.print_info("请使用网易云音乐 App 扫描下方二维码登录：")
-        U.print_info(U.render_qr_ascii(url))
-        U.print_info(f"如果二维码无法显示，请用浏览器打开：{url}")
-        U.print_info("等待扫码...")
-        deadline = time.time() + 300
-        last_status = QR_STATUS_WAITING
-        while time.time() < deadline:
-            try:
-                poll = poll_qr_login_status(unikey, timeout=10)
-            except KeyboardInterrupt:
-                U.print_warning("已取消登录。")
-                return
-            if poll.status == QR_STATUS_SUCCESS:
-                self._accept_cookie(poll.cookie)
-                return
-            if poll.status == QR_STATUS_EXPIRED:
-                U.print_error("二维码已过期，请重新发起登录。")
-                return
-            if poll.status == QR_STATUS_REJECTED:
-                U.print_error("登录被网易云风控拦截（8821），当前账号暂时无法完成扫码登录。")
-                U.print_info("请稍后重试，或切换网络环境后再次扫码；本工具不会读取或要求你从浏览器复制 Cookie。")
-                return
-            if poll.status == QR_STATUS_ERROR:
-                U.print_warning(f"网络异常：{poll.message}，继续等待...")
-            elif poll.status != last_status:
-                if poll.status == QR_STATUS_SCANNED:
-                    U.print_info("已扫码，请在手机上确认授权...")
-                elif poll.status == QR_STATUS_WAITING:
-                    U.print_info("等待扫码...")
-                last_status = poll.status
-            time.sleep(2)
-        U.print_error("登录超时，请重新发起。")
+        except MusicFetchError as err:
+            U.print_error(user_error_message(err.code, err.message))
+            return
+        self._accept_cookie(cookie)
 
     def _accept_cookie(self, cookie: str) -> None:
         cookie = normalize_cookie(cookie)
@@ -268,6 +256,7 @@ class TuiApp:
             return
         self.session.cookie = cookie
         self.session.remember_login = True
+        self.session.qr_blocked_until = ""
         self.session_store.save(self.session)
         self._nickname = profile.nickname
         U.print_success(f"登录成功：{self._nickname or '已登录'}")
@@ -295,7 +284,7 @@ class TuiApp:
         try:
             result = detect_song(value, self.session.cookie, timeout=self.session.detect_timeout_sec)
         except MusicFetchError as err:
-            U.print_error(f"{err.code}: {user_error_message(err.code, err.message)}")
+            U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
                 self._login_and_return()
             return
@@ -323,7 +312,7 @@ class TuiApp:
 
     def _screen_search(self) -> None:
         U.print_header(MENU_SEARCH)
-        keyword = U.ask_required("输入歌曲名或歌手名")
+        keyword = U.ask("输入歌曲名或歌手名（回车返回）")
         if not keyword:
             return
         if not self._require_login():
@@ -332,17 +321,24 @@ class TuiApp:
         try:
             results = search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
         except MusicFetchError as err:
-            U.print_error(f"{err.code}: {user_error_message(err.code, err.message)}")
+            U.print_error(user_error_message(err.code, err.message))
             return
         if not results:
             U.print_warning("未找到相关歌曲。")
             return
-        options = [
-            f"{r.song_name} — {r.artist} — {r.album}（{format_duration(r.duration_ms)}）"
-            for r in results
-        ] + ["返回"]
-        choice = U.menu("搜索结果", options)
-        if choice == len(options):
+        rows = [
+            (
+                str(index),
+                r.song_name,
+                r.artist or "-",
+                r.album or "-",
+                format_duration(r.duration_ms),
+            )
+            for index, r in enumerate(results, start=1)
+        ]
+        U.print_table(["#", "歌名", "歌手", "专辑", "时长"], rows)
+        choice = self._pick_from_rows("输入序号下载", len(results))
+        if choice is None:
             return
         picked = results[choice - 1]
         if U.confirm(f"下载《{picked.song_name}》？", default=True):
@@ -354,6 +350,16 @@ class TuiApp:
                 duration_ms=picked.duration_ms,
             )
 
+    def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
+        """Ask the user to pick a numbered row (1..count) or return (0 / empty)."""
+        while True:
+            raw = U.ask(f"{prompt}（0 返回）")
+            if not raw or raw == "0":
+                return None
+            if raw.isdigit() and 1 <= int(raw) <= count:
+                return int(raw)
+            U.print_warning(f"请输入 1-{count} 的序号，或 0 返回。")
+
     # ── user playlists ────────────────────────────────────────────
 
     def _screen_playlists(self) -> None:
@@ -364,16 +370,25 @@ class TuiApp:
         try:
             playlists = fetch_user_playlists(self.session.cookie, timeout=self.session.detect_timeout_sec)
         except MusicFetchError as err:
-            U.print_error(f"{err.code}: {user_error_message(err.code, err.message)}")
+            U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
                 self._login_and_return()
             return
         if not playlists:
             U.print_warning("暂无歌单。")
             return
-        options = [f"{pl.name}（{pl.song_count} 首 · {pl.creator}）" for pl in playlists] + ["返回"]
-        choice = U.menu("我的歌单", options)
-        if choice == len(options):
+        rows = [
+            (
+                str(index),
+                pl.name,
+                str(pl.song_count),
+                pl.creator or "-",
+            )
+            for index, pl in enumerate(playlists, start=1)
+        ]
+        U.print_table(["#", "歌单", "歌数", "创建者"], rows)
+        choice = self._pick_from_rows("输入序号", len(playlists))
+        if choice is None:
             return
         picked = playlists[choice - 1]
         self._batch_flow(f"https://music.163.com/playlist?id={picked.playlist_id}")
@@ -401,7 +416,7 @@ class TuiApp:
                 on_progress=lambda current, total, song_id: self._detect_progress(current, total, detect_total),
             )
         except MusicFetchError as err:
-            U.print_error(f"{err.code}: {user_error_message(err.code, err.message)}")
+            U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
                 self._login_and_return()
             return
@@ -434,13 +449,20 @@ class TuiApp:
             (f"{row.song_name or row.song_id}（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）", row.selected)
             for row in ready
         ]
-        selected = U.multiselect("选择要下载的歌曲（空格勾选，回车确认）", entries)
+        selected = U.multiselect("选择要下载的歌曲（空格勾选，回车确定，Esc 取消）", entries)
         if not selected:
             self._offer_batch_export(rows)
             return
         chosen = [ready[index] for index in selected]
-        out_dir = Path(U.ask_required("保存目录", default=self.session.last_download_dir)).expanduser()
+        out_dir_raw = self._ask_with_cancel(
+            "保存目录（直接回车用默认；输入 0 取消）", default=self.session.last_download_dir
+        )
+        if out_dir_raw is None:
+            return
+        out_dir = Path(out_dir_raw).expanduser()
         target_format = self._pick_format()
+        if target_format is None:
+            return
         download_lyric = U.confirm("同时下载歌词？", default=False)
         session = BatchDownloadSession(
             rows=chosen,
@@ -583,12 +605,30 @@ class TuiApp:
 
     # ── download options ──────────────────────────────────────────
 
-    def _pick_format(self) -> str:
+    def _ask_with_cancel(self, prompt: str, default: str = "") -> Optional[str]:
+        """Ask for input; empty input uses *default*, '0' cancels (None).
+
+        Lets a first-time user bail out of a multi-step wizard instead of
+        being stuck guessing how to go back.
+        """
+        while True:
+            raw = U.ask(prompt, default=default)
+            if raw == "0":
+                return None
+            if raw:
+                return raw
+            if default:
+                return default
+            U.print_warning("输入不能为空（输入 0 取消）。")
+
+    def _pick_format(self) -> Optional[str]:
         formats = list(SUPPORTED_GUI_AUDIO_FORMATS)
-        labels = formats[:]
+        labels = formats[:] + ["取消"]
         if not is_ffmpeg_available():
             U.print_warning("未安装 ffmpeg：其他格式会自动回退保存为源格式（仅 mp3 一定可用）。")
         choice = U.menu("选择下载格式", labels)
+        if choice == len(labels):
+            return None
         return formats[choice - 1]
 
     def _download_song(
@@ -600,10 +640,21 @@ class TuiApp:
         duration_ms: Optional[int] = None,
         cover_url: Optional[str] = None,
     ) -> bool:
-        out_dir = Path(U.ask_required("保存目录", default=self.session.last_download_dir)).expanduser()
+        out_dir_raw = self._ask_with_cancel(
+            "保存目录（直接回车用默认；输入 0 取消）", default=self.session.last_download_dir
+        )
+        if out_dir_raw is None:
+            return False
+        out_dir = Path(out_dir_raw).expanduser()
         suggested = sanitize_filename(f"{song_name}-{song_id}" if song_name else f"song-{song_id}")
-        rename = U.ask("文件名（不含后缀，回车使用默认）", default=suggested) or None
+        rename = self._ask_with_cancel(
+            "文件名（不含后缀；直接回车用默认；输入 0 取消）", default=suggested
+        )
+        if rename is None:
+            return False
         target_format = self._pick_format()
+        if target_format is None:
+            return False
         download_lyric = U.confirm("同时下载歌词（.lrc + 嵌入标签）？", default=False)
         try:
             output_path = resolve_output_path(
@@ -614,7 +665,7 @@ class TuiApp:
                 out_format=target_format,
             )
         except MusicFetchError as err:
-            U.print_error(f"{err.code}: {user_error_message(err.code, err.message)}")
+            U.print_error(user_error_message(err.code, err.message))
             return False
         U.print_info(f"输出：{output_path}")
         job = DownloadJob(
@@ -667,10 +718,7 @@ class TuiApp:
                 status=TASK_STATE_FAILED,
                 error_code=result.error_code,
             )
-            U.print_error(
-                f"下载失败：{result.error_code} "
-                f"{user_error_message(result.error_code, result.error_message)}"
-            )
+            U.print_error(f"下载失败：{user_error_message(result.error_code, result.error_message)}")
         return False
 
     def _add_record(
@@ -726,7 +774,10 @@ class TuiApp:
                 U.print_info(
                     f"第 {page + 1 if total_pages else 0}/{total_pages} 页 · 共 {len(filtered)} 条"
                 )
-            record_actions = [f"操作第 {index} 条" for index in range(1, len(page_records) + 1)]
+            record_actions = [
+                f"操作第 {index} 条（{page_records[index - 1].song_name}）"
+                for index in range(1, len(page_records) + 1)
+            ]
             actions = record_actions + ["搜索关键词", "状态筛选", "上一页", "下一页", "导出筛选结果 CSV", "返回"]
             choice = U.menu("操作", actions)
             if choice <= len(page_records):
@@ -802,7 +853,7 @@ class TuiApp:
             self._open_folder(Path(record.output_path).expanduser().parent)
         elif action == "删除文件并移除记录":
             path = Path(record.output_path).expanduser()
-            if U.confirm(f"确定删除文件并移除记录？\\n{path}", default=False):
+            if U.confirm(f"确定删除文件并移除记录？\n{path}", default=False):
                 try:
                     if path.exists():
                         path.unlink()
@@ -850,7 +901,7 @@ class TuiApp:
                 record.song_id, record.song_name, str(output_path), 0, TASK_STATE_FAILED,
                 error_code=result.error_code,
             )
-            U.print_error(f"重试失败：{result.error_code} {user_error_message(result.error_code, result.error_message)}")
+            U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
 
     @staticmethod
     def _open_folder(path: Path) -> None:
@@ -859,7 +910,7 @@ class TuiApp:
             return
         try:
             if sys.platform == "win32":
-                os.startfile(str(path))  # type: ignore[attr-defined]
+                os.startfile(str(path))
             elif sys.platform == "darwin":
                 subprocess.run(["open", str(path)], check=False)
             else:
@@ -1008,8 +1059,8 @@ class TuiApp:
         U.print_info("检查中...")
         try:
             latest, url = fetch_latest_project_version(timeout=8)
-        except RuntimeError as err:
-            U.print_error(f"检查更新失败：{err}")
+        except RuntimeError:
+            U.print_warning("无法检查更新（网络不可用或仓库不可访问），请稍后再试。")
             return
         if version_key(latest) > version_key(APP_VERSION):
             U.print_success(f"发现新版本：{latest}（当前 {APP_VERSION}）")
