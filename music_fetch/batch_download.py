@@ -95,6 +95,7 @@ class BatchDownloadSession:
         self._cancel_requested = False
         self._done = False
         self._stopped = False
+        self._auth_expired = False
 
     # ── state API ─────────────────────────────────────────────────
 
@@ -106,6 +107,11 @@ class BatchDownloadSession:
     def stopped(self) -> bool:
         """True when the flow ended early because of a cancel request."""
         return self._stopped
+
+    @property
+    def auth_expired(self) -> bool:
+        """True when a worker rejected the app-owned login credential."""
+        return self._auth_expired
 
     def counters(self) -> BatchDownloadCounters:
         return BatchDownloadCounters(
@@ -211,6 +217,9 @@ class BatchDownloadSession:
             )
             self._failed += 1
             self._cursor += 1
+            if err.code == "AUTH_EXPIRED":
+                self._auth_expired = True
+                self.request_cancel_all()
             return
 
         row.status = "downloading"
@@ -263,6 +272,9 @@ class BatchDownloadSession:
                 )
             )
             self._failed += 1
+            if result.error_code == "AUTH_EXPIRED":
+                self._auth_expired = True
+                self.request_cancel_all()
         else:
             row.status = "download_canceled"
             row.selected = False

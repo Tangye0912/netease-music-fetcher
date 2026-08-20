@@ -2,9 +2,9 @@
 """Interactive terminal UI for music-fetch.
 
 Bare `music-fetch` (no arguments) opens this keyboard-driven interface:
-QR login rendered in the terminal, numbered menus, checkbox multi-select for
-batch downloads, and progress bars with pause/resume/cancel keys.  All
-heavy lifting stays in the pure modules (api/audio/pipeline/batch_*).
+official browser QR login, numbered menus, checkbox multi-select for batch
+downloads, and progress bars with pause/resume/cancel keys.  All heavy lifting
+stays in the pure modules (api/audio/pipeline/batch_*).
 """
 
 from __future__ import annotations
@@ -154,12 +154,12 @@ class TuiApp:
             return bool(self.session.cookie)
 
     def run(self) -> int:
-        # Validate an existing session; an expired cookie locks the menu to login.
-        # Only clear + persist when there was actually a stored cookie (a fresh
-        # first run has none and should not create an empty session file).
+        # A missing or expired app-owned credential always starts the isolated
+        # official QR flow.  No browser profile is inspected for a login state.
         if self.session.cookie and not self._validate_session_login():
-            self.session.cookie = ""
-            self.session_store.save(self.session)
+            self._clear_login()
+        if not self.session.cookie:
+            self._screen_login()
         while True:
             try:
                 U.clear_screen()
@@ -167,9 +167,13 @@ class TuiApp:
                 pass
             U.print_header(f"{APP_NAME} v{APP_VERSION}")
             if self.session.cookie:
-                U.print_info(
-                    f"  登录：{self._login_label()}    代理：{self._proxy_label}    "
-                    f"目录：{self.session.last_download_dir}    ffmpeg：{'可用' if is_ffmpeg_available() else '未安装'}"
+                U.print_status(
+                    [
+                        ("登录", self._login_label()),
+                        ("代理", self._proxy_label),
+                        ("目录", self.session.last_download_dir),
+                        ("ffmpeg", "可用" if is_ffmpeg_available() else "未安装"),
+                    ]
                 )
                 options = [
                     MENU_SINGLE,
@@ -216,9 +220,7 @@ class TuiApp:
                 self._screen_check_update()
             elif label == MENU_LOGOUT:
                 if U.confirm("确定退出当前账号？", default=True):
-                    self.session.cookie = ""
-                    self._nickname = ""
-                    self.session_store.save(self.session)
+                    self._clear_login()
                     U.print_success("已退出登录。")
 
     # ── login ─────────────────────────────────────────────────────
@@ -234,7 +236,6 @@ class TuiApp:
         try:
             cookie = run_official_login(
                 timeout=300,
-                reuse_existing=False,
                 on_status=lambda message: U.print_info(message),
             )
         except BrowserLoginError as err:
@@ -269,6 +270,18 @@ class TuiApp:
         U.print_warning(T.MSG_NEED_LOGIN_ANY)
         return U.confirm("现在登录？", default=True) and self._login_and_return()
 
+    def _clear_login(self) -> None:
+        self.session.cookie = ""
+        self.session.remember_login = False
+        self._nickname = ""
+        self.session_store.save(self.session)
+
+    def _handle_auth_expired(self) -> bool:
+        """Discard an expired app credential before starting a fresh QR login."""
+        self._clear_login()
+        U.print_warning("登录凭证已失效，需要重新扫码登录。")
+        return self._login_and_return()
+
     def _login_and_return(self) -> bool:
         self._screen_login()
         return bool(self.session.cookie)
@@ -288,7 +301,7 @@ class TuiApp:
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
-                self._login_and_return()
+                self._handle_auth_expired()
             return
         U.print_success(f"歌曲 ID：{result.song_id}")
         U.print_info(f"歌名：{result.song_name or '未知'}")
@@ -324,6 +337,8 @@ class TuiApp:
             results = search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
+            if err.code == "AUTH_EXPIRED":
+                self._handle_auth_expired()
             return
         if not results:
             U.print_warning("未找到相关歌曲。")
@@ -374,7 +389,7 @@ class TuiApp:
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
-                self._login_and_return()
+                self._handle_auth_expired()
             return
         if not playlists:
             U.print_warning("暂无歌单。")
@@ -420,7 +435,7 @@ class TuiApp:
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
-                self._login_and_return()
+                self._handle_auth_expired()
             return
         if detect_total[0] > 0:
             print()
@@ -480,6 +495,9 @@ class TuiApp:
         self._run_batch_session(session)
         self.session.last_download_dir = str(out_dir)
         self.session_store.save(self.session)
+        if session.auth_expired:
+            self._handle_auth_expired()
+            return
         failed_rows = retryable_failed_rows(rows)
         if failed_rows and U.confirm(f"有 {len(failed_rows)} 首下载失败，是否重试？", default=False):
             retry_session = BatchDownloadSession(
@@ -494,6 +512,9 @@ class TuiApp:
                 download_lyric=download_lyric,
             )
             self._run_batch_session(retry_session)
+            if retry_session.auth_expired:
+                self._handle_auth_expired()
+                return
         self._offer_batch_export(rows)
 
     @staticmethod
@@ -543,6 +564,7 @@ class TuiApp:
         with ProgressBar(
             title="下载中 — p 暂停/继续 · c 取消",
             key_bindings=kb,
+            style=U.PROGRESS_STYLE,
         ) as pb:
             counter: ProgressBarCounter[object] = pb(total=None, label="准备下载...")
             while job.state() in JOB_RUNNING_STATES:
@@ -583,6 +605,7 @@ class TuiApp:
         with ProgressBar(
             title="批量下载 — p 暂停全部 · r 恢复全部 · c 取消",
             key_bindings=kb,
+            style=U.PROGRESS_STYLE,
         ) as pb:
             counter: ProgressBarCounter[object] = pb(total=total_rows if total_rows else None, label="准备...")
             while not session.done:
@@ -721,6 +744,8 @@ class TuiApp:
                 error_code=result.error_code,
             )
             U.print_error(f"下载失败：{user_error_message(result.error_code, result.error_message)}")
+            if result.error_code == "AUTH_EXPIRED":
+                self._handle_auth_expired()
         return False
 
     def _add_record(
@@ -904,6 +929,8 @@ class TuiApp:
                 error_code=result.error_code,
             )
             U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
+            if result.error_code == "AUTH_EXPIRED":
+                self._handle_auth_expired()
 
     @staticmethod
     def _open_folder(path: Path) -> None:

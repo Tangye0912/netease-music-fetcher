@@ -130,6 +130,19 @@ class BatchDownloadSessionTests(unittest.TestCase):
         self.assertEqual(records[0].status, "failed")
         self.assertEqual(records[0].error_code, "NETWORK_ERROR")
 
+    def test_auth_expired_stops_dispatching_pending_jobs(self):
+        rows = [_row("1"), _row("2")]
+        with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob):
+            session = self._session(rows, concurrency=1)
+            session.poll()
+            first = list(session._jobs.values())[0]
+            first.fail(code="AUTH_EXPIRED", message="expired")
+            self._poll_until_done(session)
+        self.assertTrue(session.auth_expired)
+        self.assertTrue(session.stopped)
+        self.assertEqual(len(FakeJob.instances), 1)
+        self.assertEqual(rows[1].status, "ready")
+
     def test_cancel_all_stops_dispatch_and_keeps_pending_rows_ready(self):
         rows = [_row("1"), _row("2"), _row("3")]
         with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob):

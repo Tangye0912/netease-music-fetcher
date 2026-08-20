@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""Official NetEase web login via the user's real browser.
+"""Official NetEase web login in an isolated temporary browser profile.
 
 The tool's own QR codes (generated through the encrypted API) get flagged by
 NetEase risk control ("设备环境异常"), so instead of rendering a terminal QR
-we open the official music.163.com login page in a real browser and let the
-user scan the *official* QR (or reuse an existing browser session).  The
-resulting cookie is captured through the Chrome DevTools Protocol (CDP).
-
-Two capture paths are handled automatically:
-
-  1. Reuse an existing login: launch the user's default browser profile; if a
-     MUSIC_U cookie is already present, grab it with no scanning at all.
-  2. Scan flow: otherwise prompt the user to scan the official QR in the
-     opened browser and poll until the cookie appears.
+we open the official music.163.com login page in a separate temporary profile,
+let the user scan the *official* QR, and capture the resulting cookie through
+the Chrome DevTools Protocol (CDP).  The user's normal browser profile is never
+opened or inspected.
 
 Requires a local Chrome/Edge and the `websocket-client` package (a declared
 dependency, imported lazily so the rest of the app still imports without it).
@@ -21,21 +15,19 @@ dependency, imported lazily so the rest of the app still imports without it).
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from urllib import request
 
 from music_fetch.api import MusicFetchError, normalize_cookie
-from music_fetch.network import open_url
 
 LOGIN_URL = "https://music.163.com/#/login"
+_DIRECT_OPENER = request.build_opener(request.ProxyHandler({}))
 
 # Common install locations for Edge and Chrome (in preference order).
 _BROWSER_CANDIDATES = [
@@ -114,45 +106,45 @@ def _launch_browser(
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _kill_background_browsers(exe: str) -> None:
-    """End lingering background processes of the given browser.
-
-    Edge/Chrome keep background processes even after all windows are closed
-    (e.g. "continue running background apps").  Those hold the default
-    profile, so a new launch with the same profile cannot open a DevTools
-    port.  Killing them lets a clean instance start with the debug port.
-    """
-    name = Path(exe).name  # e.g. msedge.exe / chrome.exe
+def _stop_browser(proc: subprocess.Popen[bytes], timeout: float = 5.0) -> bool:
+    """Stop a login browser process and wait until it releases profile files."""
     try:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/IM", name, "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        else:
-            subprocess.run(
-                ["pkill", "-f", name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+        proc.terminate()
     except OSError:
         pass
+    try:
+        proc.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError:
+            return False
+        try:
+            proc.wait(timeout=timeout)
+            return True
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    except OSError:
+        return False
 
 
-def _default_profile_dir(exe: str) -> Optional[str]:
-    """Return the default user-data directory for the browser executable."""
-    name = Path(exe).name.lower()
-    local_appdata = os.environ.get("LOCALAPPDATA", "")
-    if not local_appdata:
-        return None
-    if "msedge" in name:
-        return str(Path(local_appdata) / "Microsoft" / "Edge" / "User Data")
-    if "chrome" in name:
-        return str(Path(local_appdata) / "Google" / "Chrome" / "User Data")
-    return None
+def _remove_temp_profile(profile_dir: str, attempts: int = 3) -> None:
+    """Remove a temporary login profile, surfacing a privacy-sensitive failure."""
+    last_error: Optional[OSError] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            shutil.rmtree(profile_dir)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as err:
+            last_error = err
+            if attempt + 1 < attempts:
+                time.sleep(0.2)
+    raise BrowserLoginError(
+        f"临时登录数据未能清理：{profile_dir}。请关闭残留的扫码窗口后删除该目录。"
+    ) from last_error
 
 
 def _read_devtools_port(profile_dir: Optional[str]) -> Optional[int]:
@@ -167,6 +159,11 @@ def _read_devtools_port(profile_dir: Optional[str]) -> Optional[int]:
         return None
 
 
+def _open_local_url(req: request.Request, timeout: float) -> Any:
+    """Open a loopback CDP endpoint without the application's network proxy."""
+    return _DIRECT_OPENER.open(req, timeout=timeout)
+
+
 def _wait_for_cdp_ws(profile_dir: Optional[str], fallback_port: int, timeout: float) -> Optional[int]:
     """Wait for the browser's DevTools HTTP endpoint and return its port.
 
@@ -179,7 +176,7 @@ def _wait_for_cdp_ws(profile_dir: Optional[str], fallback_port: int, timeout: fl
         port = _read_devtools_port(profile_dir) or fallback_port
         req = request.Request(f"http://127.0.0.1:{port}/json/version", method="GET")
         try:
-            with open_url(req, timeout=2) as resp:
+            with _open_local_url(req, timeout=2) as resp:
                 json.loads(resp.read().decode("utf-8"))
             return port
         except (OSError, ValueError, json.JSONDecodeError):
@@ -193,7 +190,7 @@ def _find_page_ws(port: int, timeout: float) -> Optional[str]:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with open_url(
+            with _open_local_url(
                 request.Request(f"http://127.0.0.1:{port}/json/list", method="GET"), timeout=2
             ) as resp:
                 targets = json.loads(resp.read().decode("utf-8"))
@@ -230,7 +227,11 @@ def _read_music_cookies(port: int, timeout: float = 10.0) -> str:
     if page_ws is None:
         return ""
     try:
-        ws = websocket.create_connection(page_ws, timeout=timeout)
+        ws = websocket.create_connection(
+            page_ws,
+            timeout=timeout,
+            http_no_proxy=["127.0.0.1", "localhost"],
+        )
     except Exception:
         return ""
     try:
@@ -284,16 +285,13 @@ def _read_music_cookies(port: int, timeout: float = 10.0) -> str:
 
 def run_official_login(
     timeout: float = 300.0,
-    reuse_existing: bool = False,
     on_status: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Open the official login page and capture the NetEase cookie.
 
-    By default (reuse_existing=False) the flow opens a fresh temp-profile
-    browser window and the user scans the official QR once — reliable and
-    fast.  Set reuse_existing=True to first attempt attaching to the user's
-    real browser profile (reuses an existing login, but is unreliable on some
-    Edge installs and can add long waits).
+    Every login opens a fresh temporary browser profile and requires scanning
+    the official QR.  Existing Chrome/Edge profiles and their cookies are never
+    opened or inspected.
 
     Returns a normalized cookie string containing MUSIC_U.  Raises
     MusicFetchError (AUTH_EXPIRED/NETWORK_ERROR) or BrowserLoginError.
@@ -302,57 +300,17 @@ def run_official_login(
     exe = find_browser_exe()
     if not exe:
         raise BrowserLoginError(
-            "未找到可用的浏览器（Chrome/Edge）。请安装后重试，或改用“粘贴 Cookie”方式登录。"
+            "未找到可用的浏览器（Chrome/Edge）。请安装 Chrome 或 Edge 后重试。"
         )
 
     proc: Optional[subprocess.Popen[bytes]] = None
     temp_profile: Optional[str] = None
     try:
-        # 1) Try the user's real profile first so an existing login is reused.
-        cdp_port: Optional[int] = None
-        active_profile: Optional[str] = None
-        if reuse_existing:
-            real_profile = _default_profile_dir(exe)
-            log("正在检测浏览器中已保存的网易云登录状态...")
-            port = pick_free_port()
-            proc = _launch_browser(exe, port, None, LOGIN_URL)
-            cdp_port = _wait_for_cdp_ws(real_profile, port, timeout=20)
-            if cdp_port is None:
-                # The profile is likely held by lingering background processes
-                # (Edge keeps them even after the window is closed), or the
-                # browser started slowly. End background processes and retry
-                # the real profile once before falling back to a scan window.
-                log("未检测到可复用的浏览器调试连接，正在结束浏览器后台进程后重试...")
-                _kill_background_browsers(exe)
-                if proc is not None:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-                proc = None
-                time.sleep(2)
-                port = pick_free_port()
-                proc = _launch_browser(exe, port, None, LOGIN_URL)
-                cdp_port = _wait_for_cdp_ws(real_profile, port, timeout=25)
-                if cdp_port is None:
-                    log("仍无法复用浏览器登录态，将打开一个新的扫码窗口。")
-                    if proc is not None:
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                    proc = None
-            else:
-                active_profile = real_profile
-
-        # 2) Otherwise open a clean temp-profile window for scanning.
-        if cdp_port is None:
-            log("正在打开扫码登录窗口...")
-            temp_profile = tempfile.mkdtemp(prefix="music-fetch-login-")
-            port = pick_free_port()
-            proc = _launch_browser(exe, port, temp_profile, LOGIN_URL)
-            cdp_port = _wait_for_cdp_ws(temp_profile, port, timeout=15)
-            active_profile = temp_profile
+        log("正在打开隔离的扫码登录窗口...")
+        temp_profile = tempfile.mkdtemp(prefix="music-fetch-login-")
+        port = pick_free_port()
+        proc = _launch_browser(exe, port, temp_profile, LOGIN_URL)
+        cdp_port = _wait_for_cdp_ws(temp_profile, port, timeout=15)
 
         if cdp_port is None:
             raise BrowserLoginError("浏览器未能启动（调试端口未就绪），请关闭浏览器后重试。")
@@ -375,8 +333,8 @@ def run_official_login(
                 # The browser may have restarted on a new DevTools port;
                 # re-discover the endpoint after a few empty reads.
                 stale_reads += 1
-                if stale_reads >= 3 and active_profile is not None:
-                    new_port = _wait_for_cdp_ws(active_profile, cdp_port, timeout=10)
+                if stale_reads >= 3:
+                    new_port = _wait_for_cdp_ws(temp_profile, cdp_port, timeout=10)
                     if new_port is not None:
                         cdp_port = new_port
                     stale_reads = 0
@@ -393,16 +351,13 @@ def run_official_login(
         log("已获取登录凭证。")
         return normalize_cookie(cookie)
     finally:
+        stopped = True
         if proc is not None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+            stopped = _stop_browser(proc)
         if temp_profile:
-            try:
-                shutil.rmtree(temp_profile, ignore_errors=True)
-            except Exception:
-                pass
+            _remove_temp_profile(temp_profile)
+        if not stopped:
+            raise BrowserLoginError("扫码浏览器未能完全退出，请手动关闭该窗口后重试。")
 
 
 def diagnose(timeout: float = 20.0) -> list[str]:
@@ -437,22 +392,21 @@ def diagnose(timeout: float = 20.0) -> list[str]:
             try:
                 cookies = _read_music_cookies(cdp_port, timeout=8)
                 lines.append(f"cookies_found={bool(cookies)}")
-                if cookies:
-                    lines.append(f"cookie_preview={cookies[:80]}")
             except Exception as err:  # noqa: BLE001 - diagnostic
                 lines.append(f"read_cookies_error={err!r}")
     except Exception as err:  # noqa: BLE001 - diagnostic
         lines.append(f"launch_error={err!r}")
     finally:
+        stopped = True
         if proc is not None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+            stopped = _stop_browser(proc)
         try:
-            shutil.rmtree(temp_profile, ignore_errors=True)
-        except Exception:
-            pass
+            _remove_temp_profile(temp_profile)
+            lines.append("profile_cleanup=ok")
+        except BrowserLoginError as err:
+            lines.append(f"profile_cleanup_error={err}")
+        if not stopped:
+            lines.append("browser_stop_error=browser process is still running")
     return lines
 
 

@@ -33,12 +33,63 @@ class PrintTableTests(unittest.TestCase):
                 [["1", "明天过后", "03:57"], ["2", "天下", "03:41"]],
                 max_width=80,
             )
-        self.assertEqual(len(captured), 4)  # header + separator + 2 rows
-        # Data rows must line up: identical display width.  (The header's last
-        # cell loses its trailing pad via rstrip, which is invisible, so only
-        # the data rows are compared here.)
-        widths = {tui_utils._display_width(_plain(line)) for line in captured[2:]}
+        self.assertEqual(len(captured), 6)  # top + header + separator + 2 rows + bottom
+        self.assertTrue(_plain(captured[0]).startswith("┌"))
+        self.assertTrue(_plain(captured[-1]).startswith("└"))
+        # Every bordered row must occupy the same display width.
+        widths = {tui_utils._display_width(_plain(line)) for line in captured}
         self.assertEqual(len(widths), 1)
+
+
+class ThemeRenderingTests(unittest.TestCase):
+    def test_header_centers_cjk_title_to_terminal_width(self) -> None:
+        captured: list[str] = []
+        with mock.patch("music_fetch.tui_utils.print_info", side_effect=captured.append), mock.patch(
+            "music_fetch.tui_utils.shutil.get_terminal_size", return_value=mock.Mock(columns=40)
+        ):
+            tui_utils.print_header("音乐下载")
+        self.assertEqual(captured[0], "")
+        line = _plain(captured[1])
+        self.assertEqual(tui_utils._display_width(line), 40)
+        self.assertIn(" 音乐下载 ", line)
+        self.assertTrue(line.startswith("─"))
+        self.assertTrue(line.endswith("─"))
+
+    def test_menu_renders_bordered_numbered_panel(self) -> None:
+        captured: list[str] = []
+        with mock.patch("music_fetch.tui_utils.print_info", side_effect=captured.append), mock.patch(
+            "music_fetch.tui_utils.ask", return_value="2"
+        ), mock.patch(
+            "music_fetch.tui_utils.shutil.get_terminal_size", return_value=mock.Mock(columns=40)
+        ):
+            choice = tui_utils.menu("主菜单", ["单曲下载", "退出"])
+        self.assertEqual(choice, 2)
+        plain = [_plain(line) for line in captured]
+        self.assertIn(" 主菜单 ", plain[1])
+        self.assertTrue(plain[1].startswith("┌"))
+        self.assertIn("01  单曲下载", plain[2])
+        self.assertIn("02  退出", plain[3])
+        self.assertTrue(plain[4].startswith("└"))
+        self.assertTrue(all(tui_utils._display_width(line) == 40 for line in plain[1:5]))
+
+    def test_status_band_is_full_width_and_contains_labels(self) -> None:
+        captured: list[str] = []
+        with mock.patch("music_fetch.tui_utils._safe_print_formatted", side_effect=captured.append), mock.patch(
+            "music_fetch.tui_utils.shutil.get_terminal_size", return_value=mock.Mock(columns=50)
+        ):
+            tui_utils.print_status([("登录", "测试用户"), ("代理", "直连")])
+        line = _plain(captured[0])
+        self.assertEqual(tui_utils._display_width(line), 50)
+        self.assertIn("登录: 测试用户", line)
+        self.assertIn("代理: 直连", line)
+
+    def test_status_messages_have_clear_symbols(self) -> None:
+        captured: list[str] = []
+        with mock.patch("music_fetch.tui_utils._safe_print_formatted", side_effect=captured.append):
+            tui_utils.print_success("完成")
+            tui_utils.print_warning("注意")
+            tui_utils.print_error("失败")
+        self.assertEqual([_plain(line) for line in captured], ["✓ 完成", "! 注意", "✕ 失败"])
 
 
 if __name__ == "__main__":

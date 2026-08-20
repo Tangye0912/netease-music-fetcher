@@ -12,6 +12,12 @@ from music_fetch.app_stores import AppSession
 
 
 class BuildParserTests(unittest.TestCase):
+    def test_help_describes_current_browser_login_flow(self):
+        help_text = music_fetch.cli.build_parser().format_help()
+        self.assertIn("open isolated official", help_text)
+        self.assertIn("browser QR login", help_text)
+        self.assertNotIn("TUI QR login", help_text)
+
     def test_parser_has_expected_arguments(self):
         parser = music_fetch.cli.build_parser()
         # Parse minimal args to verify parser works
@@ -67,8 +73,9 @@ class BuildParserTests(unittest.TestCase):
 class CliSessionCookieTests(unittest.TestCase):
     @mock.patch("music_fetch.cli.run_download_pipeline")
     @mock.patch("music_fetch.cli.fetch_song_metadata")
+    @mock.patch("music_fetch.cli.fetch_account_profile")
     @mock.patch("music_fetch.cli.SessionStore")
-    def test_run_download_reuses_tui_session(self, session_store_mock, meta_mock, pipeline_mock):
+    def test_run_download_reuses_tui_session(self, session_store_mock, _profile_mock, meta_mock, pipeline_mock):
         session_store_mock.return_value.load.return_value = AppSession(
             cookie="MUSIC_U=session; __csrf=session-csrf"
         )
@@ -103,14 +110,32 @@ class CliSessionCookieTests(unittest.TestCase):
         self.assertEqual(captured["cookie"], "MUSIC_U=session; __csrf=session-csrf")
         session_store_mock.assert_called_once_with(SESSION_FILE)
 
+    @mock.patch("music_fetch.cli.fetch_account_profile")
+    @mock.patch("music_fetch.cli.run_official_login", return_value="MUSIC_U=scanned; __csrf=scanned")
     @mock.patch("music_fetch.cli.SessionStore")
-    def test_missing_session_tells_user_to_scan_first(self, session_store_mock):
+    def test_missing_session_opens_isolated_scan(self, session_store_mock, login_mock, _profile_mock):
         session_store_mock.return_value.load.return_value = AppSession()
-        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
-            music_fetch.cli._load_cli_cookie(None)
-        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
-        self.assertIn("music-fetch（不带参数）", ctx.exception.message)
-        self.assertIn("扫码登录", ctx.exception.message)
+        cookie = music_fetch.cli._load_cli_cookie(None)
+        self.assertIn("MUSIC_U=scanned", cookie)
+        login_mock.assert_called_once_with(timeout=300)
+        saved = session_store_mock.return_value.save.call_args.args[0]
+        self.assertIn("MUSIC_U=scanned", saved.cookie)
+
+    @mock.patch("music_fetch.cli.fetch_account_profile")
+    @mock.patch("music_fetch.cli.run_official_login", return_value="MUSIC_U=fresh")
+    @mock.patch("music_fetch.cli.SessionStore")
+    def test_expired_session_is_cleared_then_scanned(self, session_store_mock, login_mock, profile_mock):
+        session = AppSession(cookie="MUSIC_U=expired", remember_login=True)
+        session_store_mock.return_value.load.return_value = session
+        profile_mock.side_effect = [
+            music_fetch.MusicFetchError("AUTH_EXPIRED", "expired"),
+            mock.Mock(),
+        ]
+        cookie = music_fetch.cli._load_cli_cookie(None)
+        self.assertEqual(cookie, "MUSIC_U=fresh")
+        login_mock.assert_called_once_with(timeout=300)
+        self.assertEqual(session_store_mock.return_value.save.call_count, 2)
+        self.assertEqual(session.cookie, "MUSIC_U=fresh")
 
 
 class RunDownloadTests(unittest.TestCase):

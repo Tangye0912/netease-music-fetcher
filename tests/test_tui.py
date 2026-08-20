@@ -79,13 +79,47 @@ class TuiAppHelperTests(unittest.TestCase):
     @mock.patch("music_fetch.tui.U.print_header")
     @mock.patch("music_fetch.tui.U.clear_screen")
     def test_run_locks_menu_when_not_logged_in(self, clear_mock, header_mock, info_mock):
-        with mock.patch.object(self.app, "_validate_session_login", return_value=False), mock.patch(
+        with mock.patch.object(self.app, "_screen_login") as login_mock, mock.patch(
             "music_fetch.tui.U.menu", return_value=2
         ) as menu_mock:
             result = self.app.run()
         self.assertEqual(result, 0)
+        login_mock.assert_called_once_with()
         # Not logged in -> the menu only offers 登录 / 退出.
         self.assertEqual(menu_mock.call_args.args[1], [music_fetch.tui.MENU_LOGIN, music_fetch.tui.MENU_QUIT])
+
+    def test_run_clears_expired_cookie_before_automatic_login(self):
+        self.app.session.cookie = "MUSIC_U=expired"
+        self.app.session.remember_login = True
+        with mock.patch.object(self.app, "_validate_session_login", return_value=False), mock.patch.object(
+            self.app, "_screen_login"
+        ) as login_mock, mock.patch("music_fetch.tui.U.menu", return_value=2), mock.patch(
+            "music_fetch.tui.U.clear_screen"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch("music_fetch.tui.U.print_info"):
+            self.assertEqual(self.app.run(), 0)
+        login_mock.assert_called_once_with()
+        stored = self.session_store.load()
+        self.assertEqual(stored.cookie, "")
+        self.assertFalse(stored.remember_login)
+
+    @mock.patch("music_fetch.tui.U.print_warning")
+    def test_handle_auth_expired_clears_cookie_before_relogin(self, _warning_mock):
+        self.app.session.cookie = "MUSIC_U=expired"
+        self.app.session.remember_login = True
+        with mock.patch.object(self.app, "_login_and_return", return_value=False) as login_mock:
+            self.assertFalse(self.app._handle_auth_expired())
+        login_mock.assert_called_once_with()
+        stored = self.session_store.load()
+        self.assertEqual(stored.cookie, "")
+        self.assertFalse(stored.remember_login)
+
+    @mock.patch("music_fetch.tui.U.print_info")
+    def test_browser_login_has_no_existing_profile_override(self, _print_info_mock):
+        with mock.patch("music_fetch.browser_login.run_official_login", return_value="MUSIC_U=abc") as run_mock, \
+             mock.patch.object(self.app, "_accept_cookie") as accept_mock:
+            self.app._login_with_browser()
+        self.assertNotIn("reuse_existing", run_mock.call_args.kwargs)
+        accept_mock.assert_called_once_with("MUSIC_U=abc")
 
     @mock.patch("music_fetch.tui.U.print_success")
     @mock.patch("music_fetch.tui.U.print_info")

@@ -9,14 +9,50 @@ from typing import Optional, Sequence
 
 from prompt_toolkit import ANSI, prompt, print_formatted_text
 from prompt_toolkit.shortcuts import checkboxlist_dialog
+from prompt_toolkit.styles import Style
 from wcwidth import wcswidth
 
 COLOR_RESET = "\x1b[0m"
-COLOR_RED = "\x1b[31m"
-COLOR_GREEN = "\x1b[32m"
-COLOR_YELLOW = "\x1b[33m"
-COLOR_CYAN = "\x1b[36m"
+COLOR_RED = "\x1b[91m"
+COLOR_GREEN = "\x1b[92m"
+COLOR_YELLOW = "\x1b[93m"
+COLOR_CYAN = "\x1b[96m"
+COLOR_WHITE = "\x1b[97m"
+COLOR_DIM = "\x1b[90m"
 COLOR_BOLD = "\x1b[1m"
+COLOR_STATUS_BG = "\x1b[48;5;30m"
+
+# Bili-hardcore-inspired palette: cyan focus, yellow metadata, green/red
+# state, muted gray chrome, and a charcoal dialog canvas.  The actual font is
+# controlled by the user's terminal; these styles provide the visual hierarchy.
+DIALOG_STYLE = Style.from_dict(
+    {
+        "dialog": "bg:#242830",
+        "dialog.body": "bg:#242830 #f4f4f4",
+        "dialog frame-label": "#5ad4e6 bold",
+        "checkbox": "#697386",
+        "checkbox-selected": "#5ad4e6 bold",
+        "button": "#697386",
+        "button.focused": "bg:#5ad4e6 #20242b bold",
+    }
+)
+
+PROGRESS_STYLE = Style.from_dict(
+    {
+        "progressbar": "bg:#242830",
+        "title": "#5ad4e6 bold",
+        "label": "#f4f4f4",
+        "percentage": "#ffd166 bold",
+        "bar": "#697386",
+        "bar-a": "#5ad4e6",
+        "bar-b": "#a8e063 bold",
+        "bar-c": "#3d4450",
+        "current": "#ffd166",
+        "total": "#9aa4b2",
+        "time-elapsed": "#9aa4b2",
+        "time-left": "#9aa4b2",
+    }
+)
 
 
 def _ansi(color: str, text: str) -> str:
@@ -42,21 +78,35 @@ def print_info(text: str) -> None:
 
 
 def print_success(text: str) -> None:
-    _safe_print_formatted(_ansi(COLOR_GREEN, text))
+    _safe_print_formatted(_ansi(COLOR_GREEN + COLOR_BOLD, f"✓ {text}"))
 
 
 def print_error(text: str) -> None:
-    _safe_print_formatted(_ansi(COLOR_RED, text))
+    _safe_print_formatted(_ansi(COLOR_RED + COLOR_BOLD, f"✕ {text}"))
 
 
 def print_warning(text: str) -> None:
-    _safe_print_formatted(_ansi(COLOR_YELLOW, text))
+    _safe_print_formatted(_ansi(COLOR_YELLOW, f"! {text}"))
+
+
+def print_status(items: Sequence[tuple[str, str]]) -> None:
+    """Render compact application state as a full-width cyan status band."""
+    width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    content = "  " + "  │  ".join(f"{label}: {value}" for label, value in items) + "  "
+    content = _truncate_to_width(content, width)
+    content += " " * max(width - _display_width(content), 0)
+    _safe_print_formatted(_ansi(COLOR_STATUS_BG + COLOR_WHITE + COLOR_BOLD, content))
 
 
 def print_header(text: str) -> None:
     width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    label = _truncate_to_width(str(text), max(width - 4, 1))
+    label_width = _display_width(label) + 2
+    remaining = max(width - label_width, 0)
+    left = remaining // 2
+    right = remaining - left
     print_info("")
-    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, f"─ {text} " + "─" * max(width - len(text) - 4, 0)))
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, "─" * left + f" {label} " + "─" * right))
 
 
 def clear_screen() -> None:
@@ -70,7 +120,13 @@ def ask(message: str, default: str = "") -> str:
     typing replaces it instead of appending to it.
     """
     hint = f"（默认：{default}）" if default else ""
-    value = prompt(f"{message}{hint} ").strip()
+    prompt_text = (
+        _ansi(COLOR_CYAN + COLOR_BOLD, "› ")
+        + _ansi(COLOR_WHITE + COLOR_BOLD, message)
+        + (_ansi(COLOR_DIM, hint) if hint else "")
+        + " "
+    )
+    value = prompt(ANSI(prompt_text)).strip()
     return value or default
 
 
@@ -84,7 +140,11 @@ def ask_required(message: str, default: str = "") -> str:
 
 def input_multiline(message: str) -> str:
     """Prompt for multi-line text (paste-friendly); Esc+Enter submits."""
-    return prompt(f"{message}（粘贴多行内容，完成后按 Esc 再回车提交；留空直接回车返回）\n", multiline=True)
+    hint = "（粘贴多行内容，完成后按 Esc 再回车提交；留空直接回车返回）"
+    prompt_text = _ansi(COLOR_CYAN + COLOR_BOLD, "› ") + _ansi(
+        COLOR_WHITE + COLOR_BOLD, message
+    ) + _ansi(COLOR_DIM, hint) + "\n"
+    return prompt(ANSI(prompt_text), multiline=True)
 
 
 def ask_int(message: str, default: int, minimum: int, maximum: int) -> int:
@@ -120,14 +180,33 @@ def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> 
     song name / path never wraps the whole menu.  Raises KeyboardInterrupt
     when the user presses Ctrl-C.
     """
-    print_header(title)
-    width = max(shutil.get_terminal_size((80, 24)).columns - 6, 10)
+    terminal_width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    box_width = max(terminal_width, 12)
+    inner_width = max(box_width - 2, 1)
+    title_text = _truncate_to_width(str(title), max(inner_width - 4, 1))
+    title_label = f" {title_text} "
+    title_remaining = max(inner_width - _display_width(title_label), 0)
+    top = "┌" + "─" * (title_remaining // 2) + title_label + "─" * (
+        title_remaining - title_remaining // 2
+    ) + "┐"
+    print_info("")
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, top))
+    option_width = max(box_width - 8, 1)
     for index, option in enumerate(options, start=1):
         text = str(option)
-        if _display_width(text) > width:
-            text = _truncate_to_width(text, max(width - 1, 1)) + "…"
-        print_info(f"  {index}. {text}")
-    print_info("")
+        if _display_width(text) > option_width:
+            text = _truncate_to_width(text, max(option_width - 1, 1)) + "…"
+        padding = " " * max(option_width - _display_width(text), 0)
+        line = (
+            _ansi(COLOR_DIM, "│ ")
+            + _ansi(COLOR_YELLOW + COLOR_BOLD, f"{index:02d}")
+            + "  "
+            + _ansi(COLOR_WHITE, text + padding)
+            + _ansi(COLOR_DIM, " │")
+        )
+        print_info(line)
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, "└" + "─" * inner_width + "┘"))
+    print_info(_ansi(COLOR_DIM, "  输入序号确认 · Ctrl+C 返回"))
     while True:
         raw = ask(f"{prompt_text} [1-{len(options)}]").strip()
         if raw.isdigit():
@@ -156,6 +235,7 @@ def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "")
         default_values=default_values,
         ok_text="确定",
         cancel_text="取消",
+        style=DIALOG_STYLE,
     ).run()
     if selected is None:
         return []
@@ -235,10 +315,12 @@ def _truncate_to_width(text: str, max_width: int) -> str:
 
 
 def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = 100) -> None:
-    """Print a simple aligned text table with truncated cells.
+    """Print a bordered, aligned table with truncated cells.
 
     Uses wcwidth so CJK full-width characters align correctly in a terminal.
     """
+    if not headers:
+        return
     width = min(shutil.get_terminal_size((80, 24)).columns, max_width)
     columns = len(headers)
     header_widths = [_display_width(str(h)) for h in headers]
@@ -247,13 +329,17 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width
         for index, cell in enumerate(row):
             if index < columns:
                 cell_widths[index] = max(cell_widths[index], _display_width(str(cell)))
-    # Shrink the widest columns so the total fits the terminal.  Columns are
-    # joined by two spaces, so the rendered width is sum(cell_widths) + 2*(n-1).
-    total = sum(cell_widths) + (columns - 1) * 2
-    while total > width and max(cell_widths) > 8:
-        widest = max(range(columns), key=lambda i: cell_widths[i])
+    # Box rows are: │ cell │ cell │, adding three characters per column plus
+    # one final border. Shrink data-heavy columns while keeping headers intact.
+    minimums = [max(header_width, 3) for header_width in header_widths]
+    total = sum(cell_widths) + columns * 3 + 1
+    while total > width and any(cell_widths[i] > minimums[i] for i in range(columns)):
+        widest = max(
+            (i for i in range(columns) if cell_widths[i] > minimums[i]),
+            key=lambda i: cell_widths[i] - minimums[i],
+        )
         cell_widths[widest] -= 1
-        total = sum(cell_widths) + (columns - 1) * 2
+        total = sum(cell_widths) + columns * 3 + 1
 
     def fmt_cell(cell: str, col_width: int) -> str:
         disp = _display_width(cell)
@@ -262,23 +348,32 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width
         body = _truncate_to_width(cell, max(col_width - 1, 1))
         return body + "…" + " " * (col_width - _display_width(body) - 1)
 
-    def fmt_row(cells: Sequence[str]) -> str:
-        parts = []
-        for index, cell in enumerate(cells):
-            if index >= columns:
-                break
-            parts.append(fmt_cell(str(cell), cell_widths[index]))
-        return "  ".join(parts).rstrip()
+    def fmt_row(cells: Sequence[str], header: bool = False) -> str:
+        parts = [_ansi(COLOR_DIM, "│ ")]
+        for index in range(columns):
+            cell = cells[index] if index < len(cells) else ""
+            color = COLOR_CYAN + COLOR_BOLD if header else (
+                COLOR_YELLOW if index == 0 else COLOR_WHITE
+            )
+            parts.append(_ansi(color, fmt_cell(str(cell), cell_widths[index])))
+            parts.append(_ansi(COLOR_DIM, " │" if index == columns - 1 else " │ "))
+        return "".join(parts)
 
-    # Header row is drawn in cyan + bold so the table reads clearly even in a
-    # plain terminal.
-    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, fmt_row(headers)))
-    print_info("─" * min(total, width))
+    def border(left: str, join: str, right: str, color: str = COLOR_DIM) -> str:
+        line = left + join.join("─" * (col_width + 2) for col_width in cell_widths) + right
+        return _ansi(color, line)
+
+    print_info(border("┌", "┬", "┐", COLOR_CYAN))
+    print_info(fmt_row(headers, header=True))
+    print_info(border("├", "┼", "┤"))
     for row in rows:
         print_info(fmt_row(row))
+    print_info(border("└", "┴", "┘", COLOR_CYAN))
 
 
 __all__ = [
+    "DIALOG_STYLE",
+    "PROGRESS_STYLE",
     "ask",
     "ask_int",
     "ask_required",
@@ -290,6 +385,7 @@ __all__ = [
     "print_error",
     "print_header",
     "print_info",
+    "print_status",
     "print_success",
     "print_table",
     "print_warning",

@@ -1,8 +1,10 @@
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib import request
 
 from music_fetch import browser_login
 from music_fetch.browser_login import (
@@ -70,6 +72,36 @@ class LaunchBrowserTests(unittest.TestCase):
         self.assertIn(browser_login.LOGIN_URL, cmd)
 
 
+class LocalCdpTransportTests(unittest.TestCase):
+    class _FakeResponse:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+
+        def read(self) -> bytes:
+            return self.payload
+
+        def __enter__(self) -> "LocalCdpTransportTests._FakeResponse":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def test_direct_opener_has_no_proxy_configuration(self) -> None:
+        proxy_handlers = [
+            handler
+            for handler in browser_login._DIRECT_OPENER.handlers
+            if isinstance(handler, request.ProxyHandler)
+        ]
+        self.assertEqual(proxy_handlers, [])
+
+    def test_wait_for_cdp_uses_local_direct_transport(self) -> None:
+        response = self._FakeResponse(b'{"Browser":"Chrome"}')
+        with mock.patch.object(browser_login, "_open_local_url", return_value=response) as open_local:
+            port = browser_login._wait_for_cdp_ws(None, 12345, timeout=1)
+        self.assertEqual(port, 12345)
+        self.assertEqual(open_local.call_args.args[0].full_url, "http://127.0.0.1:12345/json/version")
+
+
 class ReadMusicCookiesTests(unittest.TestCase):
     class _FakeWs:
         def __init__(self, responses: list[dict[str, object]]) -> None:
@@ -100,7 +132,7 @@ class ReadMusicCookiesTests(unittest.TestCase):
         return fake_module
 
     def test_reads_and_filters_music_163_cookies(self) -> None:
-        self._patch_websocket(
+        websocket = self._patch_websocket(
             [
                 {
                     "id": 1000,
@@ -123,6 +155,10 @@ class ReadMusicCookiesTests(unittest.TestCase):
         self.assertIn("MUSIC_U=eval-cookie", result)
         self.assertIn("MUSIC_U=music-value", result)
         self.assertNotIn("OTHER", result)
+        self.assertEqual(
+            websocket.create_connection.call_args.kwargs["http_no_proxy"],
+            ["127.0.0.1", "localhost"],
+        )
 
     def test_returns_empty_when_no_page_target(self) -> None:
         with mock.patch.object(browser_login, "_find_page_ws", return_value=None):
@@ -133,43 +169,58 @@ class RunOfficialLoginTests(unittest.TestCase):
     def _fake_proc(self) -> mock.Mock:
         proc = mock.Mock()
         proc.terminate = mock.Mock()
+        proc.kill = mock.Mock()
+        proc.wait = mock.Mock(return_value=0)
         return proc
 
     def test_raises_when_no_browser_found(self) -> None:
         with mock.patch.object(browser_login, "find_browser_exe", return_value=None):
-            with self.assertRaises(BrowserLoginError):
+            with self.assertRaises(BrowserLoginError) as raised:
                 run_official_login(on_status=lambda _m: None)
+        self.assertNotIn("粘贴 Cookie", str(raised.exception))
+        self.assertIn("安装 Chrome 或 Edge", str(raised.exception))
 
-    def test_returns_cookie_when_already_logged_in(self) -> None:
+    def test_always_launches_with_isolated_profile(self) -> None:
         proc = self._fake_proc()
         with mock.patch.object(browser_login, "find_browser_exe", return_value="/fake/msedge.exe"), mock.patch.object(
             browser_login, "pick_free_port", return_value=12345
         ), mock.patch.object(
             browser_login, "_launch_browser", return_value=proc
+        ) as launch_mock, mock.patch.object(
+            browser_login.tempfile, "mkdtemp", return_value="/isolated/profile"
         ), mock.patch.object(
             browser_login, "_wait_for_cdp_ws", return_value=12345
         ), mock.patch.object(
             browser_login, "_read_music_cookies", return_value="MUSIC_U=abc; __csrf=1"
+        ), mock.patch.object(
+            browser_login.shutil, "rmtree"
         ):
-            cookie = run_official_login(timeout=10, reuse_existing=True, on_status=lambda _m: None)
+            cookie = run_official_login(timeout=10, on_status=lambda _m: None)
         self.assertIn("MUSIC_U=abc", cookie)
+        self.assertEqual(launch_mock.call_args.args[2], "/isolated/profile")
+        proc.terminate.assert_called_once_with()
+        proc.wait.assert_called_once_with(timeout=5.0)
 
-    def test_retries_real_profile_after_killing_background_browsers(self) -> None:
+    def test_forces_browser_exit_when_terminate_times_out(self) -> None:
         proc = self._fake_proc()
+        proc.wait.side_effect = [subprocess.TimeoutExpired("browser", 5), 0]
         with mock.patch.object(browser_login, "find_browser_exe", return_value="/fake/msedge.exe"), mock.patch.object(
             browser_login, "pick_free_port", return_value=12345
         ), mock.patch.object(
             browser_login, "_launch_browser", return_value=proc
         ), mock.patch.object(
-            browser_login, "_wait_for_cdp_ws", side_effect=[None, 12345]
+            browser_login.tempfile, "mkdtemp", return_value="/isolated/profile"
         ), mock.patch.object(
-            browser_login, "_kill_background_browsers"
-        ) as kill_mock, mock.patch.object(
+            browser_login, "_wait_for_cdp_ws", return_value=12345
+        ), mock.patch.object(
             browser_login, "_read_music_cookies", return_value="MUSIC_U=abc; __csrf=1"
+        ), mock.patch.object(
+            browser_login.shutil, "rmtree"
         ):
-            cookie = run_official_login(timeout=10, reuse_existing=True, on_status=lambda _m: None)
-        kill_mock.assert_called_once_with("/fake/msedge.exe")
+            cookie = run_official_login(timeout=10, on_status=lambda _m: None)
         self.assertIn("MUSIC_U=abc", cookie)
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 2)
 
     def test_times_out_without_cookie(self) -> None:
         proc = self._fake_proc()
@@ -183,9 +234,17 @@ class RunOfficialLoginTests(unittest.TestCase):
             browser_login, "_read_music_cookies", return_value=""
         ):
             with self.assertRaises(browser_login.MusicFetchError):
-                run_official_login(timeout=1, reuse_existing=True, on_status=lambda _m: None)
+                run_official_login(timeout=1, on_status=lambda _m: None)
 
-    def test_default_skips_reuse_attempt_and_opens_scan_window(self) -> None:
+    def test_profile_cleanup_failure_is_reported(self) -> None:
+        with mock.patch.object(browser_login.shutil, "rmtree", side_effect=OSError("busy")), mock.patch.object(
+            browser_login.time, "sleep"
+        ):
+            with self.assertRaises(BrowserLoginError) as raised:
+                browser_login._remove_temp_profile("/isolated/profile")
+        self.assertIn("临时登录数据未能清理", str(raised.exception))
+
+    def test_diagnose_never_outputs_cookie_value(self) -> None:
         proc = self._fake_proc()
         with mock.patch.object(browser_login, "find_browser_exe", return_value="/fake/msedge.exe"), mock.patch.object(
             browser_login, "pick_free_port", return_value=12345
@@ -194,13 +253,13 @@ class RunOfficialLoginTests(unittest.TestCase):
         ), mock.patch.object(
             browser_login, "_wait_for_cdp_ws", return_value=12345
         ), mock.patch.object(
-            browser_login, "_kill_background_browsers"
-        ) as kill_mock, mock.patch.object(
-            browser_login, "_read_music_cookies", return_value="MUSIC_U=abc; __csrf=1"
+            browser_login, "_find_page_ws", return_value="ws://page"
+        ), mock.patch.object(
+            browser_login, "_read_music_cookies", return_value="MUSIC_U=secret; __csrf=secret"
         ):
-            cookie = run_official_login(timeout=10, on_status=lambda _m: None)
-        kill_mock.assert_not_called()
-        self.assertIn("MUSIC_U=abc", cookie)
+            lines = browser_login.diagnose(timeout=1)
+        self.assertIn("cookies_found=True", lines)
+        self.assertFalse(any("secret" in line or "cookie_preview" in line for line in lines))
 
 
 class ReadDevtoolsPortTests(unittest.TestCase):

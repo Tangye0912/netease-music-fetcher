@@ -1,6 +1,9 @@
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.app_settings import (
@@ -71,6 +74,29 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.proxy_port, 1080)
             self.assertEqual(loaded.proxy_username, "proxy-user")
             self.assertEqual(loaded.proxy_password, "proxy-secret")
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not enforced on Windows")
+    def test_session_file_is_private_after_each_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text("{}", encoding="utf-8")
+            path.chmod(0o644)
+
+            store = SessionStore(path)
+            store.save(AppSession(cookie="MUSIC_U=secret", proxy_password="proxy-secret"))
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_atomic_save_failure_preserves_previous_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text('{"cookie":"MUSIC_U=old"}', encoding="utf-8")
+            with mock.patch("music_fetch.app_stores.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaises(OSError):
+                    SessionStore(path).save(AppSession(cookie="MUSIC_U=new"))
+
+            self.assertEqual(path.read_text(encoding="utf-8"), '{"cookie":"MUSIC_U=old"}')
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
     def test_qr_blocked_until_is_persisted(self):
         with tempfile.TemporaryDirectory() as tmp:

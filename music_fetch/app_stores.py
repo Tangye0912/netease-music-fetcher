@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +37,29 @@ from music_fetch.app_settings import (
 from music_fetch.download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
 
 logger = get_logger("music_fetch.stores")
+
+
+def _write_private_json(path: Path, payload: object) -> None:
+    """Atomically replace a credential-bearing JSON file with private permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            if os.name != "nt":
+                os.chmod(temp_path, 0o600)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 @dataclass
@@ -103,7 +128,6 @@ class SessionStore:
         )
 
     def save(self, session: AppSession) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # When "remember_login" is off, we intentionally avoid persisting cookie to disk.
         payload = {
             "cookie": session.cookie if session.remember_login else "",
@@ -123,7 +147,7 @@ class SessionStore:
             "proxy_password": session.proxy_password,
             "qr_blocked_until": session.qr_blocked_until,
         }
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_private_json(self.path, payload)
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
 
     @staticmethod

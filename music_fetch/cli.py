@@ -21,6 +21,7 @@ from music_fetch.api import (
     DEFAULT_OUT_DIR,
     DownloadResult,
     MusicFetchError,
+    fetch_account_profile,
     fetch_playlist_song_ids,
     fetch_song_metadata,
     load_cookie,
@@ -38,26 +39,47 @@ from music_fetch.app_settings import (
 )
 from music_fetch.app_stores import SessionStore
 from music_fetch.audio import resolve_output_path
+from music_fetch.browser_login import BrowserLoginError, run_official_login
 from music_fetch.pipeline import run_download_pipeline
 from music_fetch.network import ProxyConfigError, configure_proxy
 
 
 def _load_cli_cookie(cookie_file: Optional[Path]) -> str:
-    """Load the CLI credential from an explicit cookie file or the TUI session.
+    """Load an explicit credential or ensure the app session is logged in.
 
-    The normal flow is: run `music-fetch` without arguments, scan the QR code
-    once in the TUI, then reuse that saved session in script mode.  Users
-    never need to visit the NetEase website or copy cookies from a browser.
+    When the app session is missing or expired, script mode opens the same
+    isolated official QR flow as the TUI.  It never inspects a normal browser
+    profile.  An explicitly supplied cookie file remains a caller-owned
+    override and is not copied into the app session.
     """
     if cookie_file is not None:
         return load_cookie(cookie_file)
-    session = SessionStore(SESSION_FILE).load()
+    store = SessionStore(SESSION_FILE)
+    session = store.load()
     cookie = normalize_cookie(session.cookie)
+    if "MUSIC_U=" in cookie:
+        try:
+            fetch_account_profile(cookie, timeout=6)
+            return cookie
+        except MusicFetchError as err:
+            if err.code != "AUTH_EXPIRED":
+                return cookie
+            session.cookie = ""
+            session.remember_login = False
+            store.save(session)
+
+    print("应用登录凭证缺失或已过期，正在打开隔离的官网扫码窗口...", file=sys.stderr)
+    try:
+        cookie = normalize_cookie(run_official_login(timeout=300))
+    except BrowserLoginError as err:
+        raise MusicFetchError("AUTH_EXPIRED", str(err)) from err
     if "MUSIC_U=" not in cookie:
-        raise MusicFetchError(
-            "AUTH_EXPIRED",
-            "尚未登录：请先运行 music-fetch（不带参数）完成扫码登录，登录状态会自动保存并供脚本模式复用。",
-        )
+        raise MusicFetchError("AUTH_EXPIRED", "扫码登录未返回有效的 MUSIC_U 凭证，请重试。")
+    fetch_account_profile(cookie, timeout=6)
+    session.cookie = cookie
+    session.remember_login = True
+    session.qr_blocked_until = ""
+    store.save(session)
     return cookie
 
 
@@ -213,7 +235,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cookie-file", default=None,
-        help="Optional cookie file path. By default, reuse the session saved by TUI QR login.",
+        help=(
+            "Optional cookie file path. By default, reuse the app session; "
+            "if missing or expired, open isolated official browser QR login."
+        ),
     )
     parser.add_argument(
         "--timeout", type=int, default=30,
