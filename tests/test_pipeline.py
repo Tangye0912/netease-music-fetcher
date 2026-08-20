@@ -48,7 +48,7 @@ class WriteAudioTagsTests(unittest.TestCase):
     @mock.patch("mutagen.File")
     def test_mp4_tags_use_atom_codes(self, mock_file):
         from mutagen.mp4 import MP4
-        tags = {}
+        tags: dict[str, str] = {}
         audio = self._make_mock_audio(tags, MP4)
         mock_file.return_value = audio
         output_path = Path(self.tmp.name) / "test.m4a"
@@ -64,7 +64,7 @@ class WriteAudioTagsTests(unittest.TestCase):
     @mock.patch("mutagen.File")
     def test_vorbis_tags_use_string_keys(self, mock_file):
         from mutagen.flac import FLAC
-        tags = {}
+        tags: dict[str, str] = {}
         audio = self._make_mock_audio(tags, FLAC)
         mock_file.return_value = audio
         output_path = Path(self.tmp.name) / "test.flac"

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from datetime import datetime
+from email.message import Message
 from pathlib import Path
 from urllib import error
 from unittest import mock
@@ -50,7 +51,7 @@ class NetworkProbeTests(unittest.TestCase):
 
     def test_http_error_still_proves_endpoint_is_reachable(self):
         http_error = error.HTTPError(
-            "https://example.test", 403, "Forbidden", {}, None,
+            "https://example.test", 403, "Forbidden", Message(), None,
         )
         with mock.patch("music_fetch.diagnostics.open_url", side_effect=http_error):
             result = probe_endpoint("CDN", "https://example.test")

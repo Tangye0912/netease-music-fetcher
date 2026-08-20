@@ -19,7 +19,6 @@ __all__ = [
 import re
 import shutil
 import time
-import functools
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -44,6 +43,9 @@ from music_fetch.network import open_url
 
 
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]+')
+# Shared marker used both when a download attempt raises a 403 and when the
+# fallback logic decides whether a failure was a 403 (anti-hotlink / CDN block).
+_HTTP_403_MARKER = "HTTP 403"
 
 
 # ── Filename helpers ─────────────────────────────────────────────
@@ -84,14 +86,14 @@ def infer_audio_format_from_url(media_url: str) -> Optional[str]:
     return None
 
 
-@functools.lru_cache(maxsize=1)
 def is_ffmpeg_available() -> bool:
+    # No cache: shutil.which is cheap, and caching would make a freshly
+    # installed ffmpeg invisible until the app restarts.
     return bool(shutil.which("ffmpeg"))
 
 
 def invalidate_ffmpeg_cache() -> None:
-    """Clear the cached ffmpeg availability check (e.g. after install)."""
-    is_ffmpeg_available.cache_clear()
+    """No-op retained for API compatibility (the check is no longer cached)."""
 
 
 def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:
@@ -155,7 +157,7 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         except DownloadCanceled:
             raise
         except MusicFetchError as err:
-            if err.code == "DOWNLOAD_FAILED" and "HTTP 403" in err.message:
+            if err.code == "DOWNLOAD_FAILED" and _HTTP_403_MARKER in err.message:
                 last_403 = err
                 logger.warning("Candidate rejected by CDN with 403. song_id=%s level=%s encode=%s", song_id, candidate.level, candidate.encode_type)
                 continue
@@ -357,8 +359,12 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     continue
                 raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Media request failed: HTTP {http_err.code}.") from http_err
             except error.URLError as url_err:
-                if resume_offset == 0 and tmp_path.exists():
+                # Always remove the partial file on a failed attempt: the next
+                # candidate may be a different media URL, and appending its
+                # bytes after a stale partial would corrupt the output.
+                if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
+                resume_offset = 0
                 logger.warning("Download attempt network error. attempt=%s/%s reason=%s", attempt_no, total_attempts, url_err.reason)
                 last_network_error = url_err
                 continue

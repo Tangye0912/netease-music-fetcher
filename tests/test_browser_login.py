@@ -16,7 +16,7 @@ from music_fetch.browser_login import (
 
 class CookieStringTests(unittest.TestCase):
     def test_build_cookie_string_joins_name_value_pairs(self) -> None:
-        cookies = [
+        cookies: list[dict[str, object]] = [
             {"name": "MUSIC_U", "value": "abc"},
             {"name": "__csrf", "value": "123"},
             {"name": "NMTID", "value": ""},  # empty value must be skipped

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 from unittest import mock
 
 from music_fetch.api import MusicFetchError
@@ -17,7 +18,7 @@ class FakeJob:
         self.kwargs = kwargs
         self.output_path = kwargs["output_path"]
         self._state = "pending"
-        self._result = None
+        self._result: Optional[DownloadJobResult] = None
         self.pause_calls = 0
         self.resume_calls = 0
         self.cancel_calls = 0

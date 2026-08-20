@@ -155,7 +155,9 @@ class TuiApp:
 
     def run(self) -> int:
         # Validate an existing session; an expired cookie locks the menu to login.
-        if not self._validate_session_login():
+        # Only clear + persist when there was actually a stored cookie (a fresh
+        # first run has none and should not create an empty session file).
+        if self.session.cookie and not self._validate_session_login():
             self.session.cookie = ""
             self.session_store.save(self.session)
         while True:

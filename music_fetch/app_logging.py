@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Optional
 
 _DEFAULT_LOG_PATH = Path.home() / ".config" / "music-fetch" / "logs" / "music-fetch.log"
 _FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
@@ -49,7 +50,7 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def mask_value(value: str, keep_prefix: int = 4, keep_suffix: int = 4) -> str:
+def mask_value(value: Optional[str], keep_prefix: int = 4, keep_suffix: int = 4) -> str:
     value = (value or "").strip()
     if not value:
         return ""

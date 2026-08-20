@@ -2,6 +2,7 @@
 probe_media_size_bytes, and BatchDetectRow."""
 
 import unittest
+from email.message import Message
 from unittest import mock
 
 from music_fetch.batch_models import (
@@ -82,7 +83,7 @@ class ProbeMediaSizeBytesTests(unittest.TestCase):
         def urlopen_side_effect(req, timeout):
             call_count[0] += 1
             if call_count[0] == 1:
-                raise HTTPError("url", 404, "Not Found", {}, None)
+                raise HTTPError("url", 404, "Not Found", Message(), None)
             mock_resp = mock.MagicMock()
             mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
             mock_resp.__exit__ = mock.MagicMock(return_value=None)

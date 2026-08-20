@@ -1,6 +1,7 @@
 """Tests for music_fetch.audio.py download stream logic."""
 import tempfile
 import unittest
+from email.message import Message
 from pathlib import Path
 from unittest import mock
 
@@ -75,7 +76,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
 
     def test_download_403_retries_with_next_header(self):
         import urllib.error
-        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", {}, None)
+        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", Message(), None)
         fake_403.read.return_value = b""
 
         fake_ok = mock.MagicMock()
@@ -101,7 +102,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
 
     def test_download_all_403_raises(self):
         import urllib.error
-        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", {}, None)
+        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", Message(), None)
         fake_403.read.return_value = b""
 
         with mock.patch("urllib.request.urlopen", side_effect=fake_403):
@@ -183,7 +184,7 @@ class DownloadAudioStreamTests(unittest.TestCase):
 
     def test_download_uses_http_fallback_when_https_fails(self):
         import urllib.error
-        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", {}, None)
+        fake_403 = urllib.error.HTTPError("url", 403, "Forbidden", Message(), None)
         fake_403.read.return_value = b""
 
         fake_ok = mock.MagicMock()
@@ -333,7 +334,7 @@ class FetchOuterMediaUrlTests(unittest.TestCase):
         mock_resp.geturl.return_value = "https://m10.music.126.net/song.mp3"
         with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
             result = music_fetch.audio.fetch_outer_media_url("42")
-        self.assertIsNotNone(result)
+        assert result is not None
         self.assertIn("music.126.net", result)
 
     def test_redirects_to_non_cdn(self):
@@ -346,6 +347,6 @@ class FetchOuterMediaUrlTests(unittest.TestCase):
 
     def test_http_error(self):
         from urllib import error
-        with mock.patch("music_fetch.audio.request.urlopen", side_effect=error.HTTPError("url", 404, "Not Found", {}, None)):
+        with mock.patch("music_fetch.audio.request.urlopen", side_effect=error.HTTPError("url", 404, "Not Found", Message(), None)):
             result = music_fetch.audio.fetch_outer_media_url("42")
         self.assertIsNone(result)

@@ -101,11 +101,17 @@ def confirm(message: str, default: bool = True) -> bool:
 def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> int:
     """Print a numbered menu and return the selected index (1-based input).
 
-    Raises KeyboardInterrupt when the user presses Ctrl-C.
+    Long options are truncated to the terminal width so a single over-long
+    song name / path never wraps the whole menu.  Raises KeyboardInterrupt
+    when the user presses Ctrl-C.
     """
     print_header(title)
+    width = max(shutil.get_terminal_size((80, 24)).columns - 6, 10)
     for index, option in enumerate(options, start=1):
-        print_info(f"  {index}. {option}")
+        text = str(option)
+        if _display_width(text) > width:
+            text = _truncate_to_width(text, max(width - 1, 1)) + "…"
+        print_info(f"  {index}. {text}")
     print_info("")
     while True:
         raw = ask(f"{prompt_text} [1-{len(options)}]").strip()

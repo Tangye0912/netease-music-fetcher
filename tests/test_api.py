@@ -1,5 +1,6 @@
 """Tests for music_fetch.api pure-logic functions."""
 import unittest
+from email.message import Message
 from unittest import mock
 from urllib import error
 
@@ -92,7 +93,7 @@ class ExtractUrlFromInputTests(unittest.TestCase):
     def test_extracts_url_from_text(self):
         text = "看看这首歌 https://music.163.com/song?id=123"
         url = extract_url_from_input(text)
-        self.assertIsNotNone(url)
+        assert url is not None
         self.assertIn("music.163.com", url)
 
     def test_returns_none_for_no_url(self):
@@ -188,16 +189,18 @@ class ResolveShortUrlTests(unittest.TestCase):
         self.assertEqual(result, "https://music.163.com/song?id=123")
 
     def test_http_error_same_url_ignored(self):
-        http_err = error.HTTPError("https://163cn.tv/abc", 404, "Not Found", {}, None)
-        http_err.geturl = mock.MagicMock(return_value="https://163cn.tv/abc")
-        with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err):
+        http_err = error.HTTPError("https://163cn.tv/abc", 404, "Not Found", Message(), None)
+        with mock.patch.object(http_err, "geturl", return_value="https://163cn.tv/abc"), mock.patch(
+            "music_fetch.api.request.urlopen", side_effect=http_err
+        ):
             with self.assertRaises(MusicFetchError):
                 resolve_short_url("https://163cn.tv/abc")
 
     def test_http_error_different_url_returned(self):
-        http_err = error.HTTPError("https://163cn.tv/abc", 302, "Found", {}, None)
-        http_err.geturl = mock.MagicMock(return_value="https://music.163.com/song?id=42")
-        with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err):
+        http_err = error.HTTPError("https://163cn.tv/abc", 302, "Found", Message(), None)
+        with mock.patch.object(http_err, "geturl", return_value="https://music.163.com/song?id=42"), mock.patch(
+            "music_fetch.api.request.urlopen", side_effect=http_err
+        ):
             result = resolve_short_url("https://163cn.tv/abc")
         self.assertEqual(result, "https://music.163.com/song?id=42")
 
@@ -236,7 +239,7 @@ class PerformRequestTests(unittest.TestCase):
 
     def test_perform_request_http_error(self):
         from music_fetch.api import perform_json_get
-        http_err = error.HTTPError("url", 403, "Forbidden", {}, None)
+        http_err = error.HTTPError("url", 403, "Forbidden", Message(), None)
         mock_resp = mock.MagicMock()
         mock_resp.read.return_value = b'{"code": 403}'
         with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err) as mock_urlopen:

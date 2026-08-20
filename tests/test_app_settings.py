@@ -24,12 +24,12 @@ class AppSettingsTests(unittest.TestCase):
 
     def test_url_pattern_matches_http(self):
         match = URL_IN_TEXT_PATTERN.search("text https://music.163.com/song?id=1 more")
-        self.assertIsNotNone(match)
+        assert match is not None
         self.assertEqual(match.group(0), "https://music.163.com/song?id=1")
 
     def test_url_pattern_matches_https(self):
         match = URL_IN_TEXT_PATTERN.search("text https://163cn.tv/abc more")
-        self.assertIsNotNone(match)
+        assert match is not None
         self.assertEqual(match.group(0), "https://163cn.tv/abc")
 
     def test_url_pattern_no_match(self):

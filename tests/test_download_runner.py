@@ -42,7 +42,9 @@ class DownloadJobSuccessTests(unittest.TestCase):
                 job.start()
                 self.assertTrue(job.wait(timeout=5))
             self.assertEqual(job.state(), JOB_STATE_SUCCESS)
-            self.assertEqual(job.result().file_size, 5)
+            job_result = job.result()
+            assert job_result is not None
+            self.assertEqual(job_result.file_size, 5)
 
     def test_progress_callback_updates_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -129,8 +131,10 @@ class DownloadJobFailureTests(unittest.TestCase):
                 job.start()
                 self.assertTrue(job.wait(timeout=5))
             self.assertEqual(job.state(), JOB_STATE_FAILED)
-            self.assertEqual(job.result().error_code, "DOWNLOAD_FAILED")
-            self.assertEqual(job.result().error_message, "test error")
+            result = job.result()
+            assert result is not None
+            self.assertEqual(result.error_code, "DOWNLOAD_FAILED")
+            self.assertEqual(result.error_message, "test error")
 
     def test_cancel_produces_canceled_result(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,7 +147,9 @@ class DownloadJobFailureTests(unittest.TestCase):
                 job.start()
                 self.assertTrue(job.wait(timeout=5))
             self.assertEqual(job.state(), JOB_STATE_CANCELED)
-            self.assertEqual(job.result().output_path, output_path)
+            result = job.result()
+            assert result is not None
+            self.assertEqual(result.output_path, output_path)
 
     def test_unexpected_error_produces_failed_with_unknown_code(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,7 +162,9 @@ class DownloadJobFailureTests(unittest.TestCase):
                 job.start()
                 self.assertTrue(job.wait(timeout=5))
             self.assertEqual(job.state(), JOB_STATE_FAILED)
-            self.assertEqual(job.result().error_code, "UNKNOWN_ERROR")
+            result = job.result()
+            assert result is not None
+            self.assertEqual(result.error_code, "UNKNOWN_ERROR")
 
     def test_stale_temp_files_are_cleaned_after_run(self):
         with tempfile.TemporaryDirectory() as tmp:

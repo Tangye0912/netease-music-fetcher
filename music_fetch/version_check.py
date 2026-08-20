@@ -20,7 +20,7 @@ from music_fetch.network import open_url
 __all__ = ['version_key', 'fetch_latest_project_version', 'fetch_release_download_url']
 
 
-def version_key(version: str) -> tuple[int, ...]:
+def version_key(version: Optional[str]) -> tuple[int, ...]:
     parts = [int(part) for part in re.findall(r"\d+", version or "")]
     return tuple(parts) if parts else (0,)
 

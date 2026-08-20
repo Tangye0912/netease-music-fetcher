@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from email.message import Message
 from unittest import mock
 from urllib import error
 from urllib.error import URLError
@@ -80,7 +81,7 @@ class FetchLatestProjectVersionTagFallbackTests(unittest.TestCase):
     def test_falls_back_to_tags(self):
         from music_fetch.version_check import fetch_latest_project_version
         # Release API returns 404, tags API returns a list
-        http_err = error.HTTPError("url", 404, "Not Found", {}, None)
+        http_err = error.HTTPError("url", 404, "Not Found", Message(), None)
         tags_resp = mock.MagicMock()
         tags_resp.__enter__.return_value = tags_resp
         tags_resp.read.return_value = b'[{"name": "v1.0.0"}]'
