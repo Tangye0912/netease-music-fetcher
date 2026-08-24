@@ -18,6 +18,7 @@ import json
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -351,13 +352,20 @@ def run_official_login(
         log("已获取登录凭证。")
         return normalize_cookie(cookie)
     finally:
+        # Never let cleanup problems mask the actual outcome: if the login
+        # succeeded, surface a leftover-profile warning but still return the
+        # cookie; if an error is already propagating, let it win.
         stopped = True
+        cleanup_error: Optional[Exception] = None
         if proc is not None:
             stopped = _stop_browser(proc)
         if temp_profile:
-            _remove_temp_profile(temp_profile)
-        if not stopped:
-            raise BrowserLoginError("扫码浏览器未能完全退出，请手动关闭该窗口后重试。")
+            try:
+                _remove_temp_profile(temp_profile)
+            except BrowserLoginError as err:
+                cleanup_error = err
+        if sys.exc_info()[1] is None and (not stopped or cleanup_error is not None):
+            log("登录成功，但临时扫码数据清理未完成，请手动删除该目录后重试。")
 
 
 def diagnose(timeout: float = 20.0) -> list[str]:

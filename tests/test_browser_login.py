@@ -244,6 +244,29 @@ class RunOfficialLoginTests(unittest.TestCase):
                 browser_login._remove_temp_profile("/isolated/profile")
         self.assertIn("临时登录数据未能清理", str(raised.exception))
 
+    def test_cleanup_failure_after_success_still_returns_cookie(self) -> None:
+        proc = self._fake_proc()
+        messages: list[str] = []
+        with mock.patch.object(browser_login, "find_browser_exe", return_value="/fake/msedge.exe"), mock.patch.object(
+            browser_login, "pick_free_port", return_value=12345
+        ), mock.patch.object(
+            browser_login, "_launch_browser", return_value=proc
+        ), mock.patch.object(
+            browser_login.tempfile, "mkdtemp", return_value="/isolated/profile"
+        ), mock.patch.object(
+            browser_login, "_wait_for_cdp_ws", return_value=12345
+        ), mock.patch.object(
+            browser_login, "_read_music_cookies", return_value="MUSIC_U=abc; __csrf=1"
+        ), mock.patch.object(
+            browser_login, "_remove_temp_profile", side_effect=BrowserLoginError("临时登录数据未能清理")
+        ), mock.patch.object(
+            browser_login, "_stop_browser", return_value=False
+        ):
+            cookie = run_official_login(timeout=10, on_status=messages.append)
+        # A successful login must not be masked by a cleanup failure.
+        self.assertIn("MUSIC_U=abc", cookie)
+        self.assertTrue(any("清理未完成" in message for message in messages))
+
     def test_diagnose_never_outputs_cookie_value(self) -> None:
         proc = self._fake_proc()
         with mock.patch.object(browser_login, "find_browser_exe", return_value="/fake/msedge.exe"), mock.patch.object(
