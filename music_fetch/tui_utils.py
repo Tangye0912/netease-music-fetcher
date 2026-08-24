@@ -26,6 +26,10 @@ COLOR_DIM = "\x1b[90m"
 COLOR_BOLD = "\x1b[1m"
 COLOR_STATUS_BG = "\x1b[48;5;30m"
 
+# Upper bound for rendered content width. Wider terminals use the extra room
+# (resizing the window helps), but we stop at this cap to avoid absurd layouts.
+MAX_CONTENT_WIDTH = 160
+
 # Bili-hardcore-inspired palette: cyan focus, yellow metadata, green/red
 # state, muted gray chrome, and a charcoal dialog canvas.  The actual font is
 # controlled by the user's terminal; these styles provide the visual hierarchy.
@@ -95,7 +99,7 @@ def print_warning(text: str) -> None:
 
 def print_status(items: Sequence[tuple[str, str]]) -> None:
     """Render compact application state as a full-width cyan status band."""
-    width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     content = "  " + "  │  ".join(f"{label}: {value}" for label, value in items) + "  "
     content = _truncate_to_width(content, width)
     content += " " * max(width - _display_width(content), 0)
@@ -103,7 +107,7 @@ def print_status(items: Sequence[tuple[str, str]]) -> None:
 
 
 def print_header(text: str) -> None:
-    width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     label = _truncate_to_width(str(text), max(width - 4, 1))
     label_width = _display_width(label) + 2
     remaining = max(width - label_width, 0)
@@ -184,7 +188,7 @@ def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> 
     song name / path never wraps the whole menu.  Raises KeyboardInterrupt
     when the user presses Ctrl-C.
     """
-    terminal_width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    terminal_width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     box_width = max(terminal_width, 12)
     inner_width = max(box_width - 2, 1)
     title_text = _truncate_to_width(str(title), max(inner_width - 4, 1))
@@ -334,7 +338,7 @@ def _truncate_to_width(text: str, max_width: int) -> str:
     return out
 
 
-def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = 100) -> None:
+def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = MAX_CONTENT_WIDTH) -> None:
     """Print a bordered, aligned table with truncated cells.
 
     Uses wcwidth so CJK full-width characters align correctly in a terminal.
@@ -386,9 +390,15 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width
     print_info(border("┌", "┬", "┐", COLOR_CYAN))
     print_info(fmt_row(headers, header=True))
     print_info(border("├", "┼", "┤"))
+    truncated = False
     for row in rows:
+        for index, cell in enumerate(row):
+            if index < columns and _display_width(str(cell)) > cell_widths[index]:
+                truncated = True
         print_info(fmt_row(row))
     print_info(border("└", "┴", "┘", COLOR_CYAN))
+    if truncated:
+        print_info(_ansi(COLOR_DIM, "（窗口较窄，部分内容已截断；加宽终端窗口可查看完整信息）"))
 
 
 __all__ = [

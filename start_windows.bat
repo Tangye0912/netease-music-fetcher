@@ -2,6 +2,9 @@
 setlocal
 cd /d "%~dp0"
 
+rem 预设终端窗口大小（用户可随时手动拉伸/缩小）
+mode con cols=140 lines=40 >nul
+
 set "PY_CMD="
 where py >nul 2>nul && py -3.13 -c "import sys" >nul 2>nul && set "PY_CMD=py -3.13"
 if not defined PY_CMD where py >nul 2>nul && py -3 -c "import sys" >nul 2>nul && set "PY_CMD=py -3"

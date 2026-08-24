@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 预设终端窗口大小（xterm 尺寸控制序列；Terminal.app / iTerm2 支持，用户可随时拉伸）
+printf '\e[8;40;140t' || true
+
 PYTHON_BIN=""
 if command -v python3.13 >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python3.13)"
