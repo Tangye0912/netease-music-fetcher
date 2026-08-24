@@ -79,11 +79,13 @@ def run_batch_detect(
     if not expanded:
         return rows
 
-    # Build a deduplicated list while preserving order.
+    # Build a deduplicated list while preserving order; duplicates are
+    # collected separately and appended to the tail at the end.
+    duplicate_rows: list[BatchDetectRow] = []
     unique_expanded: list[tuple[str, str, str, str]] = []
     for source_type, source_value, song_id, source_label in expanded:
         if song_id in seen_song_ids:
-            rows.append(
+            duplicate_rows.append(
                 BatchDetectRow(
                     raw_input=source_value,
                     source_type=source_type,
@@ -194,6 +196,7 @@ def run_batch_detect(
     for idx in range(total_unique):
         if idx in results_by_index:
             rows.append(results_by_index[idx])
+    rows.extend(duplicate_rows)
     logger.info(
         "Batch detect completed. total=%s ready=%s duplicate=%s failed_or_unavailable=%s",
         len(rows),

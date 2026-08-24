@@ -63,6 +63,26 @@ class BatchInspectTests(unittest.TestCase):
         duplicate = [r for r in rows if r.status == "duplicate"]
         self.assertEqual(len(ready), 1)
         self.assertEqual(len(duplicate), 1)
+        # Duplicate rows go to the tail, after the unique results.
+        self.assertEqual(rows[-1].status, "duplicate")
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_duplicate_rows_are_appended_to_tail(self, mock_detect, _mock_probe):
+        def _detect(song_id, cookie, timeout):
+            result = self._detect_result(song_id)
+            return result
+        mock_detect.side_effect = _detect
+        raw = "\n".join([
+            "https://music.163.com/song?id=100",
+            "https://music.163.com/#/song?id=100",
+            "https://music.163.com/song?id=200",
+        ])
+        rows = run_batch_detect(raw, "MUSIC_U=test", timeout=5)
+        self.assertEqual(
+            [(row.song_id, row.status) for row in rows],
+            [("100", "ready"), ("200", "ready"), ("100", "duplicate")],
+        )
 
     @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.detect_song")
