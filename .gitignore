@@ -28,4 +28,5 @@ env/
 # Runtime
 logs/
 *.log
-.reasonix/.coverage
+# Local tool metadata (Reasonix session state)
+.reasonix/
