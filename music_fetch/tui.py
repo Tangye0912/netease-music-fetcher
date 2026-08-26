@@ -343,29 +343,55 @@ class TuiApp:
         if not results:
             U.print_warning("未找到相关歌曲。")
             return
-        rows = [
-            (
-                str(index),
-                r.song_name,
-                r.artist or "-",
-                r.album or "-",
-                format_duration(r.duration_ms),
-            )
-            for index, r in enumerate(results, start=1)
-        ]
-        U.print_table(["#", "歌名", "歌手", "专辑", "时长"], rows)
-        choice = self._pick_from_rows("输入序号下载", len(results))
-        if choice is None:
-            return
-        picked = results[choice - 1]
-        if U.confirm(f"下载《{picked.song_name}》？", default=True):
-            self._download_song(
-                song_id=picked.song_id,
-                song_name=picked.song_name,
-                artist=picked.artist or None,
-                album_name=picked.album or None,
-                duration_ms=picked.duration_ms,
-            )
+        # Paginate so one screen always fits in the terminal window.
+        page_size = 10
+        total_pages = (len(results) + page_size - 1) // page_size
+        page = 0
+        while True:
+            start = page * page_size
+            page_results = results[start:start + page_size]
+            rows = [
+                (
+                    str(index),
+                    r.song_name,
+                    r.artist or "-",
+                    r.album or "-",
+                    format_duration(r.duration_ms),
+                )
+                for index, r in enumerate(page_results, start=start + 1)
+            ]
+            U.print_table(["#", "歌名", "歌手", "专辑", "时长"], rows)
+            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(results)} 条")
+            while True:
+                raw = U.ask("输入序号下载（0 返回；n 下一页；p 上一页）").strip()
+                if not raw or raw == "0":
+                    return
+                if raw.lower() == "n":
+                    if page + 1 < total_pages:
+                        page += 1
+                        break
+                    U.print_warning("已经是最后一页。")
+                    continue
+                if raw.lower() == "p":
+                    if page > 0:
+                        page -= 1
+                        break
+                    U.print_warning("已经是第一页。")
+                    continue
+                if raw.isdigit():
+                    idx = int(raw) - 1  # 0-based index into results
+                    if start <= idx < start + len(page_results):
+                        picked = results[idx]
+                        if U.confirm(f"下载《{picked.song_name}》？", default=True):
+                            self._download_song(
+                                song_id=picked.song_id,
+                                song_name=picked.song_name,
+                                artist=picked.artist or None,
+                                album_name=picked.album or None,
+                                duration_ms=picked.duration_ms,
+                            )
+                        return
+                U.print_warning(f"请输入 {start + 1}-{start + len(page_results)} 的序号，0 返回，n/p 翻页。")
 
     def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
         """Ask the user to pick a numbered row (1..count) or return (0 / empty)."""
@@ -1088,8 +1114,8 @@ class TuiApp:
         U.print_info("检查中...")
         try:
             latest, url = fetch_latest_project_version(timeout=8)
-        except RuntimeError:
-            U.print_warning("无法检查更新（网络不可用或仓库不可访问），请稍后再试。")
+        except RuntimeError as err:
+            U.print_warning(f"无法检查更新：{err}")
             return
         if version_key(latest) > version_key(APP_VERSION):
             U.print_success(f"发现新版本：{latest}（当前 {APP_VERSION}）")

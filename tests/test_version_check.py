@@ -74,6 +74,19 @@ class FetchLatestVersionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 fetch_latest_project_version(timeout=3)
 
+    def test_rate_limit_403_raises_actionable_message(self):
+        headers = Message()
+        headers["X-RateLimit-Remaining"] = "0"
+        http_err = error.HTTPError("url", 403, "rate limit exceeded", headers, None)
+
+        with mock.patch(
+            "music_fetch.version_check.request.urlopen", side_effect=[http_err, http_err]
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                fetch_latest_project_version(timeout=3)
+        self.assertIn("请求频率已达上限", str(raised.exception))
+        self.assertIn("MUSIC_FETCH_GITHUB_TOKEN", str(raised.exception))
+
 
 class FetchLatestProjectVersionTagFallbackTests(unittest.TestCase):
     """Test fallback to tags API when release API fails."""
