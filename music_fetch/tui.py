@@ -69,7 +69,7 @@ from music_fetch.history_results import (
     paginate_download_history,
 )
 from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config, normalize_proxy_config
-from music_fetch.version_check import fetch_latest_project_version, version_key
+from music_fetch.version_check import check_for_updates_cached, version_key
 import music_fetch.tui_utils as U
 import music_fetch.ui_texts as T
 
@@ -1139,7 +1139,7 @@ class TuiApp:
         U.print_info(f"当前版本：v{APP_VERSION}")
         with U.spinner("检查中..."):
             try:
-                latest, url = fetch_latest_project_version(timeout=8)
+                latest, url = check_for_updates_cached(timeout=8)
             except RuntimeError as err:
                 U.print_warning(f"无法检查更新：{err}")
                 return

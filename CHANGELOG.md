@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **检查更新缓存**：检查结果（成功或失败）本地缓存 24 小时（`~/.config/music-fetch/update_check.json`），重复查看不重复请求 GitHub API，避免匿名限流（60 次/小时）；超过 24 小时自动重新检查。
+- **README 快速上手**：新增「快速上手」区块——普通用户下载 Release 产物免装 Python 即用；Python 用户三行命令安装启动；附 Windows/macOS 双击启动说明。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（397 通过，2 跳过，15 个参数化子测试通过）。
+- 类型检查：`python3 -m mypy music_fetch/ tests/`（60 文件零错误）。
+
 ## v3.2.0 (2026-08-24)
 
 ### Added

@@ -2,6 +2,27 @@
 
 网易云音乐单曲/歌单下载工具。v3.1 起登录采用**官网扫码（浏览器）**唯一方式，并加入登录门槛（未登录只显示登录/退出）。
 
+## 快速上手
+
+### 方式一：直接下载可执行文件（普通用户，免装 Python）
+
+1. 打开本仓库 [Releases](../../releases) 页，下载最新版：
+   - Windows：`music-fetch.exe`；
+   - macOS：`music-fetch`（首次使用先执行 `chmod +x music-fetch`）。
+2. 双击运行，首次启动会自动打开浏览器登录页 → 用**网易云 App** 扫码 → 登录完成即可下载。
+
+### 方式二：Python 安装（开发者 / 有 Python 环境的用户）
+
+```bash
+git clone https://github.com/Tangye0912/netease-music-fetcher.git
+cd netease-music-fetcher
+python -m pip install -e .
+music-fetch                                               # 交互界面（TUI）
+music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单曲
+```
+
+> 无需安装也可以直接运行：`python -m music_fetch.app`（Windows 双击 `start_windows.bat`、macOS 双击 `start_mac.command`，会自动预设终端窗口大小）。
+
 ## 1. 版本概览（v3.2.0）
 
 ### 1.1 v3.2.0 变更

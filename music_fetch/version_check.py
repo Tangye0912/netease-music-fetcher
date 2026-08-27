@@ -10,15 +10,25 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+from pathlib import Path
 from typing import Optional
 from urllib import error, request
 
-from music_fetch.app_settings import PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
+from music_fetch.app_settings import CONFIG_DIR, PROJECT_GITHUB_URL, PROJECT_RELEASE_API, PROJECT_TAGS_API
 from music_fetch.network import open_url
 
 
 
-__all__ = ['version_key', 'fetch_latest_project_version', 'fetch_release_download_url']
+__all__ = [
+    "version_key",
+    "fetch_latest_project_version",
+    "fetch_release_download_url",
+    "check_for_updates_cached",
+]
+
+UPDATE_CHECK_CACHE_FILE = CONFIG_DIR / "update_check.json"
+UPDATE_CHECK_TTL_SEC = 24 * 3600
 
 
 def version_key(version: Optional[str]) -> tuple[int, ...]:
@@ -118,4 +128,53 @@ def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
             if url:
                 return url
     return None
+
+
+def _read_update_cache(cache_file: Path) -> dict[str, object]:
+    try:
+        raw = json.loads(cache_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_update_cache(cache_file: Path, payload: dict[str, object]) -> None:
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass  # The cache is best-effort; a failed write just means re-checking next time.
+
+
+def check_for_updates_cached(
+    timeout: int = 8,
+    ttl_seconds: int = UPDATE_CHECK_TTL_SEC,
+    cache_file: Optional[Path] = None,
+) -> tuple[str, str]:
+    """Fetch the latest version, replaying a cached outcome within the TTL.
+
+    The anonymous GitHub API allows only 60 requests/hour per IP, so the TUI
+    caches the last check (success or error) for a day instead of hammering
+    the endpoint on every menu visit.  Raises RuntimeError exactly like
+    fetch_latest_project_version.
+    """
+    cache_path = cache_file if cache_file is not None else UPDATE_CHECK_CACHE_FILE
+    cache = _read_update_cache(cache_path)
+    now = time.time()
+    checked_at_raw = cache.get("checked_at")
+    checked_at = float(checked_at_raw) if isinstance(checked_at_raw, (int, float)) else 0.0
+    if cache and (now - checked_at) < ttl_seconds:
+        error_message = str(cache.get("error") or "").strip()
+        if error_message:
+            raise RuntimeError(error_message)
+        latest = str(cache.get("latest") or "").strip()
+        if latest:
+            return latest, str(cache.get("url") or PROJECT_GITHUB_URL).strip() or PROJECT_GITHUB_URL
+    try:
+        result = fetch_latest_project_version(timeout=timeout)
+    except RuntimeError as err:
+        _write_update_cache(cache_path, {"checked_at": now, "error": str(err)})
+        raise
+    _write_update_cache(cache_path, {"checked_at": now, "latest": result[0], "url": result[1]})
+    return result
 

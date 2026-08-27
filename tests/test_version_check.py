@@ -1,13 +1,20 @@
 """Tests for music_fetch.version_check.py — version_key and fetch_latest_project_version."""
 
 import json
+import tempfile
 import unittest
 from email.message import Message
+from pathlib import Path
 from unittest import mock
 from urllib import error
 from urllib.error import URLError
 
-from music_fetch.version_check import fetch_latest_project_version, fetch_release_download_url, version_key
+from music_fetch.version_check import (
+    check_for_updates_cached,
+    fetch_latest_project_version,
+    fetch_release_download_url,
+    version_key,
+)
 
 
 class VersionKeyTests(unittest.TestCase):
@@ -158,6 +165,65 @@ class FetchReleaseDownloadUrlTests(unittest.TestCase):
         with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
             result = fetch_release_download_url(timeout=3)
         self.assertIsNone(result)
+
+
+class CheckForUpdatesCachedTests(unittest.TestCase):
+    """The TUI caches update checks for a day to respect the anonymous
+    GitHub API rate limit (60 requests/hour)."""
+
+    def _fake_success(self):
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = resp
+        resp.read.return_value = b'{"tag_name": "v3.3.0", "html_url": "https://example.test"}'
+        return resp
+
+    def test_second_call_within_ttl_reuses_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "update_check.json"
+            with mock.patch(
+                "music_fetch.version_check.open_url", return_value=self._fake_success()
+            ) as open_mock:
+                first = check_for_updates_cached(timeout=3, cache_file=cache_file)
+                second = check_for_updates_cached(timeout=3, cache_file=cache_file)
+            self.assertEqual(first, ("v3.3.0", "https://example.test"))
+            self.assertEqual(second, first)
+            self.assertEqual(open_mock.call_count, 1)  # cached, no new request
+
+    def test_error_is_cached_and_replayed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "update_check.json"
+            with mock.patch(
+                "music_fetch.version_check.open_url", side_effect=error.URLError("offline")
+            ) as open_mock:
+                with self.assertRaises(RuntimeError) as first_raise:
+                    check_for_updates_cached(timeout=3, cache_file=cache_file)
+                calls_after_first = open_mock.call_count
+                with self.assertRaises(RuntimeError) as second_raise:
+                    check_for_updates_cached(timeout=3, cache_file=cache_file)
+            # The cached error is replayed without any new network request.
+            self.assertEqual(open_mock.call_count, calls_after_first)
+            self.assertGreater(calls_after_first, 0)
+            self.assertEqual(str(second_raise.exception), str(first_raise.exception))
+
+    def test_expired_cache_refetches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "update_check.json"
+            with mock.patch(
+                "music_fetch.version_check.open_url", return_value=self._fake_success()
+            ) as open_mock:
+                check_for_updates_cached(timeout=3, cache_file=cache_file)
+                check_for_updates_cached(timeout=3, ttl_seconds=0, cache_file=cache_file)
+            self.assertEqual(open_mock.call_count, 2)
+
+    def test_corrupt_cache_file_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "update_check.json"
+            cache_file.write_text("not json", encoding="utf-8")
+            with mock.patch(
+                "music_fetch.version_check.open_url", return_value=self._fake_success()
+            ):
+                latest, _url = check_for_updates_cached(timeout=3, cache_file=cache_file)
+            self.assertEqual(latest, "v3.3.0")
 
 
 if __name__ == "__main__":
