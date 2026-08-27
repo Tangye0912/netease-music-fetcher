@@ -109,6 +109,8 @@ class SongDetectionResult:
     cover_url: Optional[str] = None
     artist: Optional[str] = None
     album_name: Optional[str] = None
+    level: str = ""  # highest available quality level (standard/higher/exhigh/lossless/hires)
+    encode_type: str = ""  # e.g. mp3 / aac of that level
 
 
 @dataclass
@@ -584,18 +586,37 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
     return all_ids
 
 
+_LEVEL_RANK = {"standard": 1, "higher": 2, "exhigh": 3, "lossless": 4, "hires": 5}
+
+
+def _pick_highest_level(candidates: list[PlayableCandidate]) -> tuple[str, str]:
+    """Return (level, encode_type) of the highest-quality candidate."""
+    best_level = ""
+    best_encode = ""
+    best_rank = 0
+    for candidate in candidates:
+        rank = _LEVEL_RANK.get((candidate.level or "").strip().lower(), 0)
+        if rank > best_rank:
+            best_rank = rank
+            best_level = candidate.level
+            best_encode = candidate.encode_type
+    return best_level, best_encode
+
+
 def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
     song_id = parse_song_id(song_url)
     logger.info("Detecting song by url. song_id=%s", song_id)
     song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
     try:
-        media_url, media_duration = fetch_playable_url(song_id, cookie, timeout=timeout)
+        candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
     except MusicFetchError as err:
         if err.code != "SONG_UNAVAILABLE":
             raise
         return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=meta_duration, media_url=None, can_download=False, unavailable_reason=err.message, cover_url=cover_url, artist=artist, album_name=album_name)
-    duration = meta_duration if meta_duration is not None else media_duration
-    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name)
+    first = candidates[0]
+    level, encode_type = _pick_highest_level(candidates)
+    duration = meta_duration if meta_duration is not None else first.duration_ms
+    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=first.media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name, level=level, encode_type=encode_type)
 
 
 # ── Media URL utils ──────────────────────────────────────────────

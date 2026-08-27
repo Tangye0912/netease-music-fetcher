@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import re
 import shutil
-from typing import Optional, Sequence
+import sys
+import threading
+from contextlib import contextmanager
+from typing import Iterator, Optional, Sequence
 
 from prompt_toolkit import ANSI, prompt, print_formatted_text
 from prompt_toolkit.application import Application
@@ -181,12 +184,18 @@ def confirm(message: str, default: bool = True) -> bool:
         print_warning("请输入 y 或 n。")
 
 
-def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> int:
+def menu(
+    title: str,
+    options: Sequence[str],
+    prompt_text: str = "请选择",
+    shortcuts: Optional[dict[str, int]] = None,
+) -> int:
     """Print a numbered menu and return the selected index (1-based input).
 
     Long options are truncated to the terminal width so a single over-long
-    song name / path never wraps the whole menu.  Raises KeyboardInterrupt
-    when the user presses Ctrl-C.
+    song name / path never wraps the whole menu.  *shortcuts* maps single
+    keystrokes to 1-based choices (e.g. {"q": 10} for quit) and are shown in
+    the footer.  Raises KeyboardInterrupt when the user presses Ctrl-C.
     """
     terminal_width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     box_width = max(terminal_width, 12)
@@ -214,14 +223,79 @@ def menu(title: str, options: Sequence[str], prompt_text: str = "请选择") -> 
         )
         print_info(line)
     print_info(_ansi(COLOR_CYAN + COLOR_BOLD, "└" + "─" * inner_width + "┘"))
-    print_info(_ansi(COLOR_DIM, "  输入序号确认 · Ctrl+C 返回"))
+    footer = "  输入序号确认 · Ctrl+C 返回"
+    if shortcuts:
+        footer += " · " + " · ".join(f"{key} {options[choice - 1]}" for key, choice in shortcuts.items())
+    print_info(_ansi(COLOR_DIM, footer))
     while True:
         raw = ask(f"{prompt_text} [1-{len(options)}]").strip()
+        if shortcuts and raw and raw.lower() in shortcuts:
+            return shortcuts[raw.lower()]
         if raw.isdigit():
             choice = int(raw)
             if 1 <= choice <= len(options):
                 return choice
         print_warning(f"请输入 1-{len(options)} 之间的数字。")
+
+
+def print_panel(
+    title: str,
+    rows: Sequence[tuple[str, str]],
+    max_width: int = MAX_CONTENT_WIDTH,
+) -> None:
+    """Print a bordered info card with a centered title and key-value rows."""
+    terminal_width = min(shutil.get_terminal_size((80, 24)).columns, max_width)
+    width = max(terminal_width, 20)
+    inner_width = max(width - 2, 1)
+    title_text = f" {_truncate_to_width(str(title), max(inner_width - 4, 1))} "
+    remaining = max(inner_width - _display_width(title_text), 0)
+    top = "┌" + "─" * (remaining // 2) + title_text + "─" * (
+        remaining - remaining // 2
+    ) + "┐"
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, top))
+    for label, value in rows:
+        text = f"{label}：{value}"
+        if _display_width(text) > inner_width - 2:
+            text = _truncate_to_width(text, max(inner_width - 3, 1)) + "…"
+        body = _ansi(COLOR_YELLOW + COLOR_BOLD, label) + _ansi(COLOR_WHITE, f"：{value}")
+        padding = " " * max(inner_width - 2 - _display_width(text), 0)
+        print_info(_ansi(COLOR_DIM, "│ ") + body + padding + _ansi(COLOR_DIM, " │"))
+    print_info(_ansi(COLOR_CYAN + COLOR_BOLD, "└" + "─" * inner_width + "┘"))
+
+
+# ASCII-only frames: braille spinners crash on GBK-codepage Windows consoles
+# (UnicodeEncodeError), so keep the animation safe everywhere.
+_SPINNER_FRAMES = ("|", "/", "-", "\\")
+
+
+@contextmanager
+def spinner(message: str, delay: float = 0.12) -> Iterator[None]:
+    """Animate a one-line spinner while the wrapped block runs.
+
+    The raw stdout writes are safe to mix with prompt_toolkit output because
+    the spinner owns its line and clears it on exit.
+    """
+    stop = threading.Event()
+
+    def _run() -> None:
+        index = 0
+        while not stop.is_set():
+            sys.stdout.write(f"\r{_SPINNER_FRAMES[index % len(_SPINNER_FRAMES)]} {message}  ")
+            sys.stdout.flush()
+            index += 1
+            stop.wait(delay)
+
+    worker = threading.Thread(target=_run, daemon=True)
+    sys.stdout.write(f"\r{_SPINNER_FRAMES[0]} {message}  ")
+    sys.stdout.flush()
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(timeout=1)
+        sys.stdout.write("\r" + " " * min(len(message) + 16, 80) + "\r")
+        sys.stdout.flush()
 
 
 def _bind_escape_to_cancel(dialog: Application[list[str] | None]) -> None:
@@ -415,9 +489,11 @@ __all__ = [
     "print_error",
     "print_header",
     "print_info",
+    "print_panel",
     "print_status",
     "print_success",
     "print_table",
     "print_warning",
     "render_qr_ascii",
+    "spinner",
 ]

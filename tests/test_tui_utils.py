@@ -121,5 +121,41 @@ class MultiselectKeyBindingTests(unittest.TestCase):
         dialog.run.assert_called_once_with()
 
 
+class MenuShortcutsTests(unittest.TestCase):
+    def test_shortcut_key_returns_mapped_choice(self) -> None:
+        with mock.patch.object(tui_utils, "print_info"), mock.patch.object(
+            tui_utils, "ask", return_value="q"
+        ):
+            choice = tui_utils.menu("测试", ["登录", "退出"], shortcuts={"q": 2})
+        self.assertEqual(choice, 2)
+
+    def test_shortcut_hint_appears_in_footer(self) -> None:
+        captured: list[str] = []
+        with mock.patch.object(tui_utils, "print_info", side_effect=captured.append), mock.patch.object(
+            tui_utils, "ask", return_value="1"
+        ):
+            tui_utils.menu("测试", ["登录 / 重新登录", "退出"], shortcuts={"q": 2})
+        plain = [_plain(line) for line in captured]
+        self.assertTrue(any("q 退出" in line for line in plain))
+
+    def test_numeric_choice_still_works_with_shortcuts(self) -> None:
+        with mock.patch.object(tui_utils, "print_info"), mock.patch.object(
+            tui_utils, "ask", return_value="1"
+        ):
+            choice = tui_utils.menu("测试", ["登录", "退出"], shortcuts={"q": 2})
+        self.assertEqual(choice, 1)
+
+
+class PrintPanelTests(unittest.TestCase):
+    def test_panel_renders_title_rows_and_border(self) -> None:
+        captured: list[str] = []
+        with mock.patch.object(tui_utils, "print_info", side_effect=captured.append):
+            tui_utils.print_panel("歌曲信息", [("歌名", "天下"), ("音质", "较高")], max_width=40)
+        plain = [_plain(line) for line in captured]
+        self.assertIn("歌曲信息", plain[0])
+        self.assertTrue(any("天下" in line for line in plain))
+        self.assertEqual(plain[-1][:1], "└")
+
+
 if __name__ == "__main__":
     unittest.main()

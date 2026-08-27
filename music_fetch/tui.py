@@ -46,7 +46,7 @@ from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRec
 from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
 from music_fetch.batch_download import BatchDownloadSession, format_speed
 from music_fetch.batch_inspect import run_batch_detect
-from music_fetch.batch_models import format_bytes, format_duration
+from music_fetch.batch_models import format_bytes, format_duration, probe_media_size_bytes
 from music_fetch.batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
 from music_fetch.diagnostics import (
     DiagnosticContext,
@@ -86,6 +86,21 @@ MENU_UPDATE = "检查更新"
 MENU_LOGOUT = "退出登录"
 MENU_LOGIN = "登录 / 重新登录"
 MENU_QUIT = "退出"
+
+_QUALITY_LABELS = {
+    "standard": "标准",
+    "higher": "较高",
+    "exhigh": "极高",
+    "lossless": "无损",
+    "hires": "Hi-Res",
+}
+
+
+def _quality_label(level: str, encode_type: str = "") -> str:
+    label = _QUALITY_LABELS.get((level or "").strip().lower(), level or "未知")
+    if encode_type:
+        return f"{label}（{encode_type}）"
+    return label
 
 
 class TuiApp:
@@ -191,7 +206,7 @@ class TuiApp:
                 U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
                 options = [MENU_LOGIN, MENU_QUIT]
             try:
-                choice = U.menu("主菜单", options)
+                choice = U.menu("主菜单", options, shortcuts={"q": len(options)})
             except (KeyboardInterrupt, EOFError):
                 print()
                 return 0
@@ -295,21 +310,26 @@ class TuiApp:
             return
         if not self._require_login():
             return
-        U.print_info("检测中...")
-        try:
-            result = detect_song(value, self.session.cookie, timeout=self.session.detect_timeout_sec)
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            if err.code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-            return
-        U.print_success(f"歌曲 ID：{result.song_id}")
-        U.print_info(f"歌名：{result.song_name or '未知'}")
-        if result.artist:
-            U.print_info(f"艺人：{result.artist}")
-        if result.album_name:
-            U.print_info(f"专辑：{result.album_name}")
-        U.print_info(f"时长：{format_duration(result.duration_ms)}")
+        with U.spinner("检测中..."):
+            try:
+                result = detect_song(value, self.session.cookie, timeout=self.session.detect_timeout_sec)
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                if err.code == "AUTH_EXPIRED":
+                    self._handle_auth_expired()
+                return
+        rows = [
+            ("歌名", result.song_name or "未知"),
+            ("艺人", result.artist or "-"),
+            ("专辑", result.album_name or "-"),
+            ("音质", _quality_label(result.level, result.encode_type)),
+            ("时长", format_duration(result.duration_ms)),
+        ]
+        if result.can_download and result.media_url:
+            size_bytes = probe_media_size_bytes(result.media_url, timeout=min(8, self.session.detect_timeout_sec))
+            if size_bytes:
+                rows.append(("大小", format_bytes(size_bytes)))
+        U.print_panel("歌曲信息", rows)
         if not result.can_download:
             U.print_error(f"该歌曲不可下载：{result.unavailable_reason or '版权/地区/VIP 限制'}")
             return
@@ -332,14 +352,14 @@ class TuiApp:
             return
         if not self._require_login():
             return
-        U.print_info("搜索中...")
-        try:
-            results = search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            if err.code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-            return
+        with U.spinner("搜索中..."):
+            try:
+                results = search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                if err.code == "AUTH_EXPIRED":
+                    self._handle_auth_expired()
+                return
         if not results:
             U.print_warning("未找到相关歌曲。")
             return
@@ -409,14 +429,14 @@ class TuiApp:
         U.print_header(MENU_PLAYLISTS)
         if not self._require_login():
             return
-        U.print_info("获取歌单列表...")
-        try:
-            playlists = fetch_user_playlists(self.session.cookie, timeout=self.session.detect_timeout_sec)
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            if err.code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-            return
+        with U.spinner("获取歌单列表..."):
+            try:
+                playlists = fetch_user_playlists(self.session.cookie, timeout=self.session.detect_timeout_sec)
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                if err.code == "AUTH_EXPIRED":
+                    self._handle_auth_expired()
+                return
         if not playlists:
             U.print_warning("暂无歌单。")
             return
@@ -749,7 +769,13 @@ class TuiApp:
                 size_bytes=result.file_size,
                 status=TASK_STATE_SUCCESS,
             )
-            U.print_success(f"下载完成：{result.output_path}（{format_bytes(result.file_size)}）")
+            U.print_panel(
+                "下载完成",
+                [
+                    ("文件", str(result.output_path)),
+                    ("大小", format_bytes(result.file_size)),
+                ],
+            )
             return True
         if result.state == "canceled":
             self._add_record(
@@ -1111,12 +1137,12 @@ class TuiApp:
     def _screen_check_update(self) -> None:
         U.print_header(MENU_UPDATE)
         U.print_info(f"当前版本：v{APP_VERSION}")
-        U.print_info("检查中...")
-        try:
-            latest, url = fetch_latest_project_version(timeout=8)
-        except RuntimeError as err:
-            U.print_warning(f"无法检查更新：{err}")
-            return
+        with U.spinner("检查中..."):
+            try:
+                latest, url = fetch_latest_project_version(timeout=8)
+            except RuntimeError as err:
+                U.print_warning(f"无法检查更新：{err}")
+                return
         if version_key(latest) > version_key(APP_VERSION):
             U.print_success(f"发现新版本：{latest}（当前 {APP_VERSION}）")
             U.print_info(f"下载地址：{url or PROJECT_GITHUB_URL}")
