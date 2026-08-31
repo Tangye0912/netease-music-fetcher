@@ -7,14 +7,7 @@ from urllib import error
 from music_fetch.api import (
     MusicFetchError,
     ErrorCode,
-    QR_STATUS_ERROR,
-    QR_STATUS_EXPIRED,
-    QR_STATUS_REJECTED,
-    QR_STATUS_SCANNED,
-    QR_STATUS_SUCCESS,
-    QR_STATUS_WAITING,
     build_cookie_string,
-    build_qr_login_url,
     extract_csrf,
     extract_url_from_input,
     is_netease_music_host,
@@ -473,125 +466,6 @@ class DetectSongTests(unittest.TestCase):
         with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [empty_resp] * 5):
             result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
         self.assertFalse(result.can_download)
-
-
-class QrLoginTests(unittest.TestCase):
-    def test_build_qr_login_url_embeds_unikey(self):
-        self.assertEqual(
-            build_qr_login_url("abc123"),
-            "https://music.163.com/login?codekey=abc123",
-        )
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_fetch_qr_unikey_success(self, qr_mock):
-        qr_mock.return_value = (200, {"code": 200, "unikey": "key-1"})
-        from music_fetch.api import fetch_qr_unikey
-        self.assertEqual(fetch_qr_unikey(timeout=5), "key-1")
-        path, payload = qr_mock.call_args.args[0], qr_mock.call_args.args[1]
-        self.assertEqual(path, "/login/qrcode/unikey")
-        self.assertEqual(payload, {})  # transport-specific type is injected in _qr_request
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_fetch_qr_unikey_rejects_non_200(self, qr_mock):
-        qr_mock.return_value = (502, {"code": 502})
-        from music_fetch.api import fetch_qr_unikey
-        with self.assertRaises(MusicFetchError) as ctx:
-            fetch_qr_unikey(timeout=5)
-        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_fetch_qr_unikey_rejects_missing_unikey(self, qr_mock):
-        qr_mock.return_value = (200, {"code": 200})
-        from music_fetch.api import fetch_qr_unikey
-        with self.assertRaises(MusicFetchError) as ctx:
-            fetch_qr_unikey(timeout=5)
-        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_poll_status_mapping(self, qr_mock):
-        from music_fetch.api import poll_qr_login_status
-        cases = [
-            ((200, {"code": 800, "message": "二维码已过期"}), QR_STATUS_EXPIRED),
-            ((200, {"code": 801, "message": "等待扫码"}), QR_STATUS_WAITING),
-            ((200, {"code": 802, "message": "等待确认"}), QR_STATUS_SCANNED),
-            ((200, {"code": 804, "message": "bad"}), QR_STATUS_ERROR),
-            ((200, {"code": 8821, "message": "请切换其他登录方式或升级新版本再试"}), QR_STATUS_REJECTED),
-        ]
-        for payload, expected_status in cases:
-            with self.subTest(payload=payload):
-                qr_mock.return_value = payload
-                result = poll_qr_login_status("key-1", timeout=5)
-                self.assertEqual(result.status, expected_status)
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_poll_status_uses_default_payload_without_type(self, qr_mock):
-        from music_fetch.api import poll_qr_login_status
-        qr_mock.return_value = (200, {"code": 801, "message": "等待扫码"})
-        poll_qr_login_status("key-1", timeout=5)
-        path, payload = qr_mock.call_args.args[0], qr_mock.call_args.args[1]
-        self.assertEqual(path, "/login/qrcode/client/login")
-        self.assertEqual(payload, {"key": "key-1"})  # type injected by _qr_request
-
-    @mock.patch("music_fetch.api._qr_request")
-    def test_poll_status_success_returns_cookie(self, qr_mock):
-        from music_fetch.api import poll_qr_login_status
-        qr_mock.return_value = (
-            200,
-            {"code": 803, "message": "授权成功", "cookie": "MUSIC_U=abc; __csrf=def"},
-        )
-        result = poll_qr_login_status("key-1", timeout=5)
-        self.assertEqual(result.status, QR_STATUS_SUCCESS)
-        self.assertEqual(result.cookie, "MUSIC_U=abc; __csrf=def")
-
-    @mock.patch("music_fetch.api._qr_request", side_effect=MusicFetchError("NETWORK_ERROR", "timeout"))
-    def test_poll_status_network_error_becomes_error_status(self, _qr_mock):
-        from music_fetch.api import poll_qr_login_status
-        result = poll_qr_login_status("key-1", timeout=5)
-        self.assertEqual(result.status, QR_STATUS_ERROR)
-        self.assertIn("timeout", result.message)
-
-    @mock.patch("music_fetch.eapi.eapi_request")
-    def test_qr_request_defaults_to_eapi_type3_with_mobile_ua(self, eapi_mock):
-        import music_fetch.api as api_module
-        eapi_mock.return_value = (200, {"code": 200})
-        result = api_module._qr_request("/login/qrcode/unikey", {}, timeout=5)
-        eapi_mock.assert_called_once_with(
-            "/api/login/qrcode/unikey",
-            {"type": "3"},
-            timeout=5,
-            user_agent=api_module.NETEASE_MOBILE_UA,
-        )
-        self.assertEqual(result, (200, {"code": 200}))
-
-    @mock.patch("music_fetch.eapi.eapi_request")
-    def test_qr_request_eapi_uses_desktop_ua_when_disabled(self, eapi_mock):
-        import music_fetch.api as api_module
-        eapi_mock.return_value = (200, {"code": 200})
-        old = api_module.QR_USE_MOBILE_UA
-        try:
-            api_module.QR_USE_MOBILE_UA = False
-            api_module._qr_request("/login/qrcode/unikey", {}, timeout=5)
-            eapi_mock.assert_called_once_with(
-                "/api/login/qrcode/unikey",
-                {"type": "3"},
-                timeout=5,
-                user_agent=None,
-            )
-        finally:
-            api_module.QR_USE_MOBILE_UA = old
-
-    @mock.patch("music_fetch.weapi.weapi_request")
-    def test_qr_request_weapi_injects_type1(self, weapi_mock):
-        import music_fetch.api as api_module
-        weapi_mock.return_value = (200, {"code": 200})
-        old = api_module.QR_TRANSPORT
-        try:
-            api_module.QR_TRANSPORT = "weapi"
-            result = api_module._qr_request("/login/qrcode/unikey", {}, timeout=5)
-            weapi_mock.assert_called_once_with("/login/qrcode/unikey", {"type": 1}, timeout=5)
-            self.assertEqual(result, (200, {"code": 200}))
-        finally:
-            api_module.QR_TRANSPORT = old
 
 
 if __name__ == "__main__":

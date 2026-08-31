@@ -4,14 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "3.2.0"
+version = "3.3.0"
 description = "网易云音乐单曲下载工具（终端 TUI + CLI）"
 requires-python = ">=3.10"
 dependencies = [
     "mutagen>=1.45",
     "prompt-toolkit>=3.0,<4.0",
     "pycryptodome>=3.20",
-    "qrcode>=7.4,<9.0",
     "requests[socks]>=2.31,<3.0",
     "websocket-client>=1.0",
 ]
@@ -38,7 +37,5 @@ strict = true
 [[tool.mypy.overrides]]
 module = [
     "mutagen.*",
-    "qrcode",
-    "qrcode.*",
 ]
 ignore_errors = true

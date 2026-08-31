@@ -80,7 +80,6 @@ class AppSession:
     proxy_port: int = 0
     proxy_username: str = ""
     proxy_password: str = ""
-    qr_blocked_until: str = ""  # ISO timestamp; QR login refused until then
 
 
 @dataclass
@@ -124,7 +123,6 @@ class SessionStore:
             proxy_port=self._safe_proxy_port(raw.get("proxy_port")),
             proxy_username=str(raw.get("proxy_username") or "").strip(),
             proxy_password=str(raw.get("proxy_password") or ""),
-            qr_blocked_until=str(raw.get("qr_blocked_until") or ""),
         )
 
     def save(self, session: AppSession) -> None:
@@ -145,7 +143,6 @@ class SessionStore:
             "proxy_port": self._safe_proxy_port(session.proxy_port),
             "proxy_username": str(session.proxy_username or "").strip(),
             "proxy_password": session.proxy_password,
-            "qr_blocked_until": session.qr_blocked_until,
         }
         _write_private_json(self.path, payload)
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)

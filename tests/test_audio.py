@@ -350,3 +350,35 @@ class FetchOuterMediaUrlTests(unittest.TestCase):
         with mock.patch("music_fetch.audio.request.urlopen", side_effect=error.HTTPError("url", 404, "Not Found", Message(), None)):
             result = music_fetch.audio.fetch_outer_media_url("42")
         self.assertIsNone(result)
+
+
+class DownloadPreviewToTempTests(unittest.TestCase):
+    def _candidate(self, level: str, encode_type: str, url: str) -> mock.Mock:
+        candidate = mock.Mock()
+        candidate.level = level
+        candidate.encode_type = encode_type
+        candidate.media_url = url
+        return candidate
+
+    def test_picks_lowest_level_candidate_and_downloads_to_temp(self):
+        candidates = [
+            self._candidate("exhigh", "aac", "https://cdn/x.aac"),
+            self._candidate("standard", "mp3", "https://cdn/x.mp3"),
+            self._candidate("higher", "aac", "https://cdn/x2.aac"),
+        ]
+        with mock.patch("music_fetch.audio.fetch_playable_candidates", return_value=candidates), mock.patch(
+            "music_fetch.audio._download_audio_stream"
+        ) as stream_mock, mock.patch(
+            "music_fetch.audio.tempfile.gettempdir", return_value="/tmp"
+        ):
+            path = music_fetch.audio.download_preview_to_temp("42", "天下", "MUSIC_U=x", timeout=5)
+        self.assertEqual(Path(path).parent, Path("/tmp") / "music-fetch-previews")
+        self.assertEqual(Path(path).suffix, ".mp3")
+        media_url = stream_mock.call_args.args[0]
+        self.assertEqual(media_url, "https://cdn/x.mp3")
+
+    def test_no_candidates_raises_unavailable(self):
+        with mock.patch("music_fetch.audio.fetch_playable_candidates", return_value=[]):
+            with self.assertRaises(MusicFetchError) as raised:
+                music_fetch.audio.download_preview_to_temp("42", "天下", "MUSIC_U=x", timeout=5)
+        self.assertEqual(raised.exception.code, "SONG_UNAVAILABLE")

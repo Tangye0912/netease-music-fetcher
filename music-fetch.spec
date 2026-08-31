@@ -32,9 +32,7 @@ a = Analysis(
         'prompt_toolkit.history',
         'prompt_toolkit.filters',
         'prompt_toolkit.cursor_shapes',
-        # QR code rendering for terminal login.
-        'qrcode',
-        # eapi transport encryption (QR login status checks).
+        # eapi transport encryption (kept for future encrypted endpoints).
         'Crypto',
         'Crypto.Cipher',
         'Crypto.Cipher.AES',

@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     permissions:
@@ -41,8 +41,11 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             echo "name=music-fetch-windows" >> $GITHUB_OUTPUT
             echo "file=dist/music-fetch.exe" >> $GITHUB_OUTPUT
-          else
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             echo "name=music-fetch-macos" >> $GITHUB_OUTPUT
+            echo "file=dist/music-fetch" >> $GITHUB_OUTPUT
+          else
+            echo "name=music-fetch-linux" >> $GITHUB_OUTPUT
             echo "file=dist/music-fetch" >> $GITHUB_OUTPUT
           fi
 

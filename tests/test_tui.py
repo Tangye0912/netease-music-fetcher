@@ -8,7 +8,6 @@ from music_fetch.api import MusicFetchError
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.tui import TuiApp
-from music_fetch.tui_utils import render_qr_ascii
 
 
 class AppRoutingTests(unittest.TestCase):
@@ -25,24 +24,6 @@ class AppRoutingTests(unittest.TestCase):
         result = app_main(["--url", "42"])
         self.assertEqual(result, 0)
         cli_main_mock.assert_called_once_with(["--url", "42"])
-
-
-class RenderQrAsciiTests(unittest.TestCase):
-    def test_renders_compact_half_block_art(self):
-        art = render_qr_ascii("https://music.163.com/login?codekey=abc123")
-        lines = art.splitlines()
-        # Half-block rendering: two module rows per line — must fit a
-        # normal 80-column terminal without resizing (bili-hardcore style).
-        self.assertLessEqual(len(lines), 20)
-        self.assertGreater(len(lines), 5)
-        self.assertLessEqual(len(lines[0]), 40)
-        self.assertTrue(any(char in art for char in ("▀", "▄", "█")))
-        # Every line must be the same width.
-        widths = {len(line) for line in lines}
-        self.assertEqual(len(widths), 1)
-
-    def test_different_inputs_render_different_art(self):
-        self.assertNotEqual(render_qr_ascii("aaaa"), render_qr_ascii("bbbb"))
 
 
 class TuiAppHelperTests(unittest.TestCase):

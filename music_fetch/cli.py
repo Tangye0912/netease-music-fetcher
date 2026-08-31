@@ -78,7 +78,6 @@ def _load_cli_cookie(cookie_file: Optional[Path]) -> str:
     fetch_account_profile(cookie, timeout=6)
     session.cookie = cookie
     session.remember_login = True
-    session.qr_blocked_until = ""
     store.save(session)
     return cookie
 

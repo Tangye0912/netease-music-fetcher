@@ -23,9 +23,16 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 
 > 无需安装也可以直接运行：`python -m music_fetch.app`（Windows 双击 `start_windows.bat`、macOS 双击 `start_mac.command`，会自动预设终端窗口大小）。
 
-## 1. 版本概览（v3.2.0）
+## 1. 版本概览（v3.3.0）
 
-### 1.1 v3.2.0 变更
+### 1.1 v3.3.0 变更
+
+- **试听**：单曲检测与搜索结果选中后可选"试听"——下载标准音质临时文件并用系统播放器打开，听完再决定是否下载。
+- **打开所在文件夹**：下载完成后一键打开文件所在目录。
+- **工程瘦身**：移除已废弃的终端二维码登录链路（`weapi`、`qrcode` 依赖、QR 轮询与冷却逻辑），冻结包更小、攻击面更少。
+- **三平台构建**：CI 新增 Linux 构建，Windows/macOS/Linux 三个平台同时出产物。
+
+### 1.2 v3.2.0 变更
 
 - **信息卡片与音质显示**：单曲检测后与下载完成后用带边框卡片展示歌曲信息（歌名/艺人/专辑/音质/时长/大小）；检测接口返回最高可用音质。
 - **搜索分页**：搜索结果每页 10 条，`n`/`p` 翻页、`0` 返回，一屏放得下，不再滚动丢失内容。
@@ -34,7 +41,7 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **登录安全加固**：登录凭证原子替换写入 + POSIX `0600` 权限；一律使用隔离临时 profile，绝不复用已有浏览器登录态；登录成功后清理失败只提示不丢凭证。
 - **菜单快捷键与加载动画**：主菜单 `q` 退出、菜单底部按键提示；检测/搜索/歌单/检查更新有动画加载提示。
 
-### 1.2 v3.1.x 重大变更
+### 1.3 v3.1.x 重大变更
 
 - **官网扫码登录（浏览器，唯一方式）**：启动本机 Chrome/Edge 打开网易云官网登录页，扫码官网二维码后自动取回登录凭证；移除终端二维码登录与粘贴 Cookie。可绕开工具自身二维码被网易云风控标记的问题。
 - **登录门槛**：未登录时主菜单只显示「登录 / 退出」，其余功能锁定；cookie 过期自动回到登录流程。
@@ -43,7 +50,7 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **新增依赖**：`websocket-client`（浏览器登录取 cookie 用）。
 - **3.1.2 发行修复**：无控制台环境回退为普通文本输出，冻结包补齐 `websocket` 与 `wcwidth` 延迟导入，Windows/macOS CI 均可完成测试和打包。
 
-### 1.3 v3.0.0 重大变更
+### 1.4 v3.0.0 重大变更
 
 - **全面 TUI 化**：移除 PySide6 GUI（约 6000 行 Qt 代码与 WebEngine 依赖），所有交互都在终端完成。
 - **终端扫码登录**：调用网易云 QR 登录接口，在终端渲染二维码（ASCII 方块），扫码后自动轮询登录状态并保存凭证。
@@ -51,7 +58,7 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **体积锐减**：单文件产物从约 185MB（含 WebEngine）降至约 13MB，跨平台打包与启动都更快。
 - **保留脚本模式**：`music-fetch --url ...` 等参数化 CLI 原样保留（含 `--concurrency` 歌单并行下载）。
 
-### 1.4 核心能力
+### 1.5 核心能力
 
 - 登录：自动打开 Chrome/Edge 官网二维码页面，扫码后经本机 DevTools 协议取回并保存凭证；无需提前登录网易云网页
 - 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词选项 → 进度条下载（p 暂停 c 取消）
@@ -183,7 +190,7 @@ git push origin v3.0.0
 | --- | --- |
 | `music_fetch/app.py` | 入口路由：无参数进入 TUI，带参数走脚本模式 CLI。 |
 | `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/批量/历史/设置/诊断。 |
-| `music_fetch/tui_utils.py` | TUI 组件：菜单、确认、键盘多选、二维码渲染、表格与进度辅助。 |
+| `music_fetch/tui_utils.py` | TUI 组件：菜单、确认、键盘多选、信息卡片、加载动画、表格与进度辅助。 |
 | `music_fetch/download_runner.py` | 线程下载任务：进度快照、暂停/恢复/取消（替换原 QThread worker）。 |
 | `music_fetch/batch_inspect.py` | 批量识别纯逻辑：混合输入解析、歌单展开、去重、并发检测与取消。 |
 | `music_fetch/batch_download.py` | 批量下载调度：并发上限、逐行状态、历史记录、全部暂停/恢复/取消与结果摘要。 |
@@ -205,7 +212,7 @@ git push origin v3.0.0
 | `music_fetch/ui_texts.py` / `error_texts.py` | 共享文案与错误码到用户提示的映射。 |
 | `music-fetch` | macOS/Linux CLI 包装脚本（无参数进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
-| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`qrcode`、`requests[socks]`）。 |
+| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`）。 |
 | `tests/` | 338 个单元/回归测试与 15 个参数化子测试（全部可在无显示环境运行）。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 

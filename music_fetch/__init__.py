@@ -48,11 +48,6 @@ from music_fetch.api import (
     # Lyrics
     fetch_lyric,
     LyricResult,
-    # QR login
-    fetch_qr_unikey,
-    build_qr_login_url,
-    poll_qr_login_status,
-    QrLoginPollResult,
     # Constants
     SUPPORTED_GUI_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,
@@ -149,11 +144,6 @@ __all__ = [
     "search_songs",
     "fetch_user_playlists",
     "fetch_lyric",
-    # QR login
-    "fetch_qr_unikey",
-    "build_qr_login_url",
-    "poll_qr_login_status",
-    "QrLoginPollResult",
     # Download runner / batch (TUI-era)
     "DownloadJob",
     "DownloadJobResult",

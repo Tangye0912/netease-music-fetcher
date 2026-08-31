@@ -13,13 +13,14 @@ __all__ = [
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
     "download_audio", "download_audio_with_progress", "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
-    "SUPPORTED_GUI_AUDIO_FORMATS",
+    "download_preview_to_temp", "SUPPORTED_GUI_AUDIO_FORMATS",
 ]
 
 import re
 import shutil
-import time
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 from urllib import error, parse, request
@@ -439,3 +440,47 @@ def embed_lyric_tag(output_path: Path, lyric: str) -> None:
             logger.info("Lyric embedded in FLAC tags. path=%s", output_path)
         except (OSError, ValueError, KeyError, TypeError):
             logger.debug("Failed to embed lyric in FLAC. path=%s", output_path, exc_info=True)
+
+
+PREVIEW_DIR_NAME = "music-fetch-previews"
+
+
+def download_preview_to_temp(
+    song_id: str,
+    song_name: str,
+    cookie: str,
+    timeout: int,
+    cancel_checker: Optional[CancelChecker] = None,
+) -> Path:
+    """Download the smallest playable candidate to a temp file for preview.
+
+    Returns the path of the downloaded preview file.  Raises MusicFetchError
+    when no candidate is playable or the download fails.  Preview files live
+    in the system temp directory so a canceled preview never pollutes the
+    user's download folder.
+    """
+    candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
+    if not candidates:
+        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "没有可试听的音源。")
+    candidate = _pick_preview_candidate(candidates)
+    preview_dir = Path(tempfile.gettempdir()) / PREVIEW_DIR_NAME
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = sanitize_filename(song_name or f"song-{song_id}")[:60]
+    extension = (candidate.encode_type or "mp3").lower()
+    output_path = preview_dir / f"试听-{safe_name}.{extension}"
+    _download_audio_stream(
+        normalize_media_url(candidate.media_url),
+        output_path,
+        timeout,
+        progress_callback=None,
+        cancel_checker=cancel_checker,
+        pause_checker=None,
+        cookie=cookie,
+    )
+    return output_path
+
+
+def _pick_preview_candidate(candidates: list[PlayableCandidate]) -> PlayableCandidate:
+    """Prefer the lowest-level (smallest) candidate for a fast preview."""
+    rank = {"standard": 0, "higher": 1, "exhigh": 2, "lossless": 3, "hires": 4}
+    return min(candidates, key=lambda candidate: rank.get((candidate.level or "").lower(), 9))

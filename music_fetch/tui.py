@@ -274,7 +274,6 @@ class TuiApp:
             return
         self.session.cookie = cookie
         self.session.remember_login = True
-        self.session.qr_blocked_until = ""
         self.session_store.save(self.session)
         self._nickname = profile.nickname
         U.print_success(f"登录成功：{self._nickname or '已登录'}")
@@ -333,15 +332,39 @@ class TuiApp:
         if not result.can_download:
             U.print_error(f"该歌曲不可下载：{result.unavailable_reason or '版权/地区/VIP 限制'}")
             return
-        if U.confirm("开始下载？", default=True):
-            self._download_song(
-                song_id=result.song_id,
-                song_name=result.song_name or "",
-                artist=result.artist,
-                album_name=result.album_name,
-                duration_ms=result.duration_ms,
-                cover_url=result.cover_url,
-            )
+        while True:
+            action = U.menu("下一步", ["直接下载", "试听（标准音质临时文件播放）", "返回"], shortcuts={"d": 1, "p": 2})
+            if action == 3:
+                return
+            if action == 2:
+                self._preview_song(result.song_id, result.song_name or "")
+                continue
+            break
+        self._download_song(
+            song_id=result.song_id,
+            song_name=result.song_name or "",
+            artist=result.artist,
+            album_name=result.album_name,
+            duration_ms=result.duration_ms,
+            cover_url=result.cover_url,
+        )
+
+    def _preview_song(self, song_id: str, song_name: str) -> None:
+        from music_fetch.audio import download_preview_to_temp
+
+        with U.spinner("准备试听（下载标准音质临时文件）..."):
+            try:
+                preview_path = download_preview_to_temp(
+                    song_id=song_id,
+                    song_name=song_name,
+                    cookie=self.session.cookie,
+                    timeout=self.session.download_timeout_sec,
+                )
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                return
+        U.print_info(f"试听文件：{preview_path}")
+        self._open_path(preview_path)
 
     # ── search ────────────────────────────────────────────────────
 
@@ -402,7 +425,17 @@ class TuiApp:
                     idx = int(raw) - 1  # 0-based index into results
                     if start <= idx < start + len(page_results):
                         picked = results[idx]
-                        if U.confirm(f"下载《{picked.song_name}》？", default=True):
+                        while True:
+                            action = U.menu(
+                                f"《{picked.song_name}》",
+                                ["直接下载", "试听（标准音质临时文件播放）", "返回列表"],
+                                shortcuts={"d": 1, "p": 2},
+                            )
+                            if action == 3:
+                                break
+                            if action == 2:
+                                self._preview_song(picked.song_id, picked.song_name)
+                                continue
                             self._download_song(
                                 song_id=picked.song_id,
                                 song_name=picked.song_name,
@@ -410,7 +443,8 @@ class TuiApp:
                                 album_name=picked.album or None,
                                 duration_ms=picked.duration_ms,
                             )
-                        return
+                            return
+                        continue
                 U.print_warning(f"请输入 {start + 1}-{start + len(page_results)} 的序号，0 返回，n/p 翻页。")
 
     def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
@@ -776,6 +810,8 @@ class TuiApp:
                     ("大小", format_bytes(result.file_size)),
                 ],
             )
+            if U.confirm("打开所在文件夹？", default=False):
+                self._open_path(result.output_path.parent)
             return True
         if result.state == "canceled":
             self._add_record(
@@ -929,7 +965,7 @@ class TuiApp:
         choice = U.menu("操作", options)
         action = options[choice - 1]
         if action == "打开所在文件夹":
-            self._open_folder(Path(record.output_path).expanduser().parent)
+            self._open_path(Path(record.output_path).expanduser().parent)
         elif action == "删除文件并移除记录":
             path = Path(record.output_path).expanduser()
             if U.confirm(f"确定删除文件并移除记录？\n{path}", default=False):
@@ -985,9 +1021,10 @@ class TuiApp:
                 self._handle_auth_expired()
 
     @staticmethod
-    def _open_folder(path: Path) -> None:
+    def _open_path(path: Path) -> None:
+        """Open a file or folder with the system default handler."""
         if not path.exists():
-            U.print_warning(f"目录不存在：{path}")
+            U.print_warning(f"路径不存在：{path}")
             return
         try:
             if sys.platform == "win32":
@@ -997,7 +1034,7 @@ class TuiApp:
             else:
                 subprocess.run(["xdg-open", str(path)], check=False)
         except OSError as err:
-            U.print_warning(f"打开目录失败：{err}")
+            U.print_warning(f"打开失败：{err}")
 
     # ── settings ──────────────────────────────────────────────────
 

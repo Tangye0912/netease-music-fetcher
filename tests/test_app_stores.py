@@ -98,21 +98,6 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), '{"cookie":"MUSIC_U=old"}')
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
-    def test_qr_blocked_until_is_persisted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "session.json"
-            store = SessionStore(path)
-            origin = AppSession(qr_blocked_until="2026-08-18T12:00:00")
-            store.save(origin)
-            loaded = store.load()
-            self.assertEqual(loaded.qr_blocked_until, "2026-08-18T12:00:00")
-
-    def test_qr_blocked_until_defaults_empty(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "session.json"
-            store = SessionStore(path)
-            self.assertEqual(store.load().qr_blocked_until, "")
-
     def test_font_size_is_clamped_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "session.json"

@@ -1,16 +1,23 @@
 # Changelog
 
-## Unreleased
+## v3.3.0 (2026-08-24)
 
 ### Added
 
+- **试听**：单曲检测与搜索结果选中后可选「试听」——下载标准音质候选到系统临时目录并用默认播放器打开（`audio.download_preview_to_temp`），听完再决定是否下载。
+- **打开所在文件夹**：下载完成后可一键打开文件所在目录（`TuiApp._open_path`，兼容文件/目录）。
 - **检查更新缓存**：检查结果（成功或失败）本地缓存 24 小时（`~/.config/music-fetch/update_check.json`），重复查看不重复请求 GitHub API，避免匿名限流（60 次/小时）；超过 24 小时自动重新检查。
 - **README 快速上手**：新增「快速上手」区块——普通用户下载 Release 产物免装 Python 即用；Python 用户三行命令安装启动；附 Windows/macOS 双击启动说明。
 
+### Changed
+
+- **三平台构建**：CI 新增 `ubuntu-latest`，Windows/macOS/Linux 三个平台同时出产物。
+- **工程瘦身**：移除已废弃的终端二维码登录链路——删除 `music_fetch/weapi.py`、`api.py` 的 QR 轮询/冷却函数与常量、`tui_utils.render_qr_ascii`、`qrcode` 依赖、会话文件中的 `qr_blocked_until` 字段；冻结包更小、攻击面更少。`eapi.py` 保留备用（未来接口加密化）。
+
 ### QA
 
-- 回归测试：`python3 -m pytest tests/ -q`（397 通过，2 跳过，15 个参数化子测试通过）。
-- 类型检查：`python3 -m mypy music_fetch/ tests/`（60 文件零错误）。
+- 回归测试：`python3 -m pytest tests/ -q`（378 通过，2 跳过，10 个参数化子测试通过）。
+- 类型检查：`python3 -m mypy music_fetch/ tests/`（58 文件零错误）。
 
 ## v3.2.0 (2026-08-24)
 
