@@ -49,6 +49,22 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(TuiApp._filter_label("failed"), "失败")
         self.assertEqual(TuiApp._filter_label("weird"), "weird")
 
+    def test_detect_progress_writes_carriage_return(self):
+        # The in-place progress counter must start with a real carriage
+        # return (a literal backslash+r would dump garbage lines).
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        state = [0]
+        with redirect_stdout(buffer):
+            TuiApp._detect_progress(2, 5, state)
+        written = buffer.getvalue()
+        self.assertEqual(state, [5])
+        self.assertTrue(written.startswith("\r"))
+        self.assertIn("2/5", written)
+        self.assertNotIn("\\r", written)
+
     @mock.patch("music_fetch.tui.U.print_header")
     def test_login_menu_routes_to_browser(self, header_mock):
         with mock.patch.object(self.app, "_login_with_browser") as browser_mock:

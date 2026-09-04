@@ -600,7 +600,7 @@ class TuiApp:
     @staticmethod
     def _detect_progress(current: int, total: int, state: list[int]) -> None:
         state[0] = total
-        sys.stdout.write(f"\\r  识别中 {current}/{total} ...    ")
+        sys.stdout.write(f"\r  识别中 {current}/{total} ...    ")
         sys.stdout.flush()
 
     def _offer_batch_export(self, rows) -> None:
