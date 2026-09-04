@@ -11,9 +11,9 @@ from __future__ import annotations
 __all__ = [
     "sanitize_filename", "dedupe_path", "resolve_output_path",
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
-    "download_audio", "download_audio_with_progress", "download_song_with_fallback",
+    "download_audio_with_progress", "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
-    "download_preview_to_temp", "SUPPORTED_GUI_AUDIO_FORMATS",
+    "SUPPORTED_GUI_AUDIO_FORMATS",
 ]
 
 import re
@@ -104,10 +104,6 @@ def is_ffmpeg_available() -> bool:
     return bool(shutil.which("ffmpeg"))
 
 
-def invalidate_ffmpeg_cache() -> None:
-    """No-op retained for API compatibility (the check is no longer cached)."""
-
-
 def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:
     fmt = target_format.lower().strip()
     if fmt not in SUPPORTED_GUI_AUDIO_FORMATS:
@@ -146,10 +142,6 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
 
 
 # ── Download ─────────────────────────────────────────────────────
-
-def download_audio(media_url: str, output_path: Path, timeout: int) -> None:
-    _download_audio_stream(media_url, output_path, timeout, progress_callback=None, cancel_checker=None, cookie="")
-
 
 def download_audio_with_progress(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, pause_checker: Optional[PauseChecker] = None, cookie: str = "") -> None:
     _download_audio_stream(media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)

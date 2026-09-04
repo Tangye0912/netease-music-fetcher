@@ -10,12 +10,12 @@ from __future__ import annotations
 __all__ = [
     "MusicFetchError", "ErrorCode", "DownloadCanceled", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
     "ProgressCallback", "CancelChecker", "PauseChecker",
-    "parse_song_id", "parse_playlist_id", "parse_input_resource",
+    "parse_song_id", "parse_input_resource",
     "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
     "configure_proxy",
     "load_cookie", "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
-    "check_login_status", "fetch_account_profile",
-    "fetch_playable_candidates", "fetch_playable_url", "fetch_song_metadata", "fetch_playlist_song_ids",
+    "fetch_account_profile",
+    "fetch_playable_candidates", "fetch_song_metadata", "fetch_playlist_song_ids",
     "detect_song", "normalize_media_url",
     "search_songs", "SearchResult",
     "fetch_user_playlists", "UserPlaylist",
@@ -140,13 +140,6 @@ def parse_song_id(value: str) -> str:
     resource_type, resource_id = parse_input_resource(value)
     if resource_type == "playlist":
         raise MusicFetchError(ErrorCode.INVALID_URL, "Detected playlist link. Please use batch mode.")
-    return resource_id
-
-
-def parse_playlist_id(value: str) -> str:
-    resource_type, resource_id = parse_input_resource(value)
-    if resource_type != "playlist":
-        raise MusicFetchError(ErrorCode.INVALID_URL, "Input is not a playlist link.")
     return resource_id
 
 
@@ -363,23 +356,6 @@ def _decode_json(body: bytes) -> dict[str, object]:
 
 # ── Account / Auth ───────────────────────────────────────────────
 
-def check_login_status(cookie: str, timeout: int = 10) -> bool:
-    if "MUSIC_U=" not in cookie:
-        logger.info("Login status check failed: no MUSIC_U in cookie.")
-        return False
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
-    if status in (401, 403):
-        return False
-    code = body.get("code")
-    if code in (301, 302, 401, 403):
-        return False
-    has_account = bool(body.get("account") or body.get("profile"))
-    is_valid = status == 200 and code == 200 and has_account
-    logger.info("Login status checked. status=%s code=%s valid=%s", status, code, is_valid)
-    return is_valid
-
-
 def fetch_account_profile(cookie: str, timeout: int = 10) -> AccountProfile:
     if "MUSIC_U=" not in cookie:
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login credential is missing MUSIC_U.")
@@ -463,12 +439,6 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
     if last_network_message:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, last_network_message)
     raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Could not resolve playable media url.")
-
-
-def fetch_playable_url(song_id: str, cookie: str, timeout: int) -> Tuple[str, Optional[int]]:
-    candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
-    first = candidates[0]
-    return first.media_url, first.duration_ms
 
 
 def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str]]:

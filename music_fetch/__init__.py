@@ -20,7 +20,6 @@ from music_fetch.api import (
     PauseChecker,
     # URL / input parsing
     parse_song_id,
-    parse_playlist_id,
     parse_input_resource,
     extract_url_from_input,
     is_netease_music_host,
@@ -32,11 +31,9 @@ from music_fetch.api import (
     normalize_cookie,
     build_cookie_string,
     # Auth / account
-    check_login_status,
     fetch_account_profile,
     # Song / playlist
     fetch_playable_candidates,
-    fetch_playable_url,
     fetch_song_metadata,
     fetch_playlist_song_ids,
     detect_song,
@@ -62,7 +59,6 @@ from music_fetch.audio import (
     infer_audio_format_from_url,
     is_ffmpeg_available,
     convert_audio_file,
-    download_audio,
     download_audio_with_progress,
     download_song_with_fallback,
     prioritize_candidates_by_format,
@@ -120,7 +116,6 @@ __all__ = [
     "PauseChecker",
     # URL / input parsing
     "parse_song_id",
-    "parse_playlist_id",
     "parse_input_resource",
     "extract_url_from_input",
     "is_netease_music_host",
@@ -132,11 +127,9 @@ __all__ = [
     "normalize_cookie",
     "build_cookie_string",
     # Auth / account
-    "check_login_status",
     "fetch_account_profile",
     # Song / playlist / search
     "fetch_playable_candidates",
-    "fetch_playable_url",
     "fetch_song_metadata",
     "fetch_playlist_song_ids",
     "detect_song",
@@ -159,7 +152,6 @@ __all__ = [
     "infer_audio_format_from_url",
     "is_ffmpeg_available",
     "convert_audio_file",
-    "download_audio",
     "download_audio_with_progress",
     "download_song_with_fallback",
     "prioritize_candidates_by_format",

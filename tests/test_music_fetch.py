@@ -44,12 +44,6 @@ class ParseSongIdTests(unittest.TestCase):
         self.assertEqual(resource_type, "playlist")
         self.assertEqual(resource_id, "9988")
 
-    @mock.patch("music_fetch.api.resolve_short_url")
-    def test_parse_playlist_id_from_short_url(self, resolve_mock):
-        resolve_mock.return_value = "https://music.163.com/playlist?id=778899"
-        playlist_id = music_fetch.parse_playlist_id("https://163cn.tv/xxxxxx")
-        self.assertEqual(playlist_id, "778899")
-
 
 class CookieTests(unittest.TestCase):
     def test_cookie_file_requires_music_u(self):
@@ -62,20 +56,6 @@ class CookieTests(unittest.TestCase):
 
 
 class PlayerApiTests(unittest.TestCase):
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_auth_expired_from_http_status(self, post_mock):
-        post_mock.return_value = (401, {"code": 401})
-        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
-            music_fetch.fetch_playable_url("123", "MUSIC_U=abc; __csrf=def", timeout=5)
-        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
-
-    @mock.patch("music_fetch.api.perform_json_post")
-    def test_song_unavailable_when_url_missing(self, post_mock):
-        post_mock.return_value = (200, {"code": 200, "data": [{"url": None}]})
-        with self.assertRaises(music_fetch.MusicFetchError) as ctx:
-            music_fetch.fetch_playable_url("123", "MUSIC_U=abc; __csrf=def", timeout=5)
-        self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
-
     @mock.patch("music_fetch.api.perform_json_get")
     def test_fetch_playlist_song_ids_success(self, get_mock):
         get_mock.return_value = (

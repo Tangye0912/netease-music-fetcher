@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest import mock
 
 import music_fetch
-from music_fetch.audio import invalidate_ffmpeg_cache
 
 
 class CookieHelperTests(unittest.TestCase):
@@ -145,7 +144,6 @@ class FormatHelperTests(unittest.TestCase):
 
     @mock.patch("music_fetch.audio.shutil.which", return_value="/usr/local/bin/ffmpeg")
     def test_is_ffmpeg_available(self, _which_mock):
-        invalidate_ffmpeg_cache()
         self.assertTrue(music_fetch.is_ffmpeg_available())
 
     @mock.patch("music_fetch.audio.shutil.which", return_value=None)
