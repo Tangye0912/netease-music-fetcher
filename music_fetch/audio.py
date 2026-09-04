@@ -420,7 +420,7 @@ def embed_lyric_tag(output_path: Path, lyric: str) -> None:
             )
             audio.save()
             logger.info("Lyric embedded in MP3 tags. path=%s", output_path)
-        except (OSError, ValueError, KeyError, TypeError):
+        except Exception:
             logger.debug("Failed to embed lyric in MP3. path=%s", output_path, exc_info=True)
     elif suffix in (".m4a", ".aac", ".mp4"):
         try:
@@ -429,16 +429,17 @@ def embed_lyric_tag(output_path: Path, lyric: str) -> None:
             audio["\xa9lyr"] = lyric
             audio.save()
             logger.info("Lyric embedded in M4A tags. path=%s", output_path)
-        except (OSError, ValueError, KeyError, TypeError):
+        except Exception:
             logger.debug("Failed to embed lyric in M4A. path=%s", output_path, exc_info=True)
-    elif suffix in (".flac", ".wav"):
+    elif suffix == ".flac":
+        # mutagen cannot parse .wav as FLAC, so lyric embedding is FLAC-only.
         try:
             from mutagen.flac import FLAC
             audio = FLAC(str(output_path))  # type: ignore[assignment]
             audio["lyrics"] = lyric
             audio.save()
             logger.info("Lyric embedded in FLAC tags. path=%s", output_path)
-        except (OSError, ValueError, KeyError, TypeError):
+        except Exception:
             logger.debug("Failed to embed lyric in FLAC. path=%s", output_path, exc_info=True)
 
 

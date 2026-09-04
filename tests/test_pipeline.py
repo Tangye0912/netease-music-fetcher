@@ -94,6 +94,16 @@ class WriteAudioTagsTests(unittest.TestCase):
         # Should not raise
         write_audio_tags(output_path, title="Test")
 
+    @mock.patch("mutagen.File")
+    def test_mutagen_error_is_swallowed(self, mock_file):
+        # mutagen raises MutagenError subclasses (not OSError/ValueError) for
+        # corrupt headers — tag writing must never propagate these.
+        mock_file.side_effect = RuntimeError("FLACNoHeaderError-ish")
+        output_path = Path(self.tmp.name) / "test.flac"
+        output_path.write_bytes(b"not-a-flac")
+        # Should not raise
+        write_audio_tags(output_path, title="Test")
+
 
 class RunDownloadPipelineTests(unittest.TestCase):
     def setUp(self):
@@ -128,6 +138,32 @@ class RunDownloadPipelineTests(unittest.TestCase):
         self.assertTrue(result.output_path.exists())
         self.assertEqual(result.file_size, 4)
         self.assertEqual(result.source_format, "mp3")
+
+    @mock.patch("music_fetch.pipeline.write_audio_tags", side_effect=RuntimeError("mutagen boom"))
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_tag_write_failure_does_not_fail_download(self, fallback_mock, _tags_mock):
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.write_bytes(b"data")
+            return PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        fallback_mock.side_effect = fake_fallback
+
+        result = run_download_pipeline(
+            song_id="42",
+            cookie="MUSIC_U=test",
+            output_path=self.output_path,
+            target_format="mp3",
+            timeout=10,
+            retry_count=1,
+            tags={"title": "Song", "artist": None, "album": None, "cover_url": None},
+        )
+        self.assertTrue(result.output_path.exists())
+        self.assertEqual(result.file_size, 4)
 
     @mock.patch("music_fetch.pipeline.download_song_with_fallback")
     def test_retry_on_failure(self, fallback_mock):

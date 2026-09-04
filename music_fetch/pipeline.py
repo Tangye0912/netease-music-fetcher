@@ -165,13 +165,17 @@ def run_download_pipeline(
             raise DownloadCanceled()
 
     if tags:
-        write_audio_tags(
-            output_path,
-            title=tags.get("title") or "",
-            artist=tags.get("artist"),
-            album=tags.get("album"),
-            cover_url=tags.get("cover_url"),
-        )
+        # Tag writing must never fail an already-completed download.
+        try:
+            write_audio_tags(
+                output_path,
+                title=tags.get("title") or "",
+                artist=tags.get("artist"),
+                album=tags.get("album"),
+                cover_url=tags.get("cover_url"),
+            )
+        except Exception:
+            logger.warning("Failed to write audio tags. song_id=%s", song_id, exc_info=True)
     if download_lyric:
         from music_fetch.api import fetch_lyric
         from music_fetch.audio import save_lyric_file, embed_lyric_tag
@@ -265,10 +269,10 @@ def write_audio_tags(
                     )
                     audio.save()
                     logger.info("Cover art embedded. output=%s", output_path)
-            except (OSError, ValueError, KeyError, TypeError):
+            except Exception:
                 logger.debug("Failed to embed cover art. output=%s", output_path, exc_info=True)
 
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:
         logger.debug("Failed to write audio tags. output=%s", output_path, exc_info=True)
 
 
