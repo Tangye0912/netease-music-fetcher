@@ -5,6 +5,7 @@ from unittest import mock
 from urllib import error
 
 from music_fetch.api import (
+    PLAYABLE_REQUEST_PROFILES,
     MusicFetchError,
     build_cookie_string,
     extract_csrf,
@@ -419,6 +420,47 @@ class FetchPlayableCandidatesTests(unittest.TestCase):
         self.assertEqual(candidates[0].encode_type, "mp3")
 
 
+class PlayableProfilesTests(unittest.TestCase):
+    """Lossless/Hi-Res tiers are requested, ranked, and labeled."""
+
+    def test_profiles_include_lossless_and_hires(self):
+        self.assertIn(("lossless", "flac"), PLAYABLE_REQUEST_PROFILES)
+        self.assertIn(("hires", "flac"), PLAYABLE_REQUEST_PROFILES)
+        # Lossless tiers come after the standard ones so free accounts
+        # degrade gracefully to standard candidates.
+        self.assertLess(
+            PLAYABLE_REQUEST_PROFILES.index(("exhigh", "aac")),
+            PLAYABLE_REQUEST_PROFILES.index(("lossless", "flac")),
+        )
+
+    def test_candidates_request_every_profile(self):
+        from music_fetch.api import fetch_playable_candidates
+        payloads: list[dict] = []
+        unique_urls = (f"https://m10.music.126.net/song-{i}.flac" for i in range(len(PLAYABLE_REQUEST_PROFILES)))
+
+        def fake_post(url, payload, headers, timeout):
+            payloads.append(payload)
+            return 200, {"code": 200, "data": [{"url": next(unique_urls), "time": 240000, "level": payload["level"]}]}
+
+        with mock.patch("music_fetch.api.perform_json_post", side_effect=fake_post):
+            candidates = fetch_playable_candidates("42", "MUSIC_U=test; __csrf=csrf", timeout=10)
+        requested_levels = [payload["level"] for payload in payloads]
+        self.assertIn("lossless", requested_levels)
+        self.assertIn("hires", requested_levels)
+        self.assertEqual(len(candidates), len(PLAYABLE_REQUEST_PROFILES))
+
+    def test_pick_highest_level_prefers_hires(self):
+        from music_fetch.api import PlayableCandidate, _pick_highest_level
+        candidates = [
+            PlayableCandidate(media_url="https://cdn/a.mp3", duration_ms=1, level="standard", encode_type="mp3"),
+            PlayableCandidate(media_url="https://cdn/b.flac", duration_ms=1, level="hires", encode_type="flac"),
+            PlayableCandidate(media_url="https://cdn/c.flac", duration_ms=1, level="lossless", encode_type="flac"),
+        ]
+        level, encode_type = _pick_highest_level(candidates)
+        self.assertEqual(level, "hires")
+        self.assertEqual(encode_type, "flac")
+
+
 class DetectSongTests(unittest.TestCase):
     """Test detect_song with mocked HTTP responses."""
 
@@ -432,14 +474,15 @@ class DetectSongTests(unittest.TestCase):
             b'{"code": 200, "songs": [{"name": "Test Song", "dt": 240000, '
             b'"al": {"picUrl": "http://cover.jpg"}, "ar": [{"name": "Artist"}]}]}'
         )
-        # Mock playable URL response — fetch_playable_candidates iterates 5 profiles
+        # Mock playable URL response — one per profile in PLAYABLE_REQUEST_PROFILES
         player_resp = mock.MagicMock()
         player_resp.__enter__.return_value = player_resp
         player_resp.status = 200
         player_resp.read.return_value = (
             b'{"code": 200, "data": [{"url": "https://m10.music.126.net/song.mp3", "time": 240000}]}'
         )
-        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [player_resp] * 5):
+        profile_count = len(PLAYABLE_REQUEST_PROFILES)
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [player_resp] * profile_count):
             result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
         self.assertTrue(result.can_download)
         self.assertEqual(result.song_name, "Test Song")
@@ -456,7 +499,7 @@ class DetectSongTests(unittest.TestCase):
         empty_resp.__enter__.return_value = empty_resp
         empty_resp.status = 200
         empty_resp.read.return_value = b'{"code": 200, "data": []}'
-        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [empty_resp] * 5):
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=[meta_resp] + [empty_resp] * len(PLAYABLE_REQUEST_PROFILES)):
             result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test; __csrf=csrf", timeout=10)
         self.assertFalse(result.can_download)
 

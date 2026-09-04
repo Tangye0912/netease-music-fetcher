@@ -56,6 +56,10 @@ PLAYABLE_REQUEST_PROFILES: list[tuple[str, str]] = [
     ("standard", "mp4"),
     ("higher", "aac"),
     ("exhigh", "aac"),
+    # Lossless tiers: VIP accounts get real URLs, free accounts get an empty
+    # url for these profiles and the standard candidates above still apply.
+    ("lossless", "flac"),
+    ("hires", "flac"),
 ]
 logger = get_logger("music_fetch.api")
 SUPPORTED_GUI_AUDIO_FORMATS = SUPPORTED_AUDIO_FORMATS

@@ -135,6 +135,36 @@ class DownloadFallbackTests(unittest.TestCase):
             first_url = download_mock.call_args_list[0].args[0]
             self.assertTrue(first_url.endswith(".m4a"))
 
+    @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_playable_candidates")
+    def test_prioritize_flac_prefers_lossless_candidate(self, candidates_mock, download_mock):
+        candidates_mock.return_value = [
+            music_fetch.PlayableCandidate(
+                media_url="https://m704.music.126.net/a.mp3",
+                duration_ms=1000,
+                level="standard",
+                encode_type="mp3",
+            ),
+            music_fetch.PlayableCandidate(
+                media_url="https://m704.music.126.net/b.flac",
+                duration_ms=1000,
+                level="lossless",
+                encode_type="flac",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "x.flac"
+            result = music_fetch.download_song_with_fallback(
+                song_id="42",
+                cookie="MUSIC_U=abc",
+                output_path=output,
+                timeout=10,
+                prefer_format="flac",
+            )
+            self.assertTrue(result.media_url.endswith(".flac"))
+            first_url = download_mock.call_args_list[0].args[0]
+            self.assertTrue(first_url.endswith(".flac"))
+
 
 class FormatHelperTests(unittest.TestCase):
     def test_infer_audio_format_from_url(self):
