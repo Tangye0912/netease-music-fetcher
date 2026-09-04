@@ -359,6 +359,47 @@ class SearchSongsTests(unittest.TestCase):
             results = search_songs("test", "cookie")
         self.assertEqual(results, [])
 
+    def test_result_null_returns_empty(self):
+        # {"result": null} must not raise AttributeError (default {} only
+        # applies when the key is missing, not when its value is None).
+        from music_fetch.api import search_songs
+        fake_body = b'{"code": 200, "result": null}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = fake_body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            results = search_songs("test", "cookie")
+        self.assertEqual(results, [])
+
+
+class FetchLyricTests(unittest.TestCase):
+    """Test fetch_lyric with mocked HTTP responses."""
+
+    def _mock_response(self, body: bytes) -> mock.MagicMock:
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        return mock_resp
+
+    def test_success_with_translation(self):
+        from music_fetch.api import fetch_lyric
+        body = b'{"code": 200, "lrc": {"lyric": "[00:01.00]hello"}, "tlyric": {"lyric": "[00:01.00]\\u4f60\\u597d"}}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=self._mock_response(body)):
+            result = fetch_lyric("1")
+        self.assertEqual(result.lyric, "[00:01.00]hello")
+        self.assertEqual(result.translated_lyric, "[00:01.00]你好")
+
+    def test_null_lrc_objects_return_empty_strings(self):
+        # {"lrc": null} must not raise AttributeError.
+        from music_fetch.api import fetch_lyric
+        body = b'{"code": 200, "lrc": null, "tlyric": null}'
+        with mock.patch("music_fetch.api.request.urlopen", return_value=self._mock_response(body)):
+            result = fetch_lyric("1")
+        self.assertEqual(result.lyric, "")
+        self.assertEqual(result.translated_lyric, "")
+
 
 class FetchUserPlaylistsTests(unittest.TestCase):
     """Test fetch_user_playlists with mocked HTTP responses."""

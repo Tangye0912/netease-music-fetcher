@@ -658,7 +658,8 @@ def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) 
     if status != 200 or body.get("code") != 200:
         logger.warning("Search API returned non-200. status=%s code=%s", status, body.get("code"))
         return []
-    raw_songs = body.get("result", {}).get("songs") or []
+    raw_result = body.get("result")
+    raw_songs = raw_result.get("songs") or [] if isinstance(raw_result, dict) else []
     results: list[SearchResult] = []
     for song in raw_songs:
         if not isinstance(song, dict):
@@ -762,8 +763,10 @@ def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
     if status != 200 or body.get("code") != 200:
         logger.warning("Lyric API returned non-200. song_id=%s status=%s", song_id, status)
         return LyricResult(lyric="")
-    lrc = str(body.get("lrc", {}).get("lyric") or "")
-    tlyric = str(body.get("tlyric", {}).get("lyric") or "")
+    lrc_obj = body.get("lrc")
+    tlyric_obj = body.get("tlyric")
+    lrc = str(lrc_obj.get("lyric") or "") if isinstance(lrc_obj, dict) else ""
+    tlyric = str(tlyric_obj.get("lyric") or "") if isinstance(tlyric_obj, dict) else ""
     logger.info("Fetched lyric. song_id=%s lyric_len=%s translated_len=%s", song_id, len(lrc), len(tlyric))
     return LyricResult(lyric=lrc, translated_lyric=tlyric)
 
