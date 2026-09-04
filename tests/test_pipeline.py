@@ -301,3 +301,52 @@ class ConvertAudioFileCleanupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LyricModeTests(unittest.TestCase):
+    """lyric_mode controls which lyric text gets saved/embedded."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.output_path = Path(self.tmp.name) / "test.mp3"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, lyric_mode):
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.write_bytes(b"data")
+            return PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        saved = []
+        with mock.patch("music_fetch.pipeline.download_song_with_fallback", side_effect=fake_fallback), \
+                mock.patch("music_fetch.api.fetch_lyric", return_value=mock.Mock(
+                    lyric="[00:01.00]orig", translated_lyric="[00:01.00]trans")), \
+                mock.patch("music_fetch.audio.save_lyric_file", side_effect=lambda _p, text: saved.append(text)), \
+                mock.patch("music_fetch.audio.embed_lyric_tag"):
+            run_download_pipeline(
+                song_id="42",
+                cookie="MUSIC_U=test",
+                output_path=self.output_path,
+                target_format="mp3",
+                download_lyric=True,
+                lyric_mode=lyric_mode,
+            )
+        return saved
+
+    def test_original_mode_saves_original(self):
+        self.assertEqual(self._run("original"), ["[00:01.00]orig"])
+
+    def test_translation_mode_saves_translation(self):
+        self.assertEqual(self._run("translation"), ["[00:01.00]trans"])
+
+    def test_bilingual_mode_saves_merged(self):
+        saved = self._run("bilingual")
+        self.assertEqual(len(saved), 1)
+        self.assertIn("[00:01.00]orig", saved[0])
+        self.assertIn("[00:01.00]trans", saved[0])

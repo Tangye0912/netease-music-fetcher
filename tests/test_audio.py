@@ -7,7 +7,50 @@ from unittest import mock
 
 import music_fetch.audio
 from music_fetch.api import DownloadCanceled, MusicFetchError
-from music_fetch.audio import sanitize_filename
+from music_fetch.audio import merge_bilingual_lyric, sanitize_filename
+
+
+class MergeBilingualLyricTests(unittest.TestCase):
+    ORIGINAL = "[ti:Song]\n[00:01.00]hello\n[00:05.50]world\n"
+    TRANSLATION = "[00:01.00]你好\n[00:05.50]世界\n"
+
+    def test_merges_aligned_timestamps(self):
+        merged = merge_bilingual_lyric(self.ORIGINAL, self.TRANSLATION)
+        lines = merged.splitlines()
+        self.assertEqual(lines[0], "[ti:Song]")
+        self.assertEqual(lines[1], "[00:01.00]hello")
+        self.assertEqual(lines[2], "[00:01.00]你好")
+        self.assertEqual(lines[3], "[00:05.50]world")
+        self.assertEqual(lines[4], "[00:05.50]世界")
+
+    def test_empty_translation_returns_original(self):
+        self.assertEqual(merge_bilingual_lyric(self.ORIGINAL, ""), self.ORIGINAL)
+        self.assertEqual(merge_bilingual_lyric(self.ORIGINAL, "   \n"), self.ORIGINAL)
+
+    def test_translation_without_timestamps_returns_original(self):
+        self.assertEqual(merge_bilingual_lyric(self.ORIGINAL, "你好\n世界\n"), self.ORIGINAL)
+
+    def test_untranslated_lines_kept_once(self):
+        merged = merge_bilingual_lyric(self.ORIGINAL, "[00:01.00]你好\n")
+        lines = merged.splitlines()
+        self.assertEqual(lines[1], "[00:01.00]hello")
+        self.assertEqual(lines[2], "[00:01.00]你好")
+        self.assertEqual(lines[3], "[00:05.50]world")
+
+    def test_translation_only_timestamp_ignored(self):
+        merged = merge_bilingual_lyric(self.ORIGINAL, "[00:09.00]额外\n")
+        self.assertEqual(merged.splitlines(), self.ORIGINAL.splitlines())
+
+    def test_multi_timestamp_line(self):
+        original = "[00:01.00][00:09.00]副歌\n"
+        translation = "[00:01.00]重复\n"
+        merged = merge_bilingual_lyric(original, translation)
+        lines = merged.splitlines()
+        # The original line is kept once; the translation follows it with the
+        # first matched timestamp.
+        self.assertEqual(lines[0], original.strip())
+        self.assertEqual(lines[1], "[00:01.00]重复")
+        self.assertEqual(len(lines), 2)
 
 
 class SanitizeFilenameTests(unittest.TestCase):

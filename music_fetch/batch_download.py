@@ -71,6 +71,7 @@ class BatchDownloadSession:
         retry_count: int = 1,
         concurrency: int = 1,
         download_lyric: bool = False,
+        lyric_mode: str = "original",
     ) -> None:
         self._queue: list[BatchResultRow] = list(rows)
         self._total = len(self._queue)
@@ -82,6 +83,7 @@ class BatchDownloadSession:
         self._retry_count = retry_count
         self._concurrency = max(1, int(concurrency))
         self._download_lyric = download_lyric
+        self._lyric_mode = lyric_mode
 
         self._jobs: dict[int, DownloadJob] = {}
         self._job_rows: dict[int, BatchResultRow] = {}
@@ -234,6 +236,7 @@ class BatchDownloadSession:
             retry_count=self._retry_count,
             tags={"title": row.song_name or "", "artist": None, "album": None, "cover_url": None},
             download_lyric=self._download_lyric,
+            lyric_mode=self._lyric_mode,
         )
         job.start()
         key = id(job)

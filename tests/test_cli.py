@@ -341,7 +341,7 @@ class RunPlaylistDownloadTests(unittest.TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, tags=None, download_lyric=False):
+        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, tags=None, download_lyric=False, **kwargs):
             nonlocal active, max_active
             with lock:
                 active += 1
@@ -543,6 +543,28 @@ class MainTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             music_fetch.cli.main(["--url", "42", "--lyric", "--help"])
         self.assertEqual(ctx.exception.code, 0)
+
+    def test_lyric_mode_parsed_and_forwarded(self):
+        args = music_fetch.cli.build_parser().parse_args(["--url", "42", "--lyric", "--lyric-mode", "bilingual"])
+        self.assertEqual(args.lyric, True)
+        self.assertEqual(args.lyric_mode, "bilingual")
+
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.run_download")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_forwards_lyric_mode(self, _cookie_mock, download_mock, _log_mock):
+        from music_fetch.api import DownloadResult
+        download_mock.return_value = DownloadResult(song_id="42", output_path=Path("out/s.mp3"), size_bytes=4, duration_ms=1000)
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            music_fetch.cli.main([
+                "--url", "https://music.163.com/song?id=42",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+                "--lyric", "--lyric-mode", "translation",
+            ])
+        self.assertEqual(download_mock.call_args.kwargs.get("lyric_mode"), "translation")
 
 
 if __name__ == "__main__":

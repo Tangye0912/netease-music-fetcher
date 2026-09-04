@@ -63,6 +63,7 @@ from music_fetch.audio import (
     download_song_with_fallback,
     prioritize_candidates_by_format,
     fetch_outer_media_url,
+    merge_bilingual_lyric,
 )
 
 from music_fetch.network import (
@@ -156,6 +157,7 @@ __all__ = [
     "download_song_with_fallback",
     "prioritize_candidates_by_format",
     "fetch_outer_media_url",
+    "merge_bilingual_lyric",
     # Network / proxy
     "configure_proxy",
     "get_proxy_config",

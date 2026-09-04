@@ -13,6 +13,7 @@ __all__ = [
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
     "download_audio_with_progress", "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
+    "merge_bilingual_lyric",
     "SUPPORTED_GUI_AUDIO_FORMATS",
 ]
 
@@ -428,6 +429,57 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
 
 
 # ── Lyrics ──────────────────────────────────────────────────────────
+
+_LRC_TIMESTAMP = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
+
+
+def _lrc_timestamps(line: str) -> list[float]:
+    """All [mm:ss.xx] timestamps on one LRC line, in seconds."""
+    stamps: list[float] = []
+    for minutes, seconds in _LRC_TIMESTAMP.findall(line):
+        try:
+            stamps.append(round(int(minutes) * 60 + float(seconds), 2))
+        except ValueError:
+            continue
+    return stamps
+
+
+def merge_bilingual_lyric(original: str, translation: str) -> str:
+    """Merge original and translated LRC text into standard bilingual lyrics.
+
+    Each timed original line is followed by the same timestamp carrying the
+    translated text; untimed lines (metadata tags etc.) are kept as-is, and
+    an empty or timestamp-less translation returns the original unchanged.
+    """
+    original = original or ""
+    translation = translation or ""
+    if not translation.strip():
+        return original
+
+    translated_by_stamp: dict[float, str] = {}
+    for line in translation.splitlines():
+        stamps = _lrc_timestamps(line)
+        text = _LRC_TIMESTAMP.sub("", line).strip()
+        if stamps and text:
+            for stamp in stamps:
+                translated_by_stamp.setdefault(stamp, text)
+
+    if not translated_by_stamp:
+        return original
+
+    merged: list[str] = []
+    for line in original.splitlines():
+        merged.append(line)
+        text = _LRC_TIMESTAMP.sub("", line).strip()
+        for stamp in _lrc_timestamps(line):
+            translated = translated_by_stamp.get(stamp)
+            if translated:
+                minutes = int(stamp // 60)
+                seconds = stamp - minutes * 60
+                merged.append(f"[{minutes:02d}:{seconds:05.2f}]{translated}")
+                break
+    return "\n".join(merged)
+
 
 def save_lyric_file(output_path: Path, lyric: str) -> None:
     """Save lyrics as a .lrc file alongside the audio file."""

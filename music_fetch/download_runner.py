@@ -68,6 +68,7 @@ class DownloadJob:
         retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT,
         tags: Optional[dict[str, Optional[str]]] = None,
         download_lyric: bool = False,
+        lyric_mode: str = "original",
     ) -> None:
         self.task_id = task_id
         self.song_id = song_id
@@ -78,6 +79,7 @@ class DownloadJob:
         _, self.timeout, self.retry_count, _ = clamp_download_settings(0, timeout, retry_count, 0)
         self._tags = tags
         self.download_lyric = download_lyric
+        self.lyric_mode = lyric_mode
 
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
@@ -181,6 +183,7 @@ class DownloadJob:
                 pause_checker=should_pause,
                 tags=self._tags,
                 download_lyric=self.download_lyric,
+                lyric_mode=self.lyric_mode,
             )
             self._finish(
                 DownloadJobResult(

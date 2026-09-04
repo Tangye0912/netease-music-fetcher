@@ -58,6 +58,7 @@ def run_download_pipeline(
     pause_checker: Optional[PauseChecker] = None,
     tags: Optional[dict[str, Optional[str]]] = None,
     download_lyric: bool = False,
+    lyric_mode: str = "original",
 ) -> DownloadPipelineResult:
     """Execute the full download pipeline: retry loop, fallback, conversion.
 
@@ -178,12 +179,18 @@ def run_download_pipeline(
             logger.warning("Failed to write audio tags. song_id=%s", song_id, exc_info=True)
     if download_lyric:
         from music_fetch.api import fetch_lyric
-        from music_fetch.audio import save_lyric_file, embed_lyric_tag
+        from music_fetch.audio import merge_bilingual_lyric, save_lyric_file, embed_lyric_tag
         try:
             lyric_result = fetch_lyric(song_id, timeout=timeout)
             if lyric_result.lyric:
-                save_lyric_file(output_path, lyric_result.lyric)
-                embed_lyric_tag(output_path, lyric_result.lyric)
+                if lyric_mode == "translation" and lyric_result.translated_lyric:
+                    lyric_text = lyric_result.translated_lyric
+                elif lyric_mode == "bilingual":
+                    lyric_text = merge_bilingual_lyric(lyric_result.lyric, lyric_result.translated_lyric)
+                else:
+                    lyric_text = lyric_result.lyric
+                save_lyric_file(output_path, lyric_text)
+                embed_lyric_tag(output_path, lyric_text)
         except Exception:
             logger.warning("Failed to download lyric. song_id=%s", song_id, exc_info=True)
     file_size = output_path.stat().st_size if output_path.exists() else 0

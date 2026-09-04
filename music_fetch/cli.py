@@ -92,6 +92,7 @@ def run_download(
     rename: Optional[str] = None,
     retry_count: int = 1,
     download_lyric: bool = False,
+    lyric_mode: str = "original",
 ) -> DownloadResult:
     logger.info("Run download started. out_dir=%s format=%s retry=%s", out_dir, out_format, retry_count)
     song_id = parse_song_id(song_url)
@@ -113,6 +114,7 @@ def run_download(
         retry_count=retry_count,
         tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
         download_lyric=download_lyric,
+        lyric_mode=lyric_mode,
     )
     actual_format = result.output_path.suffix.lstrip(".").lower()
     if actual_format and actual_format != out_format.lower():
@@ -140,6 +142,7 @@ def run_playlist_download(
     out_format: str = "mp3",
     retry_count: int = 1,
     download_lyric: bool = False,
+    lyric_mode: str = "original",
     concurrency: int = DEFAULT_CLI_CONCURRENCY,
 ) -> list[DownloadResult]:
     _, playlist_id = parse_input_resource(playlist_url)
@@ -177,6 +180,7 @@ def run_playlist_download(
                 retry_count=retry_count,
                 tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
                 download_lyric=download_lyric,
+                lyric_mode=lyric_mode,
             )
             actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
             if actual_format and actual_format != out_format.lower():
@@ -264,6 +268,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Download and embed lyrics (.lrc file + audio tag).",
     )
     parser.add_argument(
+        "--lyric-mode", dest="lyric_mode",
+        choices=["original", "translation", "bilingual"], default="original",
+        help="Lyric variant when --lyric is set (default: original).",
+    )
+    parser.add_argument(
         "--proxy-type", choices=["direct", "http", "socks5"], default="direct",
         help="Application proxy type (default: direct).",
     )
@@ -324,6 +333,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 out_format=args.out_format,
                 retry_count=args.retry_count,
                 download_lyric=args.lyric,
+                lyric_mode=args.lyric_mode,
                 concurrency=args.concurrency,
             )
             if results:
@@ -342,6 +352,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 rename=args.rename,
                 retry_count=args.retry_count,
                 download_lyric=args.lyric,
+                lyric_mode=args.lyric_mode,
             )
             duration_text = str(result.duration_ms) if result.duration_ms is not None else "unknown"
             print(

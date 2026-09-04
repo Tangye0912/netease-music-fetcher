@@ -560,7 +560,7 @@ class TuiApp:
         target_format = self._pick_format()
         if target_format is None:
             return
-        download_lyric = U.confirm("同时下载歌词？", default=False)
+        lyric_mode = "bilingual" if U.confirm("同时下载歌词（原文 + 翻译合并）？", default=False) else "original"
         session = BatchDownloadSession(
             rows=chosen,
             out_dir=out_dir,
@@ -570,7 +570,8 @@ class TuiApp:
             timeout=self.session.download_timeout_sec,
             retry_count=self.session.download_retry_count,
             concurrency=self.session.download_concurrency,
-            download_lyric=download_lyric,
+            download_lyric=lyric_mode != "original",
+            lyric_mode=lyric_mode,
         )
         self._run_batch_session(session)
         self.session.last_download_dir = str(out_dir)
@@ -589,7 +590,8 @@ class TuiApp:
                 timeout=self.session.download_timeout_sec,
                 retry_count=self.session.download_retry_count,
                 concurrency=self.session.download_concurrency,
-                download_lyric=download_lyric,
+                download_lyric=lyric_mode != "original",
+                lyric_mode=lyric_mode,
             )
             self._run_batch_session(retry_session)
             if retry_session.auth_expired:
@@ -736,6 +738,18 @@ class TuiApp:
             return None
         return formats[choice - 1]
 
+    @staticmethod
+    def _pick_lyric_mode() -> tuple[bool, str]:
+        """Ask for a lyric mode; returns (download_lyric, lyric_mode)."""
+        choice = U.menu(
+            "歌词模式",
+            ["不下载歌词", "原文歌词", "双语合并（原文 + 翻译）", "仅翻译歌词"],
+        )
+        modes = ["original", "bilingual", "translation"]
+        if choice == 1:
+            return False, "original"
+        return True, modes[choice - 2]
+
     def _download_song(
         self,
         song_id: str,
@@ -760,7 +774,7 @@ class TuiApp:
         target_format = self._pick_format()
         if target_format is None:
             return False
-        download_lyric = U.confirm("同时下载歌词（.lrc + 嵌入标签）？", default=False)
+        download_lyric, lyric_mode = self._pick_lyric_mode()
         try:
             output_path = resolve_output_path(
                 out_dir=out_dir,
@@ -788,6 +802,7 @@ class TuiApp:
                 "cover_url": cover_url,
             },
             download_lyric=download_lyric,
+            lyric_mode=lyric_mode,
         )
         result = self._run_job(job)
         self.session.last_download_dir = str(out_dir)
