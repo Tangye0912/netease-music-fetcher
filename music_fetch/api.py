@@ -27,12 +27,11 @@ __all__ = [
 ]
 
 import json
-import logging
 import re
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple
 from urllib import error, parse, request
 
 from music_fetch.app_logging import get_logger, mask_value

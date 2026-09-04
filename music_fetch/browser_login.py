@@ -390,7 +390,7 @@ def diagnose(timeout: float = 20.0) -> list[str]:
         lines.append(f"cdp_port={cdp_port}")
         if cdp_port:
             try:
-                import websocket
+                import websocket  # noqa: F401 — availability probe for the diagnostic line
 
                 lines.append("websocket_client=ok")
             except ImportError:

@@ -9,7 +9,7 @@ from io import StringIO
 from typing import TYPE_CHECKING, Iterable, Protocol
 
 if TYPE_CHECKING:
-    from music_fetch.batch_models import BatchDetectRow
+    pass
 
 from music_fetch.csv_utils import safe_csv_text
 import music_fetch.ui_texts as T

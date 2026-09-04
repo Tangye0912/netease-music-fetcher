@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pyinstaller>=6.0", "pytest>=8.0", "mypy>=1.10"]
+dev = ["pyinstaller>=6.0", "pytest>=8.0", "pytest-cov>=5.0", "mypy>=1.10", "ruff>=0.6"]
 
 [project.scripts]
 music-fetch = "music_fetch.app:main"
@@ -39,3 +39,19 @@ module = [
     "mutagen.*",
 ]
 ignore_errors = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# Minimal guardrail set: pyflakes errors/warnings + import issues.
+select = ["E", "F", "W"]
+# Single-line log/URL strings are a deliberate project style (grep-friendly);
+# reflowing them adds churn without value, so line length stays unchecked.
+ignore = ["E501"]
+
+[tool.coverage.report]
+# Floor set at the measured 75% baseline (2026-09); raise as coverage grows.
+fail_under = 75
+show_missing = true

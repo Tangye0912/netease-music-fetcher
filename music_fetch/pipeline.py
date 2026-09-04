@@ -210,7 +210,6 @@ def write_audio_tags(
         from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB
         from mutagen.mp3 import MP3
         from mutagen.mp4 import MP4
-        from mutagen.flac import FLAC
     except ImportError:
         logger.debug("mutagen not installed, skipping tag writing.")
         return

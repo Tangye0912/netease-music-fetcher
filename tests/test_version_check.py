@@ -143,7 +143,6 @@ class FetchReleaseDownloadUrlTests(unittest.TestCase):
     """Test fetch_release_download_url."""
 
     def test_returns_exe_url(self):
-        from music_fetch.version_check import fetch_release_download_url
         mock_resp = mock.MagicMock()
         mock_resp.__enter__.return_value = mock_resp
         mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.exe", "browser_download_url": "http://dl.exe"}]}'
@@ -152,7 +151,6 @@ class FetchReleaseDownloadUrlTests(unittest.TestCase):
         self.assertEqual(result, "http://dl.exe")
 
     def test_returns_dmg_url(self):
-        from music_fetch.version_check import fetch_release_download_url
         mock_resp = mock.MagicMock()
         mock_resp.__enter__.return_value = mock_resp
         mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.dmg", "browser_download_url": "http://dl.dmg"}]}'
@@ -161,7 +159,6 @@ class FetchReleaseDownloadUrlTests(unittest.TestCase):
         self.assertEqual(result, "http://dl.dmg")
 
     def test_network_error_returns_none(self):
-        from music_fetch.version_check import fetch_release_download_url
         with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
             result = fetch_release_download_url(timeout=3)
         self.assertIsNone(result)

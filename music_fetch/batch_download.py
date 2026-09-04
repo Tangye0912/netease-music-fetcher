@@ -12,14 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Sequence
 
 from music_fetch.api import MusicFetchError
 from music_fetch.app_logging import get_logger
 from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
 from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
 from music_fetch.audio import resolve_output_path
-from music_fetch.batch_models import BatchDetectRow, format_bytes
+from music_fetch.batch_models import format_bytes
 from music_fetch.batch_results import BatchResultRow, summarize_batch_rows
 from music_fetch.download_runner import (
     DownloadJob,

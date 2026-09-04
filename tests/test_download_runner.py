@@ -7,7 +7,6 @@ from music_fetch import DownloadCanceled
 from music_fetch.api import MusicFetchError, PlayableCandidate
 from music_fetch.download_runner import (
     DownloadJob,
-    DownloadJobResult,
     JOB_STATE_CANCELED,
     JOB_STATE_FAILED,
     JOB_STATE_SUCCESS,

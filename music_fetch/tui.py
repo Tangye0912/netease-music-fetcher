@@ -121,7 +121,7 @@ class TuiApp:
 
     def _apply_proxy(self) -> None:
         try:
-            config = configure_proxy(
+            configure_proxy(
                 self.session.proxy_type,
                 self.session.proxy_host,
                 self.session.proxy_port,

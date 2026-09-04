@@ -180,7 +180,8 @@ class RunDownloadTests(unittest.TestCase):
     def test_run_download_ffmpeg_fallback_warning(self, meta_mock, pipeline_mock):
         """When format mismatch, a warning is printed to stderr."""
         from music_fetch.pipeline import DownloadPipelineResult
-        import sys, io
+        import sys
+        import io
         meta_mock.return_value = ("Test Song", 120000, None, None, None)
 
         def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):

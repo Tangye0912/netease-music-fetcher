@@ -1,4 +1,3 @@
-import re
 import unittest
 
 from music_fetch.app_settings import (

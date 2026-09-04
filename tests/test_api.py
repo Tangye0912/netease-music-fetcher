@@ -6,7 +6,6 @@ from urllib import error
 
 from music_fetch.api import (
     MusicFetchError,
-    ErrorCode,
     build_cookie_string,
     extract_csrf,
     extract_url_from_input,
@@ -224,7 +223,7 @@ class PerformRequestTests(unittest.TestCase):
         http_err = error.HTTPError("url", 403, "Forbidden", Message(), None)
         mock_resp = mock.MagicMock()
         mock_resp.read.return_value = b'{"code": 403}'
-        with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err) as mock_urlopen:
+        with mock.patch("music_fetch.api.request.urlopen", side_effect=http_err) as _mock_urlopen:
             status, body = perform_json_get("https://example.com/api", {}, timeout=10)
         self.assertEqual(status, 403)
 

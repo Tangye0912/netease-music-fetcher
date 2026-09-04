@@ -28,7 +28,7 @@ class EapiCryptoTests(unittest.TestCase):
         self.assertIn("\"key\":\"k1\"", text)
 
     def test_decrypt_response_handles_encrypted_body(self):
-        params = build_eapi_params("/api/login/qrcode/client/login", {"key": "k1", "type": "3"})
+        build_eapi_params("/api/login/qrcode/client/login", {"key": "k1", "type": "3"})
         from Crypto.Cipher import AES
         import music_fetch.eapi as eapi_module
 
