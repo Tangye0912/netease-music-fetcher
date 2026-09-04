@@ -44,6 +44,14 @@ from music_fetch.network import open_url
 
 
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]+')
+CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+# Windows reserves these device names (case-insensitive, with or without an
+# extension) — saving "CON.mp3" on Windows silently fails or writes a device.
+WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
 # Shared marker used both when a download attempt raises a 403 and when the
 # fallback logic decides whether a failure was a 403 (anti-hotlink / CDN block).
 _HTTP_403_MARKER = "HTTP 403"
@@ -52,8 +60,11 @@ _HTTP_403_MARKER = "HTTP 403"
 # ── Filename helpers ─────────────────────────────────────────────
 
 def sanitize_filename(name: str) -> str:
-    cleaned = INVALID_FILENAME_CHARS.sub("_", name).strip().strip(".")
+    cleaned = INVALID_FILENAME_CHARS.sub("_", name)
+    cleaned = CONTROL_CHARS.sub("", cleaned).strip().strip(".")
     cleaned = re.sub(r"\s+", " ", cleaned)
+    if cleaned.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
     return cleaned or "song"
 
 

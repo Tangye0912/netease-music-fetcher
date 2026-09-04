@@ -7,6 +7,32 @@ from unittest import mock
 
 import music_fetch.audio
 from music_fetch.api import DownloadCanceled, MusicFetchError
+from music_fetch.audio import sanitize_filename
+
+
+class SanitizeFilenameTests(unittest.TestCase):
+    def test_replaces_invalid_characters(self):
+        self.assertEqual(sanitize_filename('a/b\\c:d*e?f"g<h>i|j'), "a_b_c_d_e_f_g_h_i_j")
+
+    def test_strips_dots_and_whitespace(self):
+        self.assertEqual(sanitize_filename("  .name. "), "name")
+        self.assertEqual(sanitize_filename("a  b"), "a b")
+
+    def test_empty_falls_back_to_song(self):
+        self.assertEqual(sanitize_filename("   "), "song")
+        self.assertEqual(sanitize_filename("..."), "song")
+
+    def test_windows_reserved_names_get_prefixed(self):
+        self.assertEqual(sanitize_filename("CON"), "_CON")
+        self.assertEqual(sanitize_filename("con.mp3"), "_con.mp3")
+        self.assertEqual(sanitize_filename("Com1"), "_Com1")
+        self.assertEqual(sanitize_filename("lpt9"), "_lpt9")
+        # Names merely containing a reserved word are untouched.
+        self.assertEqual(sanitize_filename("console"), "console")
+        self.assertEqual(sanitize_filename("AUX_x"), "AUX_x")
+
+    def test_control_characters_removed(self):
+        self.assertEqual(sanitize_filename("a\x00b\x1fc"), "abc")
 
 
 class DownloadAudioStreamTests(unittest.TestCase):
