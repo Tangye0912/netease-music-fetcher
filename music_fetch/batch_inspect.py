@@ -17,7 +17,7 @@ from music_fetch.api import MusicFetchError, detect_song, fetch_playlist_song_id
 from music_fetch.app_logging import get_logger
 from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
 from music_fetch.batch_models import BatchDetectRow, probe_media_size_bytes
-from music_fetch.error_texts import user_error_message
+from music_fetch.error_texts import UNKNOWN_ERROR, user_error_message
 import music_fetch.ui_texts as T
 
 logger = get_logger("music_fetch.batch_inspect")
@@ -144,6 +144,19 @@ def run_batch_detect(
                 song_id=song_id,
                 status="failed",
                 message=f"{err.code}: {user_error_message(err.code, err.message)}",
+                selected=False,
+            ))
+        except Exception:
+            # One unexpected row failure (bad UI callback, decode error, …)
+            # must not crash the whole batch detection.
+            logger.exception("Batch detect unexpected error. song_id=%s", song_id)
+            return (index, BatchDetectRow(
+                raw_input=source_value,
+                source_type=source_type,
+                source_label=source_label,
+                song_id=song_id,
+                status="failed",
+                message=user_error_message(UNKNOWN_ERROR, "unexpected error"),
                 selected=False,
             ))
 

@@ -46,6 +46,17 @@ class BatchInspectTests(unittest.TestCase):
         self.assertEqual(len(unavailable), 1)
         self.assertFalse(unavailable[0].selected)
 
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_unexpected_exception_becomes_failed_row(self, mock_detect, _mock_probe):
+        # A non-MusicFetchError on one row must not crash the whole detection.
+        mock_detect.side_effect = RuntimeError("decode boom")
+        rows = run_batch_detect("https://music.163.com/song?id=310", "MUSIC_U=test", timeout=5)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].status, "failed")
+        self.assertEqual(rows[0].song_id, "310")
+        self.assertTrue(rows[0].message)
+
     def test_empty_input_returns_empty(self):
         self.assertEqual(run_batch_detect("", "MUSIC_U=test", timeout=5), [])
 
