@@ -40,6 +40,7 @@ from music_fetch.app_settings import (
 from music_fetch.app_stores import SessionStore
 from music_fetch.audio import resolve_output_path
 from music_fetch.browser_login import BrowserLoginError, run_official_login
+from music_fetch.error_texts import user_error_message
 from music_fetch.pipeline import run_download_pipeline
 from music_fetch.network import ProxyConfigError, configure_proxy
 
@@ -116,8 +117,7 @@ def run_download(
     actual_format = result.output_path.suffix.lstrip(".").lower()
     if actual_format and actual_format != out_format.lower():
         print(
-            f"WARNING: ffmpeg not available, output saved as {actual_format} "
-            f"instead of requested {out_format}.",
+            f"WARNING: 未检测到 ffmpeg，已按源格式 {actual_format} 保存（请求格式 {out_format}）。",
             file=sys.stderr,
         )
     logger.info(
@@ -158,7 +158,7 @@ def run_playlist_download(
 
     def download_one(index_and_song: tuple[int, str]) -> Optional[DownloadResult]:
         idx, song_id = index_and_song
-        print(f"[{idx}/{total}] Downloading song {song_id} ...")
+        print(f"[{idx}/{total}] 正在下载歌曲 {song_id} ...")
         try:
             song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
             output_path = resolve_output_path(
@@ -181,8 +181,7 @@ def run_playlist_download(
             actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
             if actual_format and actual_format != out_format.lower():
                 print(
-                    f"  WARNING: ffmpeg not available, saved as {actual_format} "
-                    f"instead of {out_format}.",
+                    f"  WARNING: 未检测到 ffmpeg，已按源格式 {actual_format} 保存（请求格式 {out_format}）。",
                     file=sys.stderr,
                 )
             result = DownloadResult(
@@ -194,7 +193,7 @@ def run_playlist_download(
             print(f"  SUCCESS path={result.output_path}")
             return result
         except MusicFetchError as err:
-            print(f"  {err.code}: {err.message}", file=sys.stderr)
+            print(f"  {err.code}: {user_error_message(err.code, err.message)}", file=sys.stderr)
             logger.warning(
                 "Playlist song failed. song_id=%s code=%s message=%s",
                 song_id,
@@ -304,7 +303,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         proxy_fields_supplied = bool(args.proxy_host or args.proxy_port or args.proxy_username)
         if args.proxy_type == "direct" and proxy_fields_supplied:
-            raise ProxyConfigError("Select --proxy-type http or socks5 when proxy fields are provided.")
+            raise ProxyConfigError("提供了代理参数时必须指定 --proxy-type http 或 socks5。")
         configure_proxy(
             "" if args.proxy_type == "direct" else args.proxy_type,
             args.proxy_host,
@@ -328,9 +327,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 concurrency=args.concurrency,
             )
             if results:
-                print(f"\nDownloaded {len(results)} songs.")
+                print(f"\n已下载 {len(results)} 首歌曲。")
             else:
-                print("No songs were downloaded successfully.", file=sys.stderr)
+                print("未成功下载任何歌曲。", file=sys.stderr)
                 return 1
             return 0
         else:
@@ -355,11 +354,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         logger.warning("CLI proxy configuration rejected. type=%s reason=%s", args.proxy_type, err)
         return 2
     except MusicFetchError as err:
-        print(f"{err.code}: {err.message}", file=sys.stderr)
+        print(f"{err.code}: {user_error_message(err.code, err.message)}", file=sys.stderr)
         logger.warning("CLI failed with known error. code=%s message=%s", err.code, err.message)
         return 1
     except KeyboardInterrupt:
-        print("UNKNOWN_ERROR: Interrupted by user.", file=sys.stderr)
+        print("UNKNOWN_ERROR: 用户中断。", file=sys.stderr)
         logger.warning("CLI interrupted by user.")
         return 1
     except (OSError, ValueError) as err:

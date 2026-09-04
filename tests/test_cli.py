@@ -388,6 +388,26 @@ class MainTests(unittest.TestCase):
         result = music_fetch.cli.main(["--url", "not-a-valid-url-at-all"])
         self.assertEqual(result, 1)
 
+    @mock.patch("music_fetch.cli.setup_logging")
+    def test_main_error_output_is_chinese(self, _log_mock):
+        """MusicFetchError output goes through user_error_message (Chinese)."""
+        import io
+        import sys
+        from music_fetch.api import MusicFetchError
+        captured = {}
+        real_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with mock.patch("music_fetch.cli.parse_input_resource",
+                            side_effect=MusicFetchError("INVALID_URL", "Only music.163.com links")):
+                result = music_fetch.cli.main(["--url", "whatever"])
+        finally:
+            captured["text"] = sys.stderr.getvalue()
+            sys.stderr = real_stderr
+        self.assertEqual(result, 1)
+        self.assertIn("INVALID_URL", captured["text"])
+        self.assertIn("链接格式无效", captured["text"])
+
     @mock.patch("music_fetch.cli.run_playlist_download")
     @mock.patch("music_fetch.cli.setup_logging")
     @mock.patch("music_fetch.cli.load_cookie")
