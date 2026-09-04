@@ -220,7 +220,7 @@ class DownloadJob:
             )
             logger.exception("DownloadJob unexpected error. task_id=%s", self.task_id)
         finally:
-            for suffix in (".source", ".part", ".source.part"):
+            for suffix in (".source", ".part", ".source.part", ".part.src", ".source.part.src"):
                 stale = self.output_path.with_name(f"{self.output_path.name}{suffix}")
                 if stale.exists():
                     stale.unlink(missing_ok=True)

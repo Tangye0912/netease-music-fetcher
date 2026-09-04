@@ -280,16 +280,43 @@ def _candidate_media_urls(url: str) -> list[str]:
     return candidates
 
 
+def _url_identity(url: str) -> str:
+    """Comparable identity for a media URL: host + path, ignoring query tokens.
+
+    CDN query strings carry expiring auth tokens that change between runs,
+    while the host+path identifies the actual resource — so a partial file
+    from an earlier run of the same resource is resumable, one from a
+    different resource is not.
+    """
+    parsed = parse.urlparse(url)
+    return f"{parsed.netloc.lower()}{parsed.path}"
+
+
+def _read_sidecar_url(sidecar_path: Path) -> str:
+    try:
+        return sidecar_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def _download_audio_stream(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback], cancel_checker: Optional[CancelChecker], pause_checker: Optional[PauseChecker] = None, cookie: str = "") -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.with_name(f"{output_path.name}.part")
+    sidecar_path = output_path.with_name(f"{output_path.name}.part.src")
 
-    # Resume from partial download if .part file exists
+    # Resume from a partial download only when the sidecar proves the partial
+    # bytes came from the same media resource; otherwise appending would
+    # corrupt the output, so start from scratch.
     resume_offset = 0
     if tmp_path.exists():
-        resume_offset = tmp_path.stat().st_size
-        if resume_offset > 0:
-            logger.info("Resuming partial download. output=%s offset=%s", output_path, resume_offset)
+        if _url_identity(_read_sidecar_url(sidecar_path)) == _url_identity(media_url):
+            resume_offset = tmp_path.stat().st_size
+            if resume_offset > 0:
+                logger.info("Resuming partial download. output=%s offset=%s", output_path, resume_offset)
+        else:
+            logger.warning("Stale partial file from a different media resource, restarting. output=%s", output_path)
+            tmp_path.unlink(missing_ok=True)
+            sidecar_path.unlink(missing_ok=True)
 
     attempts = _build_download_attempt_headers(cookie)
     media_urls = _candidate_media_urls(media_url)
@@ -330,6 +357,15 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     if content_length and content_length.isdigit():
                         total_bytes = int(content_length) + resume_offset
                     file_mode = "ab" if resume_offset > 0 else "wb"
+                    if file_mode == "wb":
+                        # Record the source of a fresh partial so a later run
+                        # can tell whether resuming is safe.  A failed sidecar
+                        # write only disables resume (missing sidecar ⇒ no
+                        # resume), never the download itself.
+                        try:
+                            sidecar_path.write_text(candidate_url, encoding="utf-8")
+                        except OSError:
+                            logger.debug("Failed to write resume sidecar. output=%s", output_path, exc_info=True)
                     with tmp_path.open(file_mode) as file_obj:
                         while True:
                             if cancel_checker and cancel_checker():
@@ -348,6 +384,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                             if progress_callback:
                                 progress_callback(downloaded, total_bytes)
                 tmp_path.replace(output_path)
+                sidecar_path.unlink(missing_ok=True)
                 if progress_callback:
                     progress_callback(downloaded, total_bytes)
                 logger.info("Media download finished. output=%s downloaded_bytes=%s total_bytes=%s attempt=%s", output_path, downloaded, total_bytes if total_bytes is not None else "unknown", attempt_no)
@@ -355,8 +392,8 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
             except error.HTTPError as http_err:
                 # Clean up .part on any HTTP error — a stale partial file
                 # with an outdated offset would corrupt the next download.
-                if tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
+                tmp_path.unlink(missing_ok=True)
+                sidecar_path.unlink(missing_ok=True)
                 body_preview = ""
                 try:
                     body_preview = http_err.read(200).decode("utf-8", errors="ignore").strip()
@@ -374,15 +411,15 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                 # Always remove the partial file on a failed attempt: the next
                 # candidate may be a different media URL, and appending its
                 # bytes after a stale partial would corrupt the output.
-                if tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
+                tmp_path.unlink(missing_ok=True)
+                sidecar_path.unlink(missing_ok=True)
                 resume_offset = 0
                 logger.warning("Download attempt network error. attempt=%s/%s reason=%s", attempt_no, total_attempts, url_err.reason)
                 last_network_error = url_err
                 continue
             except DownloadCanceled:
-                if tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
+                tmp_path.unlink(missing_ok=True)
+                sidecar_path.unlink(missing_ok=True)
                 if output_path.exists():
                     output_path.unlink(missing_ok=True)
                 logger.info("Media download canceled, partial file removed. output=%s", output_path)
@@ -391,8 +428,8 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
         logger.error("All download attempts failed with 403. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
     if last_network_error is not None:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
+        tmp_path.unlink(missing_ok=True)
+        sidecar_path.unlink(missing_ok=True)
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {last_network_error.reason}") from last_network_error
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")

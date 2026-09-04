@@ -251,9 +251,11 @@ class DownloadStreamResumeTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_resume_from_partial(self):
-        """When a .part file exists, resume from its offset."""
+        """When a .part file exists with a matching sidecar, resume from its offset."""
         part_path = self.output_path.with_name("song.mp3.part")
         part_path.write_bytes(b"aaaa")  # 4 bytes already downloaded
+        sidecar = self.output_path.with_name("song.mp3.part.src")
+        sidecar.write_text("https://example.com/song.mp3", encoding="utf-8")
 
         # Mock a response that returns 206 + "bbbb"
         mock_resp = mock.MagicMock()
@@ -271,11 +273,15 @@ class DownloadStreamResumeTests(unittest.TestCase):
             )
         self.assertTrue(self.output_path.exists())
         self.assertEqual(self.output_path.read_bytes(), b"aaaabbbb")
+        # The sidecar is consumed once the download completes.
+        self.assertFalse(sidecar.exists())
 
     def test_server_ignores_range_restarts(self):
         """If server returns 200 instead of 206 for a Range request, restart from scratch."""
         part_path = self.output_path.with_name("song.mp3.part")
         part_path.write_bytes(b"aaaa")
+        sidecar = self.output_path.with_name("song.mp3.part.src")
+        sidecar.write_text("https://example.com/song.mp3", encoding="utf-8")
 
         mock_resp = mock.MagicMock()
         mock_resp.__enter__.return_value = mock_resp
@@ -292,6 +298,70 @@ class DownloadStreamResumeTests(unittest.TestCase):
         self.assertTrue(self.output_path.exists())
         # Should overwrite, not append
         self.assertEqual(self.output_path.read_bytes(), b"bbbb")
+
+    def test_stale_part_from_different_url_restarts(self):
+        """A .part whose sidecar names a different resource must not be resumed."""
+        part_path = self.output_path.with_name("song.mp3.part")
+        part_path.write_bytes(b"stale-bytes")
+        sidecar = self.output_path.with_name("song.mp3.part.src")
+        sidecar.write_text("https://example.com/other-song.mp3", encoding="utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.headers = {"Content-Length": "4"}
+        mock_resp.read.side_effect = [b"bbbb", b""]
+
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            music_fetch.audio._download_audio_stream(
+                "https://example.com/song.mp3",
+                self.output_path, timeout=10,
+                progress_callback=None, cancel_checker=None, cookie="",
+            )
+        # Overwritten from scratch — no appended stale bytes.
+        self.assertEqual(self.output_path.read_bytes(), b"bbbb")
+
+    def test_part_without_sidecar_restarts(self):
+        """A .part without a sidecar (crash before first write, legacy file) is discarded."""
+        part_path = self.output_path.with_name("song.mp3.part")
+        part_path.write_bytes(b"stale-bytes")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.headers = {"Content-Length": "4"}
+        mock_resp.read.side_effect = [b"bbbb", b""]
+
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp):
+            music_fetch.audio._download_audio_stream(
+                "https://example.com/song.mp3",
+                self.output_path, timeout=10,
+                progress_callback=None, cancel_checker=None, cookie="",
+            )
+        self.assertEqual(self.output_path.read_bytes(), b"bbbb")
+
+    def test_query_token_difference_still_resumes(self):
+        """CDN tokens live in the query string — same host+path stays resumable."""
+        part_path = self.output_path.with_name("song.mp3.part")
+        part_path.write_bytes(b"aaaa")
+        sidecar = self.output_path.with_name("song.mp3.part.src")
+        sidecar.write_text("https://example.com/song.mp3?wsSecret=old&wsTime=1", encoding="utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 206
+        mock_resp.headers = {"Content-Length": "4"}
+        mock_resp.read.side_effect = [b"bbbb", b""]
+
+        with mock.patch("music_fetch.audio.request.urlopen", return_value=mock_resp) as urlopen_mock:
+            music_fetch.audio._download_audio_stream(
+                "https://example.com/song.mp3?wsSecret=fresh&wsTime=2",
+                self.output_path, timeout=10,
+                progress_callback=None, cancel_checker=None, cookie="",
+            )
+        self.assertEqual(self.output_path.read_bytes(), b"aaaabbbb")
+        request_headers = urlopen_mock.call_args[0][0].headers
+        self.assertEqual(request_headers.get("Range"), "bytes=4-")
 
 
 class ConvertAudioFileTests(unittest.TestCase):
