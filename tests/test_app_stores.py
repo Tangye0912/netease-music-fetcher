@@ -40,6 +40,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(session.download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
             self.assertEqual(session.download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT)
             self.assertEqual(session.download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY)
+            self.assertEqual(session.ui_theme, "dark")
 
     def test_save_and_reload(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -54,6 +55,7 @@ class SessionStoreTests(unittest.TestCase):
                 download_timeout_sec=10,
                 download_retry_count=2,
                 download_concurrency=1,
+                ui_theme="light",
                 proxy_type="socks5",
                 proxy_host="127.0.0.1",
                 proxy_port=1080,
@@ -69,6 +71,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.download_timeout_sec, 10)
             self.assertEqual(loaded.download_retry_count, 2)
             self.assertEqual(loaded.download_concurrency, 1)
+            self.assertEqual(loaded.ui_theme, "light")
             self.assertEqual(loaded.proxy_type, "socks5")
             self.assertEqual(loaded.proxy_host, "127.0.0.1")
             self.assertEqual(loaded.proxy_port, 1080)
@@ -146,6 +149,12 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.proxy_host, "proxy.local")
             self.assertEqual(loaded.proxy_port, 0)
             self.assertEqual(loaded.proxy_username, "user")
+
+    def test_invalid_theme_falls_back_to_dark(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text('{"ui_theme":"neon"}', encoding="utf-8")
+            self.assertEqual(SessionStore(path).load().ui_theme, "dark")
 
 
 class DownloadHistoryStoreTests(unittest.TestCase):

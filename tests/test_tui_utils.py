@@ -46,6 +46,25 @@ class PrintTableTests(unittest.TestCase):
 
 
 class ThemeRenderingTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        tui_utils.set_theme("dark")
+
+    def test_theme_switch_updates_palette_and_prompt_styles(self) -> None:
+        dark_text = tui_utils._theme_color("text")
+        dark_dialog = tui_utils.DIALOG_STYLE
+
+        self.assertEqual(tui_utils.set_theme("light"), "light")
+
+        self.assertEqual(tui_utils.get_theme_name(), "light")
+        self.assertNotEqual(tui_utils._theme_color("text"), dark_text)
+        self.assertIsNot(tui_utils.DIALOG_STYLE, dark_dialog)
+
+    def test_invalid_theme_falls_back_to_dark(self) -> None:
+        tui_utils.set_theme("light")
+        self.assertEqual(tui_utils.set_theme("unknown"), "dark")
+        self.assertEqual(tui_utils.get_theme_name(), "dark")
+        self.assertIs(tui_utils._ACTIVE_THEME, tui_utils.DARK_THEME)
+
     def test_header_centers_cjk_title_to_terminal_width(self) -> None:
         captured: list[str] = []
         with mock.patch("music_fetch.tui_utils.print_info", side_effect=captured.append), mock.patch(

@@ -130,6 +130,24 @@ class BatchDownloadSessionTests(unittest.TestCase):
         self.assertEqual(records[0].status, "failed")
         self.assertEqual(records[0].error_code, "NETWORK_ERROR")
 
+    def test_summary_panel_rows_include_counts_output_and_failure_reasons(self):
+        rows = [_row("1"), _row("2")]
+        with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob):
+            session = self._session(rows)
+            session.poll()
+            for job in session._jobs.values():
+                job.fail(code="NETWORK_ERROR", message="timeout")
+            self._poll_until_done(session)
+
+        panel_rows = dict(session.summary_panel_rows())
+        self.assertEqual(panel_rows["状态"], "完成")
+        self.assertEqual(panel_rows["成功"], "0")
+        self.assertEqual(panel_rows["失败"], "2")
+        self.assertEqual(panel_rows["取消"], "0")
+        self.assertEqual(panel_rows["输出目录"], str(self.out_dir))
+        self.assertIn("x2", panel_rows["失败原因"])
+        self.assertEqual(panel_rows["提示"], "失败项可在下载历史中重试")
+
     def test_auth_expired_stops_dispatching_pending_jobs(self):
         rows = [_row("1"), _row("2")]
         with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob):
@@ -161,6 +179,7 @@ class BatchDownloadSessionTests(unittest.TestCase):
         counters = session.counters()
         self.assertEqual(counters.pending, 2)
         self.assertIn("未开始 2", session.summary_text())
+        self.assertEqual(dict(session.summary_panel_rows())["状态"], "已停止（未开始 2）")
 
     def test_pause_blocks_new_dispatch_and_resume_continues(self):
         rows = [_row("1"), _row("2"), _row("3")]

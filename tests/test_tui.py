@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 import music_fetch.tui
-from music_fetch.api import MusicFetchError
+from music_fetch.api import MusicFetchError, UserPlaylist
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.tui import TuiApp
@@ -185,6 +185,60 @@ class TuiAppHelperTests(unittest.TestCase):
         self.app.session.proxy_port = 0  # invalid port
         self.app._apply_proxy()
         self.assertFalse(get_proxy_config().enabled)
+
+    def test_init_applies_persisted_terminal_theme(self):
+        self.session_store.save(self.app.session)
+        stored = self.session_store.load()
+        stored.ui_theme = "light"
+        self.session_store.save(stored)
+
+        with mock.patch("music_fetch.tui.U.set_theme", return_value="light") as set_theme_mock:
+            TuiApp(session_store=self.session_store, history_store=self.history_store)
+
+        set_theme_mock.assert_called_once_with("light")
+
+    def test_settings_theme_choice_is_applied_and_persisted(self):
+        with mock.patch("music_fetch.tui.U.menu", side_effect=[7, 2, 8]), mock.patch(
+            "music_fetch.tui.U.set_theme", return_value="light"
+        ) as set_theme_mock, mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_success"
+        ):
+            self.app._screen_settings()
+
+        self.assertEqual(self.session_store.load().ui_theme, "light")
+        set_theme_mock.assert_called_once_with("light")
+
+    def test_playlist_screen_can_page_forward_and_select_global_index(self):
+        playlists = [
+            UserPlaylist(str(index), f"歌单 {index}", index, "", "用户")
+            for index in range(1, 12)
+        ]
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.fetch_user_playlists", return_value=playlists), mock.patch(
+            "music_fetch.tui.U.spinner"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_table"
+        ) as table_mock, mock.patch("music_fetch.tui.U.print_info"), mock.patch(
+            "music_fetch.tui.U.ask", side_effect=["n", "11"]
+        ), mock.patch.object(self.app, "_batch_flow") as batch_mock:
+            self.app._screen_playlists()
+
+        self.assertEqual(table_mock.call_count, 2)
+        batch_mock.assert_called_once_with("https://music.163.com/playlist?id=11")
+
+    def test_completed_batch_session_uses_summary_panel(self):
+        session = mock.Mock()
+        session.done = True
+        session.stopped = False
+        session.counters.return_value.total = 0
+        rows = [("状态", "完成"), ("成功", "2")]
+        session.summary_panel_rows.return_value = rows
+        with mock.patch("music_fetch.tui.ProgressBar"), mock.patch(
+            "music_fetch.tui.U.print_panel"
+        ) as panel_mock:
+            self.app._run_batch_session(session)
+
+        panel_mock.assert_called_once_with("批量下载完成", rows)
 
 
 class TuiMainTests(unittest.TestCase):

@@ -740,7 +740,7 @@ class UserPlaylist:
 
 
 def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
-    """Fetch the logged-in user's playlists."""
+    """Fetch up to 500 playlists for the logged-in user."""
     if "MUSIC_U=" not in cookie:
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login credential is missing MUSIC_U.")
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
@@ -748,31 +748,52 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
     status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
     if status != 200 or body.get("code") != 200:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Failed to fetch account info for playlists.")
-    account = body.get("account") or {}
+    account_value = body.get("account")
+    account = account_value if isinstance(account_value, dict) else {}
     user_id = account.get("id")
     if not user_id:
         raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Could not determine user ID from account.")
-    query = parse.urlencode({"uid": str(user_id), "limit": "100", "offset": "0"})
-    url = f"{USER_PLAYLIST_API}?{query}"
-    status, body = perform_json_get(url, headers, timeout=timeout)
-    if status != 200 or body.get("code") != 200:
-        logger.warning("User playlist API returned non-200. status=%s", status)
-        return []
-    raw_playlists = body.get("playlist") or []
+
+    page_size = 100
+    max_playlists = 500
     results: list[UserPlaylist] = []
-    for pl in raw_playlists:
-        if not isinstance(pl, dict):
-            continue
-        pid = str(pl.get("id") or "")
-        if not pid:
-            continue
-        results.append(UserPlaylist(
-            playlist_id=pid,
-            name=str(pl.get("name") or ""),
-            song_count=int(pl.get("trackCount") or 0),
-            cover_url=str(pl.get("coverImgUrl") or ""),
-            creator=str((pl.get("creator") or {}).get("nickname") or ""),
-        ))
+    seen_ids: set[str] = set()
+    for offset in range(0, max_playlists, page_size):
+        query = parse.urlencode({"uid": str(user_id), "limit": str(page_size), "offset": str(offset)})
+        url = f"{USER_PLAYLIST_API}?{query}"
+        status, page_body = perform_json_get(url, headers, timeout=timeout)
+        if status != 200 or page_body.get("code") != 200:
+            logger.warning("User playlist API returned non-200. status=%s offset=%s", status, offset)
+            if offset == 0:
+                return []
+            break
+
+        raw_value = page_body.get("playlist")
+        raw_playlists = raw_value if isinstance(raw_value, list) else []
+        for playlist in raw_playlists:
+            if not isinstance(playlist, dict):
+                continue
+            playlist_id = str(playlist.get("id") or "")
+            if not playlist_id or playlist_id in seen_ids:
+                continue
+            creator_value = playlist.get("creator")
+            creator = creator_value if isinstance(creator_value, dict) else {}
+            results.append(UserPlaylist(
+                playlist_id=playlist_id,
+                name=str(playlist.get("name") or ""),
+                song_count=int(playlist.get("trackCount") or 0),
+                cover_url=str(playlist.get("coverImgUrl") or ""),
+                creator=str(creator.get("nickname") or ""),
+            ))
+            seen_ids.add(playlist_id)
+            if len(results) >= max_playlists:
+                break
+
+        more = page_body.get("more")
+        if len(results) >= max_playlists or not raw_playlists:
+            break
+        if more is False or (more is None and len(raw_playlists) < page_size):
+            break
     logger.info("User playlists fetched. count=%s", len(results))
     return results
 
@@ -804,4 +825,3 @@ def fetch_lyric(song_id: str, timeout: int = 10) -> LyricResult:
     tlyric = str(tlyric_obj.get("lyric") or "") if isinstance(tlyric_obj, dict) else ""
     logger.info("Fetched lyric. song_id=%s lyric_len=%s translated_len=%s", song_id, len(lrc), len(tlyric))
     return LyricResult(lyric=lrc, translated_lyric=tlyric)
-

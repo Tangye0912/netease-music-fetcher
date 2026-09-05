@@ -570,6 +570,11 @@ class MainTests(unittest.TestCase):
         self.assertEqual(args.lyric, True)
         self.assertEqual(args.lyric_mode, "bilingual")
 
+    def test_help_lists_album_and_lyric_mode_support(self):
+        help_text = music_fetch.cli.build_parser().format_help()
+        self.assertIn("song, playlist, or album URL", help_text)
+        self.assertIn("--lyric-mode", help_text)
+
     @mock.patch("music_fetch.cli.setup_logging")
     @mock.patch("music_fetch.cli.run_download")
     @mock.patch("music_fetch.cli.load_cookie")

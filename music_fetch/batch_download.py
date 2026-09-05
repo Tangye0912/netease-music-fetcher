@@ -333,6 +333,29 @@ class BatchDownloadSession:
             return f"{summary} {T.BATCH_FAILURE_REASON_SUMMARY.format(reasons=reasons)}"
         return summary
 
+    def summary_panel_rows(self) -> list[tuple[str, str]]:
+        """Key-value rows for the end-of-run summary card in the TUI."""
+        rows: list[tuple[str, str]] = []
+        if self._stopped:
+            rows.append(("状态", f"已停止（未开始 {max(self._total - self._cursor, 0)}）"))
+        else:
+            rows.append(("状态", "完成"))
+        rows.extend(
+            [
+                ("成功", str(self._success)),
+                ("失败", str(self._failed)),
+                ("取消", str(self._canceled)),
+                ("输出目录", str(self._out_dir)),
+            ]
+        )
+        failure_reasons = summarize_batch_rows(self._queue).failure_reasons
+        if failure_reasons:
+            top_reasons = sorted(failure_reasons.items(), key=lambda item: (-item[1], item[0]))[:3]
+            reasons_text = "；".join(f"{reason} x{count}" for reason, count in top_reasons)
+            rows.append(("失败原因", reasons_text))
+            rows.append(("提示", "失败项可在下载历史中重试"))
+        return rows
+
     def _failure_reason_summary(self) -> str:
         failure_reasons = summarize_batch_rows(self._queue).failure_reasons
         if not failure_reasons:

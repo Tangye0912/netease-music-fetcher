@@ -379,6 +379,38 @@ class FetchUserPlaylistsTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].name, "My List")
 
+    def test_multiple_pages_are_aggregated_and_deduplicated(self):
+        from music_fetch.api import fetch_user_playlists
+
+        first_page = [
+            {
+                "id": index,
+                "name": f"List {index}",
+                "trackCount": index,
+                "coverImgUrl": "",
+                "creator": {"nickname": "Me"},
+            }
+            for index in range(1, 101)
+        ]
+        second_page = [
+            {"id": 100, "name": "duplicate", "trackCount": 1, "creator": None},
+            {"id": 101, "name": "List 101", "trackCount": 2, "creator": None},
+        ]
+        responses = [
+            (200, {"code": 200, "account": {"id": 123}}),
+            (200, {"code": 200, "more": True, "playlist": first_page}),
+            (200, {"code": 200, "more": False, "playlist": second_page}),
+        ]
+        with mock.patch("music_fetch.api.perform_json_get", side_effect=responses) as get_mock:
+            results = fetch_user_playlists("MUSIC_U=test")
+
+        self.assertEqual(len(results), 101)
+        self.assertEqual(results[-1].playlist_id, "101")
+        self.assertEqual(results[-1].creator, "")
+        requested_urls = [call.args[0] for call in get_mock.call_args_list[1:]]
+        self.assertIn("offset=0", requested_urls[0])
+        self.assertIn("offset=100", requested_urls[1])
+
 
 class FetchPlayableCandidatesTests(unittest.TestCase):
     """Test fetch_playable_candidates with mocked HTTP responses."""

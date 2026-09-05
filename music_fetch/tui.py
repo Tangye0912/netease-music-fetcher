@@ -115,6 +115,7 @@ class TuiApp:
         self.session_store = session_store or SessionStore(SESSION_FILE)
         self.history_store = history_store or DownloadHistoryStore(DOWNLOAD_HISTORY_FILE)
         self.session: AppSession = self.session_store.load()
+        U.set_theme(self.session.ui_theme)
         self._nickname = ""
         self._apply_proxy()
 
@@ -486,21 +487,48 @@ class TuiApp:
         if not playlists:
             U.print_warning("暂无歌单。")
             return
-        rows = [
-            (
-                str(index),
-                pl.name,
-                str(pl.song_count),
-                pl.creator or "-",
-            )
-            for index, pl in enumerate(playlists, start=1)
-        ]
-        U.print_table(["#", "歌单", "歌数", "创建者"], rows)
-        choice = self._pick_from_rows("输入序号", len(playlists))
-        if choice is None:
-            return
-        picked = playlists[choice - 1]
-        self._batch_flow(f"https://music.163.com/playlist?id={picked.playlist_id}")
+        page_size = 10
+        total_pages = (len(playlists) + page_size - 1) // page_size
+        page = 0
+        while True:
+            start = page * page_size
+            page_playlists = playlists[start:start + page_size]
+            rows = [
+                (
+                    str(index),
+                    pl.name,
+                    str(pl.song_count),
+                    pl.creator or "-",
+                )
+                for index, pl in enumerate(page_playlists, start=start + 1)
+            ]
+            U.print_table(["#", "歌单", "歌数", "创建者"], rows)
+            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(playlists)} 个歌单")
+            while True:
+                raw = U.ask("输入序号（0 返回；n 下一页；p 上一页）").strip()
+                if not raw or raw == "0":
+                    return
+                if raw.lower() == "n":
+                    if page + 1 < total_pages:
+                        page += 1
+                        break
+                    U.print_warning("已经是最后一页。")
+                    continue
+                if raw.lower() == "p":
+                    if page > 0:
+                        page -= 1
+                        break
+                    U.print_warning("已经是第一页。")
+                    continue
+                if raw.isdigit():
+                    index = int(raw) - 1
+                    if start <= index < start + len(page_playlists):
+                        picked = playlists[index]
+                        self._batch_flow(f"https://music.163.com/playlist?id={picked.playlist_id}")
+                        return
+                U.print_warning(
+                    f"请输入 {start + 1}-{start + len(page_playlists)} 的序号，0 返回，n/p 翻页。"
+                )
 
     # ── batch ─────────────────────────────────────────────────────
 
@@ -720,7 +748,8 @@ class TuiApp:
                 )
                 pb.invalidate()
                 time.sleep(0.1)
-        U.print_info(session.summary_text())
+        title = "批量下载已停止" if session.stopped else "批量下载完成"
+        U.print_panel(title, session.summary_panel_rows())
 
     # ── download options ──────────────────────────────────────────
 
@@ -1069,6 +1098,7 @@ class TuiApp:
         while True:
             U.print_header(MENU_SETTINGS)
             proxy_type_label = self.session.proxy_type or "直连"
+            theme_label = "浅色" if self.session.ui_theme == "light" else "深色"
             options = [
                 f"下载目录：{self.session.last_download_dir}",
                 f"检测超时：{self.session.detect_timeout_sec}s",
@@ -1076,6 +1106,7 @@ class TuiApp:
                 f"下载重试次数：{self.session.download_retry_count}",
                 f"并发上限：{self.session.download_concurrency}",
                 f"代理：{proxy_type_label}",
+                f"界面主题：{theme_label}",
                 "保存设置",
                 "返回（不保存）",
             ]
@@ -1094,6 +1125,11 @@ class TuiApp:
             elif choice == 6:
                 self._edit_proxy()
             elif choice == 7:
+                theme_choice = U.menu("界面主题", ["深色", "浅色", "返回"])
+                if theme_choice in (1, 2):
+                    self.session.ui_theme = "dark" if theme_choice == 1 else "light"
+                    U.set_theme(self.session.ui_theme)
+            elif choice == 8:
                 self.session_store.save(self.session)
                 U.print_success("设置已保存。")
                 return

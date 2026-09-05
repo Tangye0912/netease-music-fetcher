@@ -309,11 +309,11 @@ def run_album_download(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="music-fetch",
-        description="Fetch a playable NetEase Cloud Music track by song URL or playlist URL.",
+        description="Download NetEase Cloud Music from a song, playlist, or album URL.",
     )
     parser.add_argument(
         "--url", required=True,
-        help="NetEase song URL, playlist URL, or numeric song id.",
+        help="NetEase song, playlist, or album URL, or numeric song id.",
     )
     parser.add_argument(
         "--out", default=DEFAULT_OUT_DIR,
@@ -336,7 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--concurrency", type=int, default=DEFAULT_CLI_CONCURRENCY, dest="concurrency",
-        help=f"Parallel playlist downloads, 1-{MAX_CLI_CONCURRENCY} (default: {DEFAULT_CLI_CONCURRENCY}).",
+        help=f"Parallel playlist/album downloads, 1-{MAX_CLI_CONCURRENCY} (default: {DEFAULT_CLI_CONCURRENCY}).",
     )
     parser.add_argument(
         "--format", dest="out_format", default="mp3",
