@@ -7,19 +7,23 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v3.0.0)
+## Current Backlog (after v3.4.0)
 
-### Release Readiness
+### v3.5.0 — Download Efficiency and API Evolution
 
-- [ ] 用真实账号完成一次“终端扫码登录 → 单曲下载 → 歌单批量多选下载”冒烟（登录 803 成功路径需要真人扫码，暂未自动化）。
-- [ ] 在 Windows Terminal / cmd 与常见 Linux 终端上验证 ASCII 二维码渲染与键盘交互。
+- [ ] 增量下载：下载前识别已有文件，并提供跳过、覆盖或重命名策略。
+- [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径。
+- [ ] 为 M4A/FLAC 补齐封面嵌入，统一 MP3/M4A/FLAC 的元数据能力。
+- [ ] 将试听入口扩展到批量识别结果与“我的歌单”流程。
 
-### Type Safety and Tests
+### Quality and Architecture
 
-- [ ] 用更明确的结构类型替换 `batch_results.BatchResultRow` Protocol。
-- [ ] 重新测量覆盖率并逐步提升到 95% 以上，避免仅依赖测试数量判断质量。
+- [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
+- [ ] 逐步把覆盖率从 75% 提升到 95%，优先覆盖 TUI 路由和错误恢复分支。
+- [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
+- [ ] 为大歌单的曲目明细增加分页或虚拟化，避免一次渲染过长列表。
 
 ### Distribution
 
 - [ ] 为 macOS 构建补代码签名、公证和可重复的启动冒烟检查。
-- [ ] 为 TUI 单文件产物评估 UPX 与裁剪（当前约 13MB，可继续观察）。
+- [ ] 评估 UPX 与依赖裁剪对三平台单文件体积和启动速度的影响。

@@ -1,6 +1,6 @@
 # music-fetch
 
-网易云音乐单曲/歌单下载工具。v3.1 起登录采用**官网扫码（浏览器）**唯一方式，并加入登录门槛（未登录只显示登录/退出）。
+网易云音乐单曲、歌单与专辑下载工具。v3.1 起登录采用**官网扫码（浏览器）**唯一方式，并加入登录门槛（未登录只显示登录/退出）。
 
 ## 快速上手
 
@@ -23,16 +23,25 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 
 > 无需安装也可以直接运行：`python -m music_fetch.app`（Windows 双击 `start_windows.bat`、macOS 双击 `start_mac.command`，会自动预设终端窗口大小）。
 
-## 1. 版本概览（v3.3.0）
+## 1. 版本概览（v3.4.0）
 
-### 1.1 v3.3.0 变更
+### 1.1 v3.4.0 变更
+
+- **无损/Hi-Res**：请求链新增 lossless 与 Hi-Res FLAC 档位；需要账号本身具备对应权益，不可用时自动选择较低可播放档位。
+- **专辑下载**：TUI、CLI 和批量输入均支持专辑链接及分享文案，自动展开全部曲目。
+- **双语歌词**：单曲可选不下载、原文、翻译或双语；CLI 支持 `--lyric-mode`。
+- **批量体验**：下载结束显示结果汇总卡片和失败原因；“我的歌单”支持分页浏览。
+- **明暗主题**：设置中可切换深色/浅色主题，重启后保持选择。
+- **可靠性与工程质量**：修复 API 空值、标签写入、Windows 文件名和断点续传问题，CI 增加覆盖率、mypy 与 ruff 门槛。
+
+### 1.2 v3.3.0 变更
 
 - **试听**：单曲检测与搜索结果选中后可选"试听"——下载标准音质临时文件并用系统播放器打开，听完再决定是否下载。
 - **打开所在文件夹**：下载完成后一键打开文件所在目录。
 - **工程瘦身**：移除已废弃的终端二维码登录链路（`weapi`、`qrcode` 依赖、QR 轮询与冷却逻辑），冻结包更小、攻击面更少。
 - **三平台构建**：CI 新增 Linux 构建，Windows/macOS/Linux 三个平台同时出产物。
 
-### 1.2 v3.2.0 变更
+### 1.3 v3.2.0 变更
 
 - **信息卡片与音质显示**：单曲检测后与下载完成后用带边框卡片展示歌曲信息（歌名/艺人/专辑/音质/时长/大小）；检测接口返回最高可用音质。
 - **搜索分页**：搜索结果每页 10 条，`n`/`p` 翻页、`0` 返回，一屏放得下，不再滚动丢失内容。
@@ -41,7 +50,7 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **登录安全加固**：登录凭证原子替换写入 + POSIX `0600` 权限；一律使用隔离临时 profile，绝不复用已有浏览器登录态；登录成功后清理失败只提示不丢凭证。
 - **菜单快捷键与加载动画**：主菜单 `q` 退出、菜单底部按键提示；检测/搜索/歌单/检查更新有动画加载提示。
 
-### 1.3 v3.1.x 重大变更
+### 1.4 v3.1.x 重大变更
 
 - **官网扫码登录（浏览器，唯一方式）**：启动本机 Chrome/Edge 打开网易云官网登录页，扫码官网二维码后自动取回登录凭证；移除终端二维码登录与粘贴 Cookie。可绕开工具自身二维码被网易云风控标记的问题。
 - **登录门槛**：未登录时主菜单只显示「登录 / 退出」，其余功能锁定；cookie 过期自动回到登录流程。
@@ -50,7 +59,7 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **新增依赖**：`websocket-client`（浏览器登录取 cookie 用）。
 - **3.1.2 发行修复**：无控制台环境回退为普通文本输出，冻结包补齐 `websocket` 与 `wcwidth` 延迟导入，Windows/macOS CI 均可完成测试和打包。
 
-### 1.4 v3.0.0 重大变更
+### 1.5 v3.0.0 重大变更
 
 - **全面 TUI 化**：移除 PySide6 GUI（约 6000 行 Qt 代码与 WebEngine 依赖），所有交互都在终端完成。
 - **终端扫码登录**：调用网易云 QR 登录接口，在终端渲染二维码（ASCII 方块），扫码后自动轮询登录状态并保存凭证。
@@ -58,16 +67,17 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 - **体积锐减**：单文件产物从约 185MB（含 WebEngine）降至约 13MB，跨平台打包与启动都更快。
 - **保留脚本模式**：`music-fetch --url ...` 等参数化 CLI 原样保留（含 `--concurrency` 歌单并行下载）。
 
-### 1.5 核心能力
+### 1.6 核心能力
 
 - 登录：自动打开 Chrome/Edge 官网二维码页面，扫码后经本机 DevTools 协议取回并保存凭证；无需提前登录网易云网页
-- 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词选项 → 进度条下载（p 暂停 c 取消）
+- 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词模式 → 进度条下载（p 暂停 c 取消）
 - 搜索：按歌名/歌手名搜索并直接下载
-- 我的歌单：登录后浏览歌单，选中即进入批量流程
-- 批量：多行粘贴 → 并发识别（歌单自动展开、去重）→ 键盘多选 → 并发下载（p 全部暂停 / r 恢复 / c 取消）→ 失败项重试
-- 歌词：下载 `.lrc` 并嵌入 MP3/M4A/FLAC 标签
+- 我的歌单：登录后分页浏览创建/收藏的歌单，选中即进入批量流程
+- 专辑：输入专辑链接或分享文案，自动展开曲目进入批量下载
+- 批量：多行粘贴 → 并发识别（歌单/专辑自动展开、去重）→ 键盘多选 → 并发下载 → 汇总失败原因 → 历史重试
+- 歌词：原文、翻译或按时间轴合并的双语 `.lrc`，并嵌入支持的音频标签
 - 下载历史：分页浏览、状态筛选、关键词搜索、失败重试、打开目录、删除、筛选结果 CSV 导出（防公式注入）
-- 设置：下载目录、检测/下载超时、重试次数、并发上限、HTTP/SOCKS5 代理
+- 设置：下载目录、检测/下载超时、重试次数、并发上限、HTTP/SOCKS5 代理、明暗主题
 - 诊断：API/CDN 连通性检测、脱敏日志、诊断报告导出；主菜单可检查新版本
 - 格式：mp3/m4a/wav/flac/aac；未安装 ffmpeg 时自动回退保存源格式
 
@@ -105,10 +115,11 @@ music-fetch
 | 下载中 | `p` 暂停/继续，`c` 取消 |
 | 批量下载中 | `p` 全部暂停，`r` 全部恢复，`c` 取消 |
 | 批量多选 | `空格` 勾选，`回车` 确认，`Esc` 取消 |
+| 搜索/我的歌单分页 | `n` 下一页，`p` 上一页，`0` 返回 |
 | 多行粘贴 | 粘贴后按 `Esc` + `回车` 提交 |
 | 任意界面 | `Ctrl+C` 返回/退出 |
 
-终端主题参考 Bili-hardcore 的信息层级：居中标题、全宽面板、青色焦点、黄色元信息、绿色/红色结果、深灰辅助文字，并针对中文等宽对齐。字体由终端应用控制，程序无法强制修改；Windows Terminal 推荐 Cascadia Mono，macOS Terminal/iTerm2 推荐 SF Mono 或 JetBrains Mono，窗口宽度建议至少 80 列。
+终端主题参考 Bili-hardcore 的信息层级：居中标题、全宽面板、青色焦点、黄色元信息、绿色/红色结果，并针对中文等宽对齐。可在“软件设置 → 界面主题”切换深色/浅色配色；字体由终端应用控制，程序无法强制修改。Windows Terminal 推荐 Cascadia Mono，macOS Terminal/iTerm2 推荐 SF Mono 或 JetBrains Mono，窗口宽度建议至少 80 列。
 
 登录采用**唯一的官网扫码方式**：应用没有自己的有效凭证时，会自动打开本机 Chrome/Edge 的隔离临时 profile 进入网易云官网登录页。用户用网易云 App 扫码官网二维码后，应用自动取回、校验并保存登录凭证。
 
@@ -120,6 +131,8 @@ music-fetch
 
 ```bash
 music-fetch --url "https://music.163.com/song?id=33894312"
+# 专辑链接同样可用：
+music-fetch --url "https://music.163.com/album?id=34720827"
 ```
 
 可选参数：
@@ -134,8 +147,11 @@ music-fetch \
   --timeout 30 \
   --concurrency 4 \
   --lyric \
+  --lyric-mode bilingual \
   --verbose
 ```
+
+`--lyric-mode` 可选 `original`、`translation`、`bilingual`，仅在同时指定 `--lyric` 时生效。
 
 `--cookie-file` 仍作为高级覆盖项保留；正常使用无需指定，CLI 会优先复用应用自己的扫码会话，缺失或过期时自动重新扫码。
 
@@ -159,11 +175,11 @@ python3 -m pip install -e ".[dev]"
 python3 build.py --clean
 ```
 
-产物在 `dist/music-fetch.exe`（Windows）或 `dist/music-fetch`（macOS）。
+产物在 `dist/music-fetch.exe`（Windows）或 `dist/music-fetch`（macOS/Linux）。
 
 ### CI 自动构建
 
-推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows + macOS 版本并上传到 GitHub Release：
+推送 `v*` 格式的 tag 会触发 GitHub Actions 自动构建 Windows、macOS、Linux 版本并上传到 GitHub Release：
 
 ```bash
 git tag v3.0.0
@@ -194,10 +210,10 @@ git push origin v3.0.0
 | `music_fetch/download_runner.py` | 线程下载任务：进度快照、暂停/恢复/取消（替换原 QThread worker）。 |
 | `music_fetch/batch_inspect.py` | 批量识别纯逻辑：混合输入解析、歌单展开、去重、并发检测与取消。 |
 | `music_fetch/batch_download.py` | 批量下载调度：并发上限、逐行状态、历史记录、全部暂停/恢复/取消与结果摘要。 |
-| `music_fetch/api.py` | 网易云接口层：链接解析、cookie、登录校验、歌曲/歌单/账号/搜索/歌词/QR 登录 API。 |
+| `music_fetch/api.py` | 网易云接口层：链接解析、cookie、登录校验、歌曲/歌单/专辑/账号/搜索/歌词 API。 |
 | `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码、歌词嵌入。 |
 | `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，TUI 和 CLI 共享。 |
-| `music_fetch/cli.py` | 脚本模式 CLI：复用应用扫码会话，缺失或过期时自动打开隔离扫码；支持单曲/歌单下载、`--lyric`/`--concurrency`/代理/日志参数。 |
+| `music_fetch/cli.py` | 脚本模式 CLI：复用应用扫码会话，支持单曲/歌单/专辑下载、歌词模式、并发、代理与日志参数。 |
 | `music_fetch/network.py` | 统一网络传输：直连、HTTP/SOCKS5 代理、认证、远程 DNS。 |
 | `music_fetch/browser_login.py` | 官网扫码登录：始终用隔离临时 profile 启动 Chrome/Edge，经 DevTools 协议取回本次扫码产生的凭证，不读取玩家日常浏览器数据。 |
 | `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、去重。 |
@@ -213,14 +229,16 @@ git push origin v3.0.0
 | `music-fetch` | macOS/Linux CLI 包装脚本（无参数进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
 | `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`）。 |
-| `tests/` | 338 个单元/回归测试与 15 个参数化子测试（全部可在无显示环境运行）。 |
+| `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 
 ## 7. 测试
 
 ```bash
 python3 -m pytest tests/ -q
+python3 -m pytest tests/ -q --cov=music_fetch --cov-report=term-missing
 python3 -m mypy music_fetch/ --strict
+python3 -m ruff check music_fetch/ tests/
 ```
 
 ## 8. 日志与排障
