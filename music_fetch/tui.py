@@ -29,6 +29,7 @@ from music_fetch.api import (
     fetch_account_profile,
     fetch_user_playlists,
     normalize_cookie,
+    parse_input_resource,
     search_songs,
 )
 from music_fetch.app_logging import default_log_path, setup_logging
@@ -308,6 +309,17 @@ class TuiApp:
         if not value:
             return
         if not self._require_login():
+            return
+        # Album links route into the batch flow (playlist links keep their
+        # dedicated entry under 我的歌单 / 批量下载).
+        try:
+            resource_type, resource_id = parse_input_resource(value)
+        except MusicFetchError:
+            resource_type, resource_id = "song", ""
+        if resource_type == "album":
+            U.print_info("检测到专辑链接，专辑将进入批量下载流程。")
+            if U.confirm(f"批量下载专辑（ID {resource_id}）？", default=True):
+                self._batch_flow(f"https://music.163.com/album?id={resource_id}")
             return
         with U.spinner("检测中..."):
             try:

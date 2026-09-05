@@ -36,6 +36,8 @@ from music_fetch.api import (
     fetch_playable_candidates,
     fetch_song_metadata,
     fetch_playlist_song_ids,
+    fetch_album_songs,
+    AlbumDetail,
     detect_song,
     normalize_media_url,
     search_songs,
@@ -90,6 +92,7 @@ from music_fetch.batch_download import (
 from music_fetch.cli import (
     run_download,
     run_playlist_download,
+    run_album_download,
     build_parser,
     main,
 )
@@ -133,6 +136,8 @@ __all__ = [
     "fetch_playable_candidates",
     "fetch_song_metadata",
     "fetch_playlist_song_ids",
+    "fetch_album_songs",
+    "AlbumDetail",
     "detect_song",
     "normalize_media_url",
     "search_songs",
@@ -166,6 +171,7 @@ __all__ = [
     # CLI entry points
     "run_download",
     "run_playlist_download",
+    "run_album_download",
     "build_parser",
     "main",
     # Constants

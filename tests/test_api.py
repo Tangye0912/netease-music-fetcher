@@ -506,3 +506,82 @@ class DetectSongTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlbumParsingTests(unittest.TestCase):
+    def test_album_query_url(self):
+        rt, rid = parse_input_resource("https://music.163.com/album?id=12345")
+        self.assertEqual(rt, "album")
+        self.assertEqual(rid, "12345")
+
+    def test_album_path_url(self):
+        rt, rid = parse_input_resource("https://music.163.com/#/album/67890")
+        self.assertEqual(rt, "album")
+        self.assertEqual(rid, "67890")
+
+    def test_album_in_share_text(self):
+        rt, rid = parse_input_resource("分享云音乐音乐的专辑《Example》https://music.163.com/album?id=42")
+        self.assertEqual(rt, "album")
+        self.assertEqual(rid, "42")
+
+    def test_parse_song_id_rejects_album(self):
+        with self.assertRaises(MusicFetchError) as ctx:
+            parse_song_id("https://music.163.com/album?id=1")
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+
+
+class FetchAlbumSongsTests(unittest.TestCase):
+    def test_success_parses_name_and_song_ids(self):
+        from music_fetch.api import fetch_album_songs
+        body = b'{"code": 200, "album": {"name": "Example Album", "songs": [{"id": 1}, {"id": 2}, {"id": 1}]}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            detail = fetch_album_songs("99", "MUSIC_U=test")
+        self.assertEqual(detail.name, "Example Album")
+        self.assertEqual(detail.song_ids, ["1", "2"])
+
+    def test_falls_back_to_body_songs(self):
+        from music_fetch.api import fetch_album_songs
+        body = b'{"code": 200, "album": {"name": ""}, "songs": [{"id": 7}]}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            detail = fetch_album_songs("99", "MUSIC_U=test")
+        self.assertEqual(detail.song_ids, ["7"])
+
+    def test_empty_album_raises_unavailable(self):
+        from music_fetch.api import fetch_album_songs
+        body = b'{"code": 200, "album": {"name": "Empty", "songs": []}}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_album_songs("99", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
+
+    def test_auth_expired_on_301(self):
+        from music_fetch.api import fetch_album_songs
+        body = b'{"code": 301}'
+        mock_resp = mock.MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        with mock.patch("music_fetch.api.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_album_songs("99", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+
+
+class AlbumShareHintTests(unittest.TestCase):
+    def test_album_share_with_url_maps_hint(self):
+        from music_fetch.batch_inputs import source_hint_map
+        mapping = source_hint_map("分享云音乐音乐的专辑《夜曲》https://music.163.com/album?id=1")
+        url = "https://music.163.com/album?id=1"
+        self.assertEqual(mapping.get(url), "专辑-夜曲")

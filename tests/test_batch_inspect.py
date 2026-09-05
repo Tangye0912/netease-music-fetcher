@@ -133,3 +133,18 @@ class BatchInspectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.fetch_album_songs")
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_album_link_expands_into_album_rows(self, mock_detect, mock_album, _mock_probe):
+        from music_fetch.api import AlbumDetail
+        mock_detect.side_effect = lambda song_id, cookie, timeout: self._detect_result(song_id)
+        mock_album.return_value = AlbumDetail(name="夜曲", song_ids=["11", "12", "11"])
+        rows = run_batch_detect("https://music.163.com/album?id=99", "MUSIC_U=test", timeout=5)
+        ready = [r for r in rows if r.status == "ready"]
+        duplicates = [r for r in rows if r.status == "duplicate"]
+        self.assertEqual([r.song_id for r in ready], ["11", "12"])
+        self.assertEqual(len(duplicates), 1)
+        self.assertTrue(all(r.source_label == "专辑-夜曲" for r in ready))
+        self.assertTrue(all(r.source_type == "album" for r in ready))

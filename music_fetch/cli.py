@@ -7,7 +7,7 @@ build_parser() (argparse), and main() (CLI entry).  Depends on music_fetch.api (
 
 from __future__ import annotations
 
-__all__ = ["run_download", "run_playlist_download", "build_parser", "main"]
+__all__ = ["run_download", "run_playlist_download", "run_album_download", "build_parser", "main"]
 
 import argparse
 import logging
@@ -22,6 +22,7 @@ from music_fetch.api import (
     DownloadResult,
     MusicFetchError,
     fetch_account_profile,
+    fetch_album_songs,
     fetch_playlist_song_ids,
     fetch_song_metadata,
     load_cookie,
@@ -134,6 +135,121 @@ def run_download(
     )
 
 
+def _cli_download_one(
+    index_and_song: tuple[int, str],
+    *,
+    total: int,
+    out_dir: Path,
+    cookie: str,
+    timeout: int,
+    out_format: str,
+    retry_count: int,
+    download_lyric: bool,
+    lyric_mode: str,
+) -> Optional[DownloadResult]:
+    """Download one track for playlist/album CLI runs; prints its own progress."""
+    idx, song_id = index_and_song
+    print(f"[{idx}/{total}] 正在下载歌曲 {song_id} ...")
+    try:
+        song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
+        output_path = resolve_output_path(
+            out_dir=out_dir,
+            song_id=song_id,
+            song_name=song_name,
+            rename=None,
+            out_format=out_format,
+        )
+        pipeline_result = run_download_pipeline(
+            song_id=song_id,
+            cookie=cookie,
+            output_path=output_path,
+            target_format=out_format,
+            timeout=timeout,
+            retry_count=retry_count,
+            tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
+            download_lyric=download_lyric,
+            lyric_mode=lyric_mode,
+        )
+        actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
+        if actual_format and actual_format != out_format.lower():
+            print(
+                f"  WARNING: 未检测到 ffmpeg，已按源格式 {actual_format} 保存（请求格式 {out_format}）。",
+                file=sys.stderr,
+            )
+        result = DownloadResult(
+            song_id=song_id,
+            output_path=pipeline_result.output_path.resolve(),
+            size_bytes=pipeline_result.file_size,
+            duration_ms=meta_duration,
+        )
+        print(f"  SUCCESS path={result.output_path}")
+        return result
+    except MusicFetchError as err:
+        print(f"  {err.code}: {user_error_message(err.code, err.message)}", file=sys.stderr)
+        logger.warning(
+            "Playlist song failed. song_id=%s code=%s message=%s",
+            song_id,
+            err.code,
+            err.message,
+        )
+        return None
+
+
+def _download_song_ids(
+    song_ids: list[str],
+    *,
+    out_dir: Path,
+    cookie: str,
+    timeout: int,
+    out_format: str,
+    retry_count: int,
+    download_lyric: bool,
+    lyric_mode: str,
+    concurrency: int,
+    source: str,
+) -> list[DownloadResult]:
+    """Run concurrent CLI downloads for a list of song ids."""
+    total = len(song_ids)
+    max_workers = max(1, min(int(concurrency), MAX_CLI_CONCURRENCY))
+    logger.info(
+        "Batch CLI download started. source=%s song_count=%s format=%s retry=%s concurrency=%s",
+        source,
+        total,
+        out_format,
+        retry_count,
+        max_workers,
+    )
+
+    def download_one(index_and_song: tuple[int, str]) -> Optional[DownloadResult]:
+        return _cli_download_one(
+            index_and_song,
+            total=total,
+            out_dir=out_dir,
+            cookie=cookie,
+            timeout=timeout,
+            out_format=out_format,
+            retry_count=retry_count,
+            download_lyric=download_lyric,
+            lyric_mode=lyric_mode,
+        )
+
+    if max_workers <= 1:
+        ordered = [download_one(item) for item in enumerate(song_ids, start=1)]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            ordered = list(pool.map(download_one, enumerate(song_ids, start=1)))
+
+    results = [result for result in ordered if result is not None]
+    logger.info(
+        "Batch CLI download completed. source=%s total=%s success=%s failed=%s",
+        source,
+        total,
+        len(results),
+        total - len(results),
+    )
+    return results
+
+
 def run_playlist_download(
     playlist_url: str,
     out_dir: Path,
@@ -148,78 +264,46 @@ def run_playlist_download(
     _, playlist_id = parse_input_resource(playlist_url)
     cookie = _load_cli_cookie(cookie_file)
     song_ids = fetch_playlist_song_ids(playlist_id, cookie, timeout=timeout)
-    total = len(song_ids)
-    max_workers = max(1, min(int(concurrency), MAX_CLI_CONCURRENCY))
-    logger.info(
-        "Playlist download started. playlist_id=%s song_count=%s format=%s retry=%s concurrency=%s",
-        playlist_id,
-        total,
-        out_format,
-        retry_count,
-        max_workers,
+    return _download_song_ids(
+        song_ids,
+        out_dir=out_dir,
+        cookie=cookie,
+        timeout=timeout,
+        out_format=out_format,
+        retry_count=retry_count,
+        download_lyric=download_lyric,
+        lyric_mode=lyric_mode,
+        concurrency=concurrency,
+        source=f"playlist:{playlist_id}",
     )
 
-    def download_one(index_and_song: tuple[int, str]) -> Optional[DownloadResult]:
-        idx, song_id = index_and_song
-        print(f"[{idx}/{total}] 正在下载歌曲 {song_id} ...")
-        try:
-            song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
-            output_path = resolve_output_path(
-                out_dir=out_dir,
-                song_id=song_id,
-                song_name=song_name,
-                rename=None,
-                out_format=out_format,
-            )
-            pipeline_result = run_download_pipeline(
-                song_id=song_id,
-                cookie=cookie,
-                output_path=output_path,
-                target_format=out_format,
-                timeout=timeout,
-                retry_count=retry_count,
-                tags={"title": song_name or "", "artist": artist, "album": album_name, "cover_url": cover_url},
-                download_lyric=download_lyric,
-                lyric_mode=lyric_mode,
-            )
-            actual_format = pipeline_result.output_path.suffix.lstrip(".").lower()
-            if actual_format and actual_format != out_format.lower():
-                print(
-                    f"  WARNING: 未检测到 ffmpeg，已按源格式 {actual_format} 保存（请求格式 {out_format}）。",
-                    file=sys.stderr,
-                )
-            result = DownloadResult(
-                song_id=song_id,
-                output_path=pipeline_result.output_path.resolve(),
-                size_bytes=pipeline_result.file_size,
-                duration_ms=meta_duration,
-            )
-            print(f"  SUCCESS path={result.output_path}")
-            return result
-        except MusicFetchError as err:
-            print(f"  {err.code}: {user_error_message(err.code, err.message)}", file=sys.stderr)
-            logger.warning(
-                "Playlist song failed. song_id=%s code=%s message=%s",
-                song_id,
-                err.code,
-                err.message,
-            )
-            return None
 
-    if max_workers <= 1:
-        ordered = [download_one(item) for item in enumerate(song_ids, start=1)]
-    else:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            ordered = list(pool.map(download_one, enumerate(song_ids, start=1)))
-
-    results = [result for result in ordered if result is not None]
-    logger.info(
-        "Playlist download completed. total=%s success=%s failed=%s",
-        total,
-        len(results),
-        total - len(results),
+def run_album_download(
+    album_url: str,
+    out_dir: Path,
+    cookie_file: Optional[Path] = None,
+    timeout: int = 30,
+    out_format: str = "mp3",
+    retry_count: int = 1,
+    download_lyric: bool = False,
+    lyric_mode: str = "original",
+    concurrency: int = DEFAULT_CLI_CONCURRENCY,
+) -> list[DownloadResult]:
+    _, album_id = parse_input_resource(album_url)
+    cookie = _load_cli_cookie(cookie_file)
+    album = fetch_album_songs(album_id, cookie, timeout=timeout)
+    return _download_song_ids(
+        album.song_ids,
+        out_dir=out_dir,
+        cookie=cookie,
+        timeout=timeout,
+        out_format=out_format,
+        retry_count=retry_count,
+        download_lyric=download_lyric,
+        lyric_mode=lyric_mode,
+        concurrency=concurrency,
+        source=f"album:{album_id}",
     )
-    return results
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -327,6 +411,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         if resource_type == "playlist":
             results = run_playlist_download(
                 playlist_url=args.url,
+                out_dir=out_dir,
+                cookie_file=cookie_file,
+                timeout=args.timeout,
+                out_format=args.out_format,
+                retry_count=args.retry_count,
+                download_lyric=args.lyric,
+                lyric_mode=args.lyric_mode,
+                concurrency=args.concurrency,
+            )
+            if results:
+                print(f"\n已下载 {len(results)} 首歌曲。")
+            else:
+                print("未成功下载任何歌曲。", file=sys.stderr)
+                return 1
+            return 0
+        if resource_type == "album":
+            results = run_album_download(
+                album_url=args.url,
                 out_dir=out_dir,
                 cookie_file=cookie_file,
                 timeout=args.timeout,

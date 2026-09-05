@@ -428,6 +428,27 @@ class MainTests(unittest.TestCase):
                 result = music_fetch.cli.main(args)
             self.assertEqual(result, 0)
 
+    @mock.patch("music_fetch.cli.run_album_download")
+    @mock.patch("music_fetch.cli.setup_logging")
+    @mock.patch("music_fetch.cli.load_cookie")
+    def test_main_album_route(self, _cookie_mock, _log_mock, album_mock):
+        from music_fetch.api import DownloadResult
+        album_mock.return_value = [DownloadResult(song_id="1", output_path=Path("out/song.mp3"), size_bytes=4, duration_ms=1000)]
+        with tempfile.TemporaryDirectory() as tmp:
+            cookie_file = Path(tmp) / "cookies.txt"
+            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
+            args = [
+                "--url", "https://music.163.com/album?id=456",
+                "--cookie-file", str(cookie_file),
+                "--out", tmp,
+            ]
+            with mock.patch("music_fetch.cli.Path") as mock_path:
+                mock_path.return_value.expanduser.return_value = Path(tmp)
+                result = music_fetch.cli.main(args)
+            self.assertEqual(result, 0)
+            album_mock.assert_called_once()
+            self.assertEqual(album_mock.call_args.kwargs.get("album_url"), "https://music.163.com/album?id=456")
+
     @mock.patch("music_fetch.cli.setup_logging")
     @mock.patch("music_fetch.cli.load_cookie")
     def test_main_playlist_empty(self, _cookie_mock, _log_mock):

@@ -13,7 +13,7 @@ import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Callable, Optional
 
-from music_fetch.api import MusicFetchError, detect_song, fetch_playlist_song_ids, parse_input_resource
+from music_fetch.api import MusicFetchError, detect_song, fetch_album_songs, fetch_playlist_song_ids, parse_input_resource
 from music_fetch.app_logging import get_logger
 from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
 from music_fetch.batch_models import BatchDetectRow, probe_media_size_bytes
@@ -62,6 +62,16 @@ def run_batch_detect(
                     break
                 for song_id in song_ids:
                     expanded.append(("playlist", value, song_id, playlist_label))
+            elif resource_type == "album":
+                album = fetch_album_songs(resource_id, cookie, timeout=timeout)
+                if cancel.is_set():
+                    break
+                if album.name and not source_hint:
+                    album_label = f"{T.BATCH_SOURCE_ALBUM}-{album.name}"
+                else:
+                    album_label = source_hint or f"{T.BATCH_SOURCE_ALBUM}-{resource_id}"
+                for song_id in album.song_ids:
+                    expanded.append(("album", value, song_id, album_label))
             else:
                 expanded.append(("song", value, resource_id, source_hint))
         except MusicFetchError as err:

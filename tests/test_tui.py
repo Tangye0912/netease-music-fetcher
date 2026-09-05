@@ -207,3 +207,13 @@ class TuiMainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlbumRoutingTests(TuiAppHelperTests):
+    @mock.patch("music_fetch.tui.TuiApp._batch_flow")
+    @mock.patch("music_fetch.tui.U.confirm", return_value=True)
+    @mock.patch("music_fetch.tui.U.ask", return_value="https://music.163.com/album?id=1")
+    def test_single_screen_routes_album_links_to_batch(self, _ask_mock, _confirm_mock, batch_mock):
+        self.app.session.cookie = "MUSIC_U=x"
+        self.app._screen_single()
+        batch_mock.assert_called_once_with("https://music.163.com/album?id=1")

@@ -16,6 +16,7 @@ __all__ = [
     "load_cookie", "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
     "fetch_account_profile",
     "fetch_playable_candidates", "fetch_song_metadata", "fetch_playlist_song_ids",
+    "fetch_album_songs", "AlbumDetail", "ALBUM_API",
     "detect_song", "normalize_media_url",
     "search_songs", "SearchResult",
     "fetch_user_playlists", "UserPlaylist",
@@ -143,6 +144,8 @@ def parse_song_id(value: str) -> str:
     resource_type, resource_id = parse_input_resource(value)
     if resource_type == "playlist":
         raise MusicFetchError(ErrorCode.INVALID_URL, "Detected playlist link. Please use batch mode.")
+    if resource_type == "album":
+        raise MusicFetchError(ErrorCode.INVALID_URL, "Detected album link. Please use batch mode.")
     return resource_id
 
 
@@ -181,6 +184,8 @@ def _detect_resource_type(parsed: parse.ParseResult, raw_target: str) -> str:
     lowered = raw_target.lower()
     if "/playlist" in path or "/playlist" in fragment or "#/playlist" in lowered:
         return "playlist"
+    if "/album" in path or "/album" in fragment or "#/album" in lowered:
+        return "album"
     return "song"
 
 
@@ -201,8 +206,12 @@ def _extract_resource_id(parsed: parse.ParseResult, raw_target: str) -> str:
         if match:
             return match.group(1)
 
-    for pattern in (r"/song/(\d+)", r"/playlist/(\d+)"):
+    for pattern in (r"/song/(\d+)", r"/playlist/(\d+)", r"/album/(\d+)"):
         match = re.search(pattern, parsed.path or "")
+        if match:
+            return match.group(1)
+        # Hash-router URLs keep the resource path inside the fragment.
+        match = re.search(pattern, parsed.fragment or "")
         if match:
             return match.group(1)
 
@@ -556,6 +565,59 @@ def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) ->
     else:
         logger.info("Fetched playlist songs. playlist_id=%s count=%s", playlist_id, len(all_ids))
     return all_ids
+
+
+ALBUM_API = "https://music.163.com/api/v1/album/{album_id}"
+
+
+@dataclass
+class AlbumDetail:
+    """Album name plus the ordered, deduplicated song ids it contains."""
+    name: str
+    song_ids: list[str]
+
+
+def fetch_album_songs(album_id: str, cookie: str, timeout: int = 20) -> AlbumDetail:
+    """Fetch an album's name and its track ids for batch downloads."""
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    url = ALBUM_API.format(album_id=album_id)
+    try:
+        status, body = perform_json_get(url, headers, timeout=timeout)
+    except MusicFetchError:
+        raise
+    if status in (401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
+    code = body.get("code")
+    if code in (301, 302, 401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
+    if status != 200 or code != 200:
+        message = str(body.get("message") or f"Unexpected album API response: status={status}, code={code}")
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
+    album = body.get("album") if isinstance(body.get("album"), dict) else {}
+    name = str(album.get("name") or "").strip()
+    album_songs = album.get("songs")
+    body_songs = body.get("songs")
+    raw_songs: list[object] = (
+        album_songs if isinstance(album_songs, list)
+        else body_songs if isinstance(body_songs, list)
+        else []
+    )
+    song_ids: list[str] = []
+    seen: set[str] = set()
+    for row in raw_songs:
+        if not isinstance(row, dict):
+            continue
+        value = row.get("id")
+        if not isinstance(value, int):
+            continue
+        sid = str(value)
+        if sid not in seen:
+            seen.add(sid)
+            song_ids.append(sid)
+    if not song_ids:
+        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Album is empty or unavailable.")
+    logger.info("Fetched album songs. album_id=%s name=%s count=%s", album_id, name or "-", len(song_ids))
+    return AlbumDetail(name=name, song_ids=song_ids)
 
 
 _LEVEL_RANK = {"standard": 1, "higher": 2, "exhigh": 3, "lossless": 4, "hires": 5}
