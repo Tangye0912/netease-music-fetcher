@@ -1,6 +1,4 @@
-import tempfile
 import unittest
-from pathlib import Path
 from unittest import mock
 
 import music_fetch
@@ -43,16 +41,6 @@ class ParseSongIdTests(unittest.TestCase):
         resource_type, resource_id = music_fetch.parse_input_resource("https://music.163.com/#/playlist?id=9988")
         self.assertEqual(resource_type, "playlist")
         self.assertEqual(resource_id, "9988")
-
-
-class CookieTests(unittest.TestCase):
-    def test_cookie_file_requires_music_u(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cookie_file = Path(tmp) / "cookies.txt"
-            cookie_file.write_text("__csrf=abc", encoding="utf-8")
-            with self.assertRaises(music_fetch.MusicFetchError) as ctx:
-                music_fetch.load_cookie(cookie_file)
-            self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
 
 
 class PlayerApiTests(unittest.TestCase):
@@ -121,47 +109,6 @@ class AccountProfileTests(unittest.TestCase):
         with self.assertRaises(music_fetch.MusicFetchError) as ctx:
             music_fetch.fetch_account_profile("MUSIC_U=abc", timeout=5)
         self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
-
-
-class RunDownloadTests(unittest.TestCase):
-    @mock.patch("music_fetch.cli.run_download_pipeline")
-    @mock.patch("music_fetch.cli.fetch_song_metadata")
-    def test_run_download_success(self, meta_mock, pipeline_mock):
-        meta_mock.return_value = ("Track Name", 130000, None, None, None)
-
-        def fake_pipeline(*, song_id, cookie, output_path, target_format, timeout, retry_count, **kwargs):
-            from music_fetch.pipeline import DownloadPipelineResult
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(b"abc123")
-            return DownloadPipelineResult(
-                output_path=output_path,
-                file_size=6,
-                candidate=music_fetch.PlayableCandidate(
-                    media_url="https://example.com/media.mp4",
-                    duration_ms=120000,
-                    level="standard",
-                    encode_type="aac",
-                ),
-                source_format="mp3",
-            )
-
-        pipeline_mock.side_effect = fake_pipeline
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cookie_file = Path(tmp) / "cookies.txt"
-            out_dir = Path(tmp) / "downloads"
-            cookie_file.write_text("MUSIC_U=abc; __csrf=def", encoding="utf-8")
-            result = music_fetch.run_download(
-                song_url="https://music.163.com/song?id=42",
-                out_dir=out_dir,
-                cookie_file=cookie_file,
-                timeout=10,
-            )
-
-            self.assertTrue(result.output_path.exists())
-            self.assertEqual(result.output_path.suffix, ".mp3")
-            self.assertEqual(result.size_bytes, 6)
-            self.assertEqual(result.duration_ms, 130000)
 
 
 if __name__ == "__main__":

@@ -17,8 +17,7 @@
 git clone https://github.com/Tangye0912/netease-music-fetcher.git
 cd netease-music-fetcher
 python -m pip install -e .
-music-fetch                                               # 交互界面（TUI）
-music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单曲
+music-fetch    # 交互界面（TUI），唯一入口
 ```
 
 > 无需安装也可以直接运行：`python -m music_fetch.app`（Windows 双击 `start_windows.bat`、macOS 双击 `start_mac.command`，会自动预设终端窗口大小）。
@@ -27,9 +26,10 @@ music-fetch --url "https://music.163.com/song?id=33894312"  # 命令行下载单
 
 ### 1.1 v3.4.0 变更
 
+- **移除脚本模式（CLI）**：`music-fetch` 现在只有终端交互界面（TUI）一种入口；传参数会提示并退出。后续开发专注 TUI 体验。
 - **无损/Hi-Res**：请求链新增 lossless 与 Hi-Res FLAC 档位；需要账号本身具备对应权益，不可用时自动选择较低可播放档位。
-- **专辑下载**：TUI、CLI 和批量输入均支持专辑链接及分享文案，自动展开全部曲目。
-- **双语歌词**：单曲可选不下载、原文、翻译或双语；CLI 支持 `--lyric-mode`。
+- **专辑下载**：TUI 和批量输入均支持专辑链接及分享文案，自动展开全部曲目。
+- **双语歌词**：单曲可选不下载、原文、翻译或双语。
 - **批量体验**：下载结束显示结果汇总卡片和失败原因；“我的歌单”支持分页浏览。
 - **明暗主题**：设置中可切换深色/浅色主题，重启后保持选择。
 - **可靠性与工程质量**：修复 API 空值、标签写入、Windows 文件名和断点续传问题，CI 增加覆盖率、mypy 与 ruff 门槛。
@@ -125,47 +125,6 @@ music-fetch
 
 应用不会打开、读取或复用玩家日常浏览器 profile 中的 Cookie；浏览器此前是否登录过网易云不会影响本流程。**未登录时主菜单只显示「登录 / 退出」**，其余功能锁定；Cookie 过期后先清除旧凭证，再自动走同一套隔离扫码流程。登录不要求用户提前在网页登录网易云。
 
-### 脚本模式（CLI）
-
-脚本模式会默认复用应用保存的扫码登录状态；如果本地没有有效凭证，也会自动打开同一个隔离临时 profile 要求扫码，不需要先启动 TUI 或准备 Cookie 文件。
-
-```bash
-music-fetch --url "https://music.163.com/song?id=33894312"
-# 专辑链接同样可用：
-music-fetch --url "https://music.163.com/album?id=34720827"
-```
-
-可选参数：
-
-```bash
-music-fetch \
-  --url "https://music.163.com/song?id=33894312" \
-  --out "./downloads" \
-  --format mp3 \
-  --rename "自定义文件名" \
-  --retry 3 \
-  --timeout 30 \
-  --concurrency 4 \
-  --lyric \
-  --lyric-mode bilingual \
-  --verbose
-```
-
-`--lyric-mode` 可选 `original`、`translation`、`bilingual`，仅在同时指定 `--lyric` 时生效。
-
-`--cookie-file` 仍作为高级覆盖项保留；正常使用无需指定，CLI 会优先复用应用自己的扫码会话，缺失或过期时自动重新扫码。
-
-CLI 代理示例（密码通过环境变量传入）：
-
-```bash
-MUSIC_FETCH_PROXY_PASSWORD="proxy-password" music-fetch \
-  --url "33894312" \
-  --proxy-type socks5 \
-  --proxy-host 127.0.0.1 \
-  --proxy-port 1080 \
-  --proxy-username proxy-user
-```
-
 ## 4. 打包与 CI
 
 ### 本地打包
@@ -198,35 +157,33 @@ git push origin v3.0.0
 - `CONVERT_FAILED`：音频格式转换失败
 - `UNSUPPORTED_FORMAT`：不支持的输出格式
 - `UNKNOWN_ERROR`：未预期异常
-- `PROXY_CONFIG_ERROR`：CLI 代理参数无效或不完整
 
 ## 6. 项目架构
 
 | 路径 | 职责 |
 | --- | --- |
-| `music_fetch/app.py` | 入口路由：无参数进入 TUI，带参数走脚本模式 CLI。 |
-| `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/批量/历史/设置/诊断。 |
+| `music_fetch/app.py` | 入口：无参数进入 TUI；传参数提示"脚本模式已移除"并退出。 |
+| `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/专辑/批量/历史/设置/诊断。 |
 | `music_fetch/tui_utils.py` | TUI 组件：菜单、确认、键盘多选、信息卡片、加载动画、表格与进度辅助。 |
 | `music_fetch/download_runner.py` | 线程下载任务：进度快照、暂停/恢复/取消（替换原 QThread worker）。 |
-| `music_fetch/batch_inspect.py` | 批量识别纯逻辑：混合输入解析、歌单展开、去重、并发检测与取消。 |
+| `music_fetch/batch_inspect.py` | 批量识别纯逻辑：混合输入解析、歌单/专辑展开、去重、并发检测与取消。 |
 | `music_fetch/batch_download.py` | 批量下载调度：并发上限、逐行状态、历史记录、全部暂停/恢复/取消与结果摘要。 |
 | `music_fetch/api.py` | 网易云接口层：链接解析、cookie、登录校验、歌曲/歌单/专辑/账号/搜索/歌词 API。 |
 | `music_fetch/audio.py` | 音频下载与处理：候选下载、403 fallback、断点续传、格式推断、ffmpeg 转码、歌词嵌入。 |
-| `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，TUI 和 CLI 共享。 |
-| `music_fetch/cli.py` | 脚本模式 CLI：复用应用扫码会话，支持单曲/歌单/专辑下载、歌词模式、并发、代理与日志参数。 |
+| `music_fetch/pipeline.py` | 下载管道：纯逻辑重试+转码编排，TUI 与批量下载共用。 |
 | `music_fetch/network.py` | 统一网络传输：直连、HTTP/SOCKS5 代理、认证、远程 DNS。 |
 | `music_fetch/browser_login.py` | 官网扫码登录：始终用隔离临时 profile 启动 Chrome/Edge，经 DevTools 协议取回本次扫码产生的凭证，不读取玩家日常浏览器数据。 |
 | `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、去重。 |
 | `music_fetch/batch_models.py` | 批量数据模型与格式化工具。 |
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败筛选、状态汇总、失败原因聚合、安全 CSV 生成。 |
-| `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史；CLI 默认复用同一会话。 |
+| `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史。 |
 | `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、分页、安全 CSV 导出。 |
 | `music_fetch/download_tasks.py` / `download_retry.py` | 任务状态模型与失败重试判断。 |
 | `music_fetch/diagnostics.py` | 诊断核心：日志尾部、脱敏、API/CDN 探针与报告生成。 |
 | `music_fetch/version_check.py` | GitHub API 版本检查。 |
 | `music_fetch/app_settings.py` / `app_logging.py` | 全局常量与日志体系。 |
 | `music_fetch/ui_texts.py` / `error_texts.py` | 共享文案与错误码到用户提示的映射。 |
-| `music-fetch` | macOS/Linux CLI 包装脚本（无参数进入 TUI）。 |
+| `music-fetch` | macOS/Linux 包装脚本（进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
 | `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`）。 |
 | `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）。 |

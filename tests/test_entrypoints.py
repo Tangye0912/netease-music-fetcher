@@ -12,9 +12,9 @@ class EntryPointTests(unittest.TestCase):
         spec = importlib.util.find_spec("music_fetch.app")
         self.assertIsNotNone(spec, "music_fetch.app module should be importable")
 
-    def test_cli_module_still_importable(self):
+    def test_cli_module_removed(self):
         spec = importlib.util.find_spec("music_fetch.cli")
-        self.assertIsNotNone(spec, "music_fetch.cli module should be importable")
+        self.assertIsNone(spec, "music_fetch.cli module should no longer exist")
 
     def test_pyproject_script_points_to_app_main(self):
         data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -29,15 +29,15 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn("prompt-toolkit", " ".join(deps).lower())
 
     @unittest.skipIf(os.name == "nt", "shell wrapper not available on Windows")
-    def test_music_fetch_shell_wrapper_runs_cli_help(self):
+    def test_music_fetch_shell_wrapper_reports_script_mode_removed(self):
         proc = subprocess.run(
             ["./music-fetch", "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
-        self.assertEqual(proc.returncode, 0)
-        self.assertIn("usage: music-fetch", proc.stdout)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("脚本模式已在 v3.4 移除", proc.stderr)
 
 
 if __name__ == "__main__":

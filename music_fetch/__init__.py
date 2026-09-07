@@ -10,7 +10,6 @@ from music_fetch.api import (
     ErrorCode,
     DownloadCanceled,
     # Data classes
-    DownloadResult,
     SongDetectionResult,
     AccountProfile,
     PlayableCandidate,
@@ -25,7 +24,6 @@ from music_fetch.api import (
     is_netease_music_host,
     resolve_short_url,
     # Cookie helpers
-    load_cookie,
     extract_csrf,
     parse_cookie_fields,
     normalize_cookie,
@@ -50,8 +48,6 @@ from music_fetch.api import (
     # Constants
     SUPPORTED_GUI_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,
-    DEFAULT_OUT_DIR,
-    DEFAULT_COOKIE_FILE,
 )
 
 from music_fetch.audio import (
@@ -89,14 +85,6 @@ from music_fetch.batch_download import (
     format_speed,
 )
 
-from music_fetch.cli import (
-    run_download,
-    run_playlist_download,
-    run_album_download,
-    build_parser,
-    main,
-)
-
 # Explicit public surface — keeps `from music_fetch import *` deterministic and
 # prevents incidental re-exports from leaking into downstream code.
 __all__ = [
@@ -106,7 +94,6 @@ __all__ = [
     "DownloadCanceled",
     "ProxyConfigError",
     # Data classes
-    "DownloadResult",
     "SongDetectionResult",
     "AccountProfile",
     "PlayableCandidate",
@@ -125,7 +112,6 @@ __all__ = [
     "is_netease_music_host",
     "resolve_short_url",
     # Cookie helpers
-    "load_cookie",
     "extract_csrf",
     "parse_cookie_fields",
     "normalize_cookie",
@@ -168,15 +154,7 @@ __all__ = [
     "get_proxy_config",
     "normalize_proxy_config",
     "open_url",
-    # CLI entry points
-    "run_download",
-    "run_playlist_download",
-    "run_album_download",
-    "build_parser",
-    "main",
     # Constants
     "SUPPORTED_GUI_AUDIO_FORMATS",
     "SHORT_LINK_HOSTS",
-    "DEFAULT_OUT_DIR",
-    "DEFAULT_COOKIE_FILE",
 ]

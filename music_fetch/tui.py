@@ -38,7 +38,7 @@ from music_fetch.app_settings import (
     APP_VERSION,
     CONFIG_DIR,
     DOWNLOAD_HISTORY_FILE,
-    MAX_CLI_CONCURRENCY,
+    MAX_UI_CONCURRENCY,
     MIN_DOWNLOAD_CONCURRENCY,
     PROJECT_GITHUB_URL,
     SESSION_FILE,
@@ -1121,7 +1121,7 @@ class TuiApp:
             elif choice == 4:
                 self.session.download_retry_count = U.ask_int("下载重试次数", self.session.download_retry_count, 0, 5)
             elif choice == 5:
-                self.session.download_concurrency = U.ask_int("并发上限", self.session.download_concurrency, MIN_DOWNLOAD_CONCURRENCY, MAX_CLI_CONCURRENCY)
+                self.session.download_concurrency = U.ask_int("并发上限", self.session.download_concurrency, MIN_DOWNLOAD_CONCURRENCY, MAX_UI_CONCURRENCY)
             elif choice == 6:
                 self._edit_proxy()
             elif choice == 7:

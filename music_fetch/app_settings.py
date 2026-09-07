@@ -36,9 +36,8 @@ MAX_DOWNLOAD_RETRY_COUNT = 5
 DEFAULT_DOWNLOAD_CONCURRENCY = 1
 MIN_DOWNLOAD_CONCURRENCY = 1
 MAX_DOWNLOAD_CONCURRENCY = 3
-# CLI playlist downloads may use more parallel workers than the TUI download session.
-DEFAULT_CLI_CONCURRENCY = 1
-MAX_CLI_CONCURRENCY = 8
+# TUI settings allow a higher concurrency ceiling than the persisted clamp.
+MAX_UI_CONCURRENCY = 8
 DOWNLOAD_HISTORY_PAGE_SIZE = 50
 MAX_DOWNLOAD_HISTORY_RECORDS = 1000
 

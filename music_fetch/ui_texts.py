@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared user-visible texts for the CLI, TUI, and export layers."""
+"""Shared user-visible texts for the TUI and export layers."""
 
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,12 +19,11 @@ class AppRoutingTests(unittest.TestCase):
         self.assertEqual(result, 0)
         tui_main_mock.assert_called_once_with()
 
-    @mock.patch("music_fetch.cli.main")
-    def test_args_route_to_cli(self, cli_main_mock):
-        cli_main_mock.return_value = 0
-        result = app_main(["--url", "42"])
-        self.assertEqual(result, 0)
-        cli_main_mock.assert_called_once_with(["--url", "42"])
+    def test_args_report_script_mode_removed(self):
+        with mock.patch("sys.stderr", new=io.StringIO()) as stderr_mock:
+            result = app_main(["--url", "42"])
+        self.assertEqual(result, 2)
+        self.assertIn("脚本模式已在 v3.4 移除", stderr_mock.getvalue())
 
 
 class TuiAppHelperTests(unittest.TestCase):

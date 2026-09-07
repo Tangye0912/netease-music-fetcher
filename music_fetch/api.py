@@ -2,18 +2,18 @@
 NetEase Cloud Music API client.
 
 Data-flow: constants → data-classes → URL/cookie helpers → HTTP helpers → API functions.
-Depended on by music_fetch.audio.py (download) and music_fetch.cli.py (CLI entry point).  No reverse dependency.
+Depended on by music_fetch.audio.py (download) and music_fetch.tui.py.  No reverse dependency.
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "MusicFetchError", "ErrorCode", "DownloadCanceled", "DownloadResult", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
+    "MusicFetchError", "ErrorCode", "DownloadCanceled", "SongDetectionResult", "AccountProfile", "PlayableCandidate",
     "ProgressCallback", "CancelChecker", "PauseChecker",
     "parse_song_id", "parse_input_resource",
     "extract_url_from_input", "is_netease_music_host", "resolve_short_url",
     "configure_proxy",
-    "load_cookie", "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
+    "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
     "fetch_account_profile",
     "fetch_playable_candidates", "fetch_song_metadata", "fetch_playlist_song_ids",
     "fetch_album_songs", "AlbumDetail", "ALBUM_API",
@@ -21,7 +21,7 @@ __all__ = [
     "search_songs", "SearchResult",
     "fetch_user_playlists", "UserPlaylist",
     "SUPPORTED_GUI_AUDIO_FORMATS",
-    "USER_AGENT", "OUTER_MEDIA_URL_API", "DEFAULT_OUT_DIR", "DEFAULT_COOKIE_FILE",
+    "USER_AGENT", "OUTER_MEDIA_URL_API",
     "PLAYABLE_REQUEST_PROFILES",
     "SHORT_LINK_HOSTS",
     "logger",
@@ -31,11 +31,10 @@ import json
 import re
 from enum import Enum
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Optional, Tuple
 from urllib import error, parse, request
 
-from music_fetch.app_logging import get_logger, mask_value
+from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import SHORT_LINK_HOSTS, SUPPORTED_AUDIO_FORMATS, TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
 from music_fetch.network import configure_proxy, open_url
 
@@ -49,8 +48,6 @@ PLAYLIST_DETAIL_API = "https://music.163.com/api/v6/playlist/detail"
 ACCOUNT_STATUS_API = "https://music.163.com/api/nuser/account/get"
 OUTER_MEDIA_URL_API = "https://music.163.com/song/media/outer/url?id={song_id}.mp3"
 LYRIC_API = "https://music.163.com/api/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
-DEFAULT_OUT_DIR = "downloads"
-DEFAULT_COOKIE_FILE = "~/.config/music-fetch/cookies.txt"
 PLAYABLE_REQUEST_PROFILES: list[tuple[str, str]] = [
     ("standard", "mp3"),
     ("standard", "aac"),
@@ -91,14 +88,6 @@ class ErrorCode(Enum):
 
 class DownloadCanceled(Exception):
     """Control-flow signal: download was canceled by user. Not a subprocess error."""
-
-
-@dataclass
-class DownloadResult:
-    song_id: str
-    output_path: Path
-    size_bytes: int
-    duration_ms: Optional[int]
 
 
 @dataclass
@@ -267,24 +256,6 @@ def _pick_first_digit(values: Optional[list[str]]) -> Optional[str]:
 
 
 # ── Cookie helpers ───────────────────────────────────────────────
-
-def load_cookie(cookie_file: Path) -> str:
-    logger.info("Loading cookie file from %s", cookie_file)
-    if not cookie_file.exists():
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file not found: {cookie_file}. Run music-fetch without arguments to sign in with QR first.")
-    try:
-        raw = cookie_file.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, f"Cookie file is corrupted (invalid encoding): {cookie_file}.")
-    cookie = normalize_cookie(raw)
-    if not cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file is empty. Run music-fetch without arguments to sign in with QR first.")
-    if "MUSIC_U=" not in cookie:
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Cookie file does not include MUSIC_U. Run music-fetch without arguments to sign in with QR first.")
-    fields = parse_cookie_fields(cookie)
-    logger.info("Cookie loaded. has_music_u=%s has_csrf=%s music_u_mask=%s", "MUSIC_U" in fields, "__csrf" in fields, mask_value(fields.get("MUSIC_U", "")))
-    return cookie
-
 
 def extract_csrf(cookie: str) -> str:
     return parse_cookie_fields(cookie).get("__csrf", "")
