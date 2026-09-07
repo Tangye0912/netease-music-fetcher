@@ -177,6 +177,34 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(records[0].song_id, "42")
         self.assertEqual(records[0].song_name, "测试歌曲")
 
+    def test_clear_history_empties_store_after_confirm(self):
+        self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "success")
+        self.app._add_record("2", "歌二", "/tmp/b.mp3", 1, "failed")
+        with mock.patch("music_fetch.tui.U.confirm", return_value=True), mock.patch(
+            "music_fetch.tui.U.print_success"
+        ), mock.patch("music_fetch.tui.U.print_warning"):
+            self.app._clear_history(self.history_store.load())
+        self.assertEqual(self.history_store.load(), [])
+
+    def test_clear_history_aborts_without_confirm(self):
+        self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "success")
+        with mock.patch("music_fetch.tui.U.confirm", return_value=False):
+            self.app._clear_history(self.history_store.load())
+        self.assertEqual(len(self.history_store.load()), 1)
+
+    def test_retry_all_failed_counts_successes(self):
+        self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "failed")
+        self.app._add_record("2", "歌二", "/tmp/b.mp3", 1, "success")
+        self.app._add_record("3", "歌三", "/tmp/c.mp3", 1, "failed")
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.U.confirm", return_value=True), mock.patch(
+            "music_fetch.tui.U.print_info"
+        ), mock.patch("music_fetch.tui.U.print_warning"), mock.patch.object(
+            self.app, "_retry_record", side_effect=[True, False]
+        ) as retry_mock:
+            self.app._retry_all_failed(self.history_store.load())
+        self.assertEqual(retry_mock.call_count, 2)
+
     def test_invalid_stored_proxy_falls_back_to_direct(self):
         from music_fetch.network import get_proxy_config
 

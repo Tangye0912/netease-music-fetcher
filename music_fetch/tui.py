@@ -582,6 +582,22 @@ class TuiApp:
             U.print_warning("没有可下载的歌曲。")
             self._offer_batch_export(rows)
             return
+        # Preview any detected song before committing to the download list.
+        while True:
+            action = U.menu("下一步", ["选择歌曲下载", "试听某首（标准音质临时文件播放）", "返回"], shortcuts={"d": 1, "p": 2})
+            if action == 3:
+                return
+            if action == 2:
+                pick = U.ask("输入要试听的序号（0 返回）").strip()
+                if not pick or pick == "0":
+                    continue
+                if pick.isdigit() and 1 <= int(pick) <= len(rows):
+                    target = rows[int(pick) - 1]
+                    self._preview_song(target.song_id, target.song_name or f"song-{target.song_id}")
+                    continue
+                U.print_warning(f"请输入 1-{len(rows)} 的序号，或 0 返回。")
+                continue
+            break
         entries = [
             (f"{row.song_name or row.song_id}（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）", row.selected)
             for row in ready
@@ -949,7 +965,16 @@ class TuiApp:
                 f"操作第 {index} 条（{page_records[index - 1].song_name}）"
                 for index in range(1, len(page_records) + 1)
             ]
-            actions = record_actions + ["搜索关键词", "状态筛选", "上一页", "下一页", "导出筛选结果 CSV", "返回"]
+            actions = record_actions + [
+                "搜索关键词",
+                "状态筛选",
+                "上一页",
+                "下一页",
+                "导出筛选结果 CSV",
+                "重试全部失败",
+                "清空历史",
+                "返回",
+            ]
             choice = U.menu("操作", actions)
             if choice <= len(page_records):
                 self._history_record_actions(page_records[choice - 1])
@@ -965,6 +990,10 @@ class TuiApp:
                 page += 1
             elif actions[choice - 1] == "导出筛选结果 CSV":
                 self._export_history_csv(filtered)
+            elif actions[choice - 1] == "重试全部失败":
+                self._retry_all_failed(records)
+            elif actions[choice - 1] == "清空历史":
+                self._clear_history(records)
             else:
                 return
 
@@ -1035,12 +1064,13 @@ class TuiApp:
         elif action == "重试下载":
             self._retry_record(record)
 
-    def _retry_record(self, record: DownloadRecord) -> None:
+    def _retry_record(self, record: DownloadRecord) -> Optional[bool]:
+        """Retry one failed record; returns True/False on outcome, None on cancel."""
         if not self.session.cookie:
             U.print_warning(T.MSG_NEED_LOGIN_ANY)
             self._login_and_return()
             if not self.session.cookie:
-                return
+                return None
         output_path = Path(record.output_path).expanduser()
         target_format = retry_target_format(output_path)
         job = DownloadJob(
@@ -1056,25 +1086,51 @@ class TuiApp:
         result = self._run_job(job)
         self.history_store.remove_by_path(str(output_path))
         if result is None:
-            return
+            return None
         if result.state == "success":
             size = result.output_path.stat().st_size if result.output_path.exists() else 0
             self._add_record(
                 record.song_id, record.song_name, str(result.output_path), size, TASK_STATE_SUCCESS,
             )
             U.print_success(f"重试成功：{result.output_path}")
-        elif result.state == "canceled":
+            return True
+        if result.state == "canceled":
             self._add_record(
                 record.song_id, record.song_name, str(output_path), 0, TASK_STATE_CANCELED,
             )
-        else:
-            self._add_record(
-                record.song_id, record.song_name, str(output_path), 0, TASK_STATE_FAILED,
-                error_code=result.error_code,
-            )
-            U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
-            if result.error_code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
+            return None
+        self._add_record(
+            record.song_id, record.song_name, str(output_path), 0, TASK_STATE_FAILED,
+            error_code=result.error_code,
+        )
+        U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
+        if result.error_code == "AUTH_EXPIRED":
+            self._handle_auth_expired()
+        return False
+
+    def _retry_all_failed(self, records: list[DownloadRecord]) -> None:
+        failed = [record for record in records if record.status == TASK_STATE_FAILED]
+        if not failed:
+            U.print_warning("没有失败的下载记录。")
+            return
+        if not U.confirm(f"将依次重试 {len(failed)} 条失败记录，确定？", default=False):
+            return
+        if not self.session.cookie:
+            U.print_warning(T.MSG_NEED_LOGIN_ANY)
+            self._login_and_return()
+            if not self.session.cookie:
+                return
+        succeeded = sum(1 for record in failed if self._retry_record(record) is True)
+        U.print_info(f"重试完成：成功 {succeeded}/{len(failed)}，其余仍失败可再次重试。")
+
+    def _clear_history(self, records: list[DownloadRecord]) -> None:
+        if not records:
+            U.print_warning("历史记录为空。")
+            return
+        if not U.confirm(f"确定清空全部 {len(records)} 条下载历史？（仅删除记录，不删除文件）", default=False):
+            return
+        self.history_store.save([])
+        U.print_success("下载历史已清空。")
 
     @staticmethod
     def _open_path(path: Path) -> None:
