@@ -467,7 +467,7 @@ class PlayableProfilesTests(unittest.TestCase):
 
     def test_candidates_request_every_profile(self):
         from music_fetch.api import fetch_playable_candidates
-        payloads: list[dict] = []
+        payloads: list[dict[str, str]] = []
         unique_urls = (f"https://m10.music.126.net/song-{i}.flac" for i in range(len(PLAYABLE_REQUEST_PROFILES)))
 
         def fake_post(url, payload, headers, timeout):
