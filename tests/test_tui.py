@@ -192,6 +192,36 @@ class TuiAppHelperTests(unittest.TestCase):
             self.app._clear_history(self.history_store.load())
         self.assertEqual(len(self.history_store.load()), 1)
 
+    def test_history_screen_direct_record_selection(self):
+        # The history screen takes a bare record number instead of a
+        # per-record menu (which overflowed the terminal at 50 rows/page).
+        self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "success")
+        with mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_info"
+        ), mock.patch("music_fetch.tui.U.print_table"), mock.patch(
+            "music_fetch.tui.U.ask", side_effect=["1", "0"]
+        ), mock.patch.object(self.app, "_history_record_actions") as actions_mock:
+            self.app._screen_history()
+        actions_mock.assert_called_once()
+        self.assertEqual(actions_mock.call_args.args[0].song_id, "1")
+
+    def test_history_screen_retry_uses_filtered_records(self):
+        # "r" retries failed records within the active filter, not the whole
+        # history (a keyword filter for 歌一 must not retry 歌二).
+        self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "failed")
+        self.app._add_record("2", "歌二", "/tmp/b.mp3", 1, "failed")
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_info"
+        ), mock.patch("music_fetch.tui.U.ask", side_effect=["s", "歌一", "r", "0"]), mock.patch(
+            "music_fetch.tui.U.confirm", return_value=True
+        ), mock.patch("music_fetch.tui.U.print_warning"), mock.patch.object(
+            self.app, "_retry_record", return_value=None
+        ) as retry_mock:
+            self.app._screen_history()
+        self.assertEqual(retry_mock.call_count, 1)
+        self.assertEqual(retry_mock.call_args.args[0].song_id, "1")
+
     def test_retry_all_failed_counts_successes(self):
         self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "failed")
         self.app._add_record("2", "歌二", "/tmp/b.mp3", 1, "success")

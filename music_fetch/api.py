@@ -651,16 +651,16 @@ class SearchResult:
 
 
 def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) -> list[SearchResult]:
-    """Search songs by keyword on NetEase Cloud Music."""
+    """Search songs by keyword on NetEase Cloud Music.
+
+    Request failures raise MusicFetchError so callers can tell "no results"
+    apart from a network problem; an empty result set returns [].
+    """
     if not keyword.strip():
         return []
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     payload = {"s": keyword, "type": "1", "limit": str(limit), "offset": "0"}
-    try:
-        status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
-    except MusicFetchError:
-        logger.warning("Search request failed. keyword=%s", keyword)
-        return []
+    status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
     if status != 200 or body.get("code") != 200:
         logger.warning("Search API returned non-200. status=%s code=%s", status, body.get("code"))
         return []

@@ -306,11 +306,13 @@ class SearchSongsTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].song_name, "Song A")
 
-    def test_network_error_returns_empty(self):
+    def test_network_error_propagates(self):
+        # Network failures must reach the caller so the UI can show a
+        # connection error instead of "no results".
         from music_fetch.api import search_songs
         with mock.patch("music_fetch.api.request.urlopen", side_effect=error.URLError("timeout")):
-            results = search_songs("test", "cookie")
-        self.assertEqual(results, [])
+            with self.assertRaises(MusicFetchError):
+                search_songs("test", "cookie")
 
     def test_result_null_returns_empty(self):
         # {"result": null} must not raise AttributeError (default {} only

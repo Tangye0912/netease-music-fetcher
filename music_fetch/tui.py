@@ -456,8 +456,10 @@ class TuiApp:
                                 album_name=picked.album or None,
                                 duration_ms=picked.duration_ms,
                             )
-                            return
-                        continue
+                            break
+                        # Redraw the list so the user can pick the next song
+                        # without searching again.
+                        break
                 U.print_warning(f"请输入 {start + 1}-{start + len(page_results)} 的序号，0 返回，n/p 翻页。")
 
     def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
@@ -588,11 +590,18 @@ class TuiApp:
             if action == 3:
                 return
             if action == 2:
-                pick = U.ask("输入要试听的序号（0 返回）").strip()
+                ready_numbers = [str(index) for index, row in enumerate(rows, start=1) if row.status == "ready"]
+                if not ready_numbers:
+                    U.print_warning("没有可试听的歌曲。")
+                    continue
+                pick = U.ask(f"输入要试听的序号（{'、'.join(ready_numbers)}；0 返回）").strip()
                 if not pick or pick == "0":
                     continue
                 if pick.isdigit() and 1 <= int(pick) <= len(rows):
                     target = rows[int(pick) - 1]
+                    if target.status != "ready":
+                        U.print_warning("该歌曲不可下载，无法试听。")
+                        continue
                     self._preview_song(target.song_id, target.song_name or f"song-{target.song_id}")
                     continue
                 U.print_warning(f"请输入 1-{len(rows)} 的序号，或 0 返回。")
@@ -616,7 +625,7 @@ class TuiApp:
         target_format = self._pick_format()
         if target_format is None:
             return
-        lyric_mode = "bilingual" if U.confirm("同时下载歌词（原文 + 翻译合并）？", default=False) else "original"
+        download_lyric, lyric_mode = self._pick_lyric_mode()
         session = BatchDownloadSession(
             rows=chosen,
             out_dir=out_dir,
@@ -626,7 +635,7 @@ class TuiApp:
             timeout=self.session.download_timeout_sec,
             retry_count=self.session.download_retry_count,
             concurrency=self.session.download_concurrency,
-            download_lyric=lyric_mode != "original",
+            download_lyric=download_lyric,
             lyric_mode=lyric_mode,
         )
         self._run_batch_session(session)
@@ -646,7 +655,7 @@ class TuiApp:
                 timeout=self.session.download_timeout_sec,
                 retry_count=self.session.download_retry_count,
                 concurrency=self.session.download_concurrency,
-                download_lyric=lyric_mode != "original",
+                download_lyric=download_lyric,
                 lyric_mode=lyric_mode,
             )
             self._run_batch_session(retry_session)
@@ -961,41 +970,43 @@ class TuiApp:
                 U.print_info(
                     f"第 {page + 1 if total_pages else 0}/{total_pages} 页 · 共 {len(filtered)} 条"
                 )
-            record_actions = [
-                f"操作第 {index} 条（{page_records[index - 1].song_name}）"
-                for index in range(1, len(page_records) + 1)
-            ]
-            actions = record_actions + [
-                "搜索关键词",
-                "状态筛选",
-                "上一页",
-                "下一页",
-                "导出筛选结果 CSV",
-                "重试全部失败",
-                "清空历史",
-                "返回",
-            ]
-            choice = U.menu("操作", actions)
-            if choice <= len(page_records):
-                self._history_record_actions(page_records[choice - 1])
-            elif actions[choice - 1] == "搜索关键词":
+            if not page_records:
+                raw = U.ask("n/p 上一页/下一页 · s 搜索 · f 状态筛选 · 0 返回").strip()
+            else:
+                raw = U.ask(
+                    f"输入序号操作第 1-{len(page_records)} 条 · n/p 翻页 · s 搜索 · f 筛选 · e 导出 · r 重试失败 · c 清空 · 0 返回"
+                ).strip()
+            key = raw.lower()
+            if not raw or raw == "0":
+                return
+            if key == "n":
+                if page + 1 < total_pages:
+                    page += 1
+                else:
+                    U.print_warning("已经是最后一页。")
+            elif key == "p":
+                if page > 0:
+                    page -= 1
+                else:
+                    U.print_warning("已经是第一页。")
+            elif key == "s":
                 query = U.ask("搜索（歌曲名/ID/文件名/路径/错误码，留空清除）")
                 page = 0
-            elif actions[choice - 1] == "状态筛选":
+            elif key == "f":
                 status_filter = self._pick_status_filter()
                 page = 0
-            elif actions[choice - 1] == "上一页" and page > 0:
-                page -= 1
-            elif actions[choice - 1] == "下一页" and page + 1 < total_pages:
-                page += 1
-            elif actions[choice - 1] == "导出筛选结果 CSV":
+            elif key == "e":
                 self._export_history_csv(filtered)
-            elif actions[choice - 1] == "重试全部失败":
-                self._retry_all_failed(records)
-            elif actions[choice - 1] == "清空历史":
+            elif key == "r":
+                self._retry_all_failed(filtered)
+            elif key == "c":
                 self._clear_history(records)
+            elif raw.isdigit() and 1 <= int(raw) <= len(page_records):
+                self._history_record_actions(page_records[int(raw) - 1])
+            elif raw.isdigit():
+                U.print_warning(f"请输入 1-{len(page_records)} 的序号。")
             else:
-                return
+                U.print_warning("无法识别的输入，请重试。")
 
     @staticmethod
     def _filter_label(status_filter: str) -> str:

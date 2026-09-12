@@ -79,22 +79,22 @@ class PaginationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.records = [_record(str(i), f"Song {i}", f"/tmp/song-{i}.mp3") for i in range(125)]
 
-    def test_first_page_returns_first_50(self):
+    def test_first_page_returns_first_page_size(self):
         page_records, total_pages, clamped = paginate_download_history(self.records, 0)
-        self.assertEqual(len(page_records), 50)
-        self.assertEqual(total_pages, 3)
+        self.assertEqual(len(page_records), 15)
+        self.assertEqual(total_pages, 9)
         self.assertEqual(clamped, 0)
         self.assertEqual(page_records[0].song_id, "0")
 
-    def test_last_page_has_25_records(self):
-        page_records, total_pages, clamped = paginate_download_history(self.records, 2)
-        self.assertEqual(len(page_records), 25)
-        self.assertEqual(total_pages, 3)
-        self.assertEqual(clamped, 2)
+    def test_last_page_has_5_records(self):
+        page_records, total_pages, clamped = paginate_download_history(self.records, 8)
+        self.assertEqual(len(page_records), 5)
+        self.assertEqual(total_pages, 9)
+        self.assertEqual(clamped, 8)
 
     def test_out_of_range_page_clamps_to_last_page(self):
         _page_records, _total_pages, clamped = paginate_download_history(self.records, 99)
-        self.assertEqual(clamped, 2)
+        self.assertEqual(clamped, 8)
 
     def test_negative_page_clamps_to_zero(self):
         _page_records, _total_pages, clamped = paginate_download_history(self.records, -5)

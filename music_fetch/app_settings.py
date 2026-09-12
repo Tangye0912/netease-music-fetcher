@@ -38,7 +38,9 @@ MIN_DOWNLOAD_CONCURRENCY = 1
 MAX_DOWNLOAD_CONCURRENCY = 3
 # TUI settings allow a higher concurrency ceiling than the persisted clamp.
 MAX_UI_CONCURRENCY = 8
-DOWNLOAD_HISTORY_PAGE_SIZE = 50
+# History rows shown per page: small enough that the table plus the prompt
+# stay inside the 40-row terminal preset (start_mac.command / start_windows.bat).
+DOWNLOAD_HISTORY_PAGE_SIZE = 15
 MAX_DOWNLOAD_HISTORY_RECORDS = 1000
 
 UNKNOWN_SONG_NAME = "未知歌曲"
