@@ -8,10 +8,12 @@ import shutil
 import sys
 import threading
 from contextlib import contextmanager
-from typing import Iterator, Optional, Sequence
+from contextvars import ContextVar
+from typing import Callable, Iterator, Optional, Sequence
 
 from prompt_toolkit import ANSI, prompt, print_formatted_text
 from prompt_toolkit.application import Application
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.keys import Keys
@@ -64,6 +66,23 @@ LIGHT_THEME: dict[str, str] = {
 
 _ACTIVE_THEME_NAME = "dark"
 _ACTIVE_THEME = DARK_THEME
+_BACKGROUND_STATUS: ContextVar[Optional[Callable[[], str]]] = ContextVar("background_status", default=None)
+
+
+@contextmanager
+def background_status(provider: Callable[[], str]) -> Iterator[None]:
+    """Refresh queue status while a line prompt waits, without worker prints."""
+    token = _BACKGROUND_STATUS.set(provider)
+    try:
+        yield
+    finally:
+        _BACKGROUND_STATUS.reset(token)
+
+
+def _status_toolbar() -> FormattedText:
+    provider = _BACKGROUND_STATUS.get()
+    text = provider() if provider else ""
+    return FormattedText([(f"bg:{_ACTIVE_THEME['dialog_bg']} {_ACTIVE_THEME['dialog_text']}", text)])
 
 # Upper bound for rendered content width. Wider terminals use the extra room
 # (resizing the window helps), but we stop at this cap to avoid absurd layouts.
@@ -203,7 +222,8 @@ def ask(message: str, default: str = "") -> str:
         + (_ansi(_theme_color("muted"), hint) if hint else "")
         + " "
     )
-    value = prompt(ANSI(prompt_text)).strip()
+    value = prompt(ANSI(prompt_text), bottom_toolbar=_status_toolbar,
+                   refresh_interval=0.5 if _BACKGROUND_STATUS.get() else 0).strip()
     return value or default
 
 
@@ -221,7 +241,8 @@ def input_multiline(message: str) -> str:
     prompt_text = _ansi(_theme_color("title") + ANSI_BOLD, "› ") + _ansi(
         _theme_color("text") + ANSI_BOLD, message
     ) + _ansi(_theme_color("muted"), hint) + "\n"
-    return prompt(ANSI(prompt_text), multiline=True)
+    return prompt(ANSI(prompt_text), multiline=True, bottom_toolbar=_status_toolbar,
+                  refresh_interval=0.5 if _BACKGROUND_STATUS.get() else 0)
 
 
 def ask_int(message: str, default: int, minimum: int, maximum: int) -> int:

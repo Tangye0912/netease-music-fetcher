@@ -25,6 +25,12 @@
 - [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径。
 - [ ] 为 M4A/FLAC 补齐封面嵌入，统一 MP3/M4A/FLAC 的元数据能力。
 
+### v4.0 — Fullscreen Experiment
+
+- [ ] 在 `tui-fullscreen-rewrite` 分支整理全屏重写的失败测试并修到全绿（归档提交 `4dbb214`，基点 `41ec0df`，尚未验收）。
+- [ ] 合并前逐项对齐菜单版功能：专辑路由、四档歌词、无损/Hi-Res、标签、主题持久化、批量试听、历史筛选/重试/导出、后台队列与退出清理。
+- [ ] 完成 Windows（含 GBK 控制台）、macOS、Linux 真机冒烟，覆盖 SSH/tmux、焦点与布局、登录恢复和下载任务控制，再评估是否合并。
+
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。

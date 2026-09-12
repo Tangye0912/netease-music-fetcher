@@ -222,7 +222,7 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(retry_mock.call_count, 1)
         self.assertEqual(retry_mock.call_args.args[0].song_id, "1")
 
-    def test_retry_all_failed_counts_successes(self):
+    def test_retry_all_failed_submits_only_failed_records(self):
         self.app._add_record("1", "歌一", "/tmp/a.mp3", 1, "failed")
         self.app._add_record("2", "歌二", "/tmp/b.mp3", 1, "success")
         self.app._add_record("3", "歌三", "/tmp/c.mp3", 1, "failed")
@@ -283,21 +283,6 @@ class TuiAppHelperTests(unittest.TestCase):
 
         self.assertEqual(table_mock.call_count, 2)
         batch_mock.assert_called_once_with("https://music.163.com/playlist?id=11")
-
-    def test_completed_batch_session_uses_summary_panel(self):
-        session = mock.Mock()
-        session.done = True
-        session.stopped = False
-        session.counters.return_value.total = 0
-        rows = [("状态", "完成"), ("成功", "2")]
-        session.summary_panel_rows.return_value = rows
-        with mock.patch("music_fetch.tui.ProgressBar"), mock.patch(
-            "music_fetch.tui.U.print_panel"
-        ) as panel_mock:
-            self.app._run_batch_session(session)
-
-        panel_mock.assert_called_once_with("批量下载完成", rows)
-
 
 class TuiMainTests(unittest.TestCase):
     @mock.patch("music_fetch.tui.setup_logging")

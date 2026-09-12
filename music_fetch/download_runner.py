@@ -114,7 +114,7 @@ class DownloadJob:
         if self._thread is None:
             return self._state not in JOB_RUNNING_STATES
         self._thread.join(timeout)
-        return self._state not in JOB_RUNNING_STATES
+        return not self._thread.is_alive()
 
     # ── status API (thread-safe) ──────────────────────────────────
 

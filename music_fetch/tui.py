@@ -3,7 +3,7 @@
 
 Bare `music-fetch` (no arguments) opens this keyboard-driven interface:
 official browser QR login, numbered menus, checkbox multi-select for batch
-downloads, and progress bars with pause/resume/cancel keys.  All heavy lifting
+downloads, and an app-owned background queue with task controls.  All heavy lifting
 stays in the pure modules (api/audio/pipeline/batch_*).
 """
 
@@ -13,14 +13,10 @@ import logging
 import os
 import subprocess
 import sys
-import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts import ProgressBar
-from prompt_toolkit.shortcuts.progress_bar.base import ProgressBarCounter
 
 from music_fetch.api import (
     MusicFetchError,
@@ -45,10 +41,10 @@ from music_fetch.app_settings import (
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
-from music_fetch.batch_download import BatchDownloadSession, format_speed
+from music_fetch.batch_download import format_speed
 from music_fetch.batch_inspect import run_batch_detect
-from music_fetch.batch_models import format_bytes, format_duration, probe_media_size_bytes
-from music_fetch.batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
+from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration, probe_media_size_bytes
+from music_fetch.batch_results import build_batch_results_csv, summarize_batch_rows
 from music_fetch.diagnostics import (
     DiagnosticContext,
     build_diagnostic_report,
@@ -56,13 +52,8 @@ from music_fetch.diagnostics import (
     run_network_diagnostics,
 )
 from music_fetch.download_retry import retry_target_format
-from music_fetch.download_runner import DownloadJob, DownloadJobResult, JOB_RUNNING_STATES
-from music_fetch.download_tasks import (
-    TASK_STATE_CANCELED,
-    TASK_STATE_FAILED,
-    TASK_STATE_SUCCESS,
-    build_task_id,
-)
+from music_fetch.download_queue import DownloadQueue, DownloadRequest, QueueItem, FINAL_STATES, STATE_LABELS
+from music_fetch.download_tasks import TASK_STATE_FAILED
 from music_fetch.error_texts import user_error_message
 from music_fetch.history_results import (
     build_download_history_csv,
@@ -80,6 +71,7 @@ MENU_SINGLE = "单曲下载"
 MENU_SEARCH = "搜索下载"
 MENU_PLAYLISTS = "我的歌单"
 MENU_BATCH = "批量下载"
+MENU_TASKS = "下载任务"
 MENU_HISTORY = "下载历史"
 MENU_SETTINGS = "软件设置"
 MENU_DIAGNOSTICS = "诊断中心"
@@ -118,6 +110,8 @@ class TuiApp:
         U.set_theme(self.session.ui_theme)
         self._nickname = ""
         self._apply_proxy()
+        self.queue = DownloadQueue(self.history_store, self.session.cookie, self.session.download_concurrency)
+        self._batches: list[tuple[list[BatchDetectRow], dict[int, str]]] = []
 
     # ── bootstrap ─────────────────────────────────────────────────
 
@@ -171,6 +165,24 @@ class TuiApp:
             return bool(self.session.cookie)
 
     def run(self) -> int:
+        self.queue.start()
+        try:
+            with U.background_status(self._queue_status):
+                return self._run_menu()
+        finally:
+            self.queue.close()
+            if not self.queue.wait(0):
+                U.print_info("正在取消下载并清理临时文件，请稍候...")
+                while True:
+                    try:
+                        if self.queue.wait(0.1):
+                            break
+                    except KeyboardInterrupt:
+                        U.print_info("仍在等待下载线程安全结束...")
+            if self.queue.history_error:
+                U.print_warning(self.queue.history_error)
+
+    def _run_menu(self) -> int:
         # A missing or expired app-owned credential always starts the isolated
         # official QR flow.  No browser profile is inspected for a login state.
         if self.session.cookie and not self._validate_session_login():
@@ -178,6 +190,8 @@ class TuiApp:
         if not self.session.cookie:
             self._screen_login()
         while True:
+            if self.queue.auth_required and self.session.cookie:
+                self._clear_login()
             try:
                 U.clear_screen()
             except Exception:  # pragma: no cover - clear may fail on exotic terminals
@@ -197,6 +211,7 @@ class TuiApp:
                     MENU_SEARCH,
                     MENU_PLAYLISTS,
                     MENU_BATCH,
+                    MENU_TASKS,
                     MENU_HISTORY,
                     MENU_SETTINGS,
                     MENU_DIAGNOSTICS,
@@ -207,6 +222,8 @@ class TuiApp:
             else:
                 U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
                 options = [MENU_LOGIN, MENU_QUIT]
+                if self.queue.snapshot():
+                    options.insert(1, MENU_TASKS)
             try:
                 choice = U.menu("主菜单", options, shortcuts={"q": len(options)})
             except (KeyboardInterrupt, EOFError):
@@ -214,7 +231,13 @@ class TuiApp:
                 return 0
             label = options[choice - 1]
             if label == MENU_QUIT:
+                unfinished = sum(item.state not in FINAL_STATES for item in self.queue.snapshot())
+                if unfinished and not U.confirm(f"还有 {unfinished} 个未完成任务，取消并退出？", default=False):
+                    continue
                 return 0
+            if label == MENU_TASKS:
+                self._screen_tasks()
+                continue
             if not self.session.cookie:
                 if label == MENU_LOGIN:
                     self._screen_login()
@@ -278,6 +301,7 @@ class TuiApp:
         self.session.remember_login = True
         self.session_store.save(self.session)
         self._nickname = profile.nickname
+        self.queue.set_cookie(cookie)
         U.print_success(f"登录成功：{self._nickname or '已登录'}")
 
     def _require_login(self) -> bool:
@@ -288,6 +312,7 @@ class TuiApp:
 
     def _clear_login(self) -> None:
         self.session.cookie = ""
+        self.queue.set_cookie("")
         self.session.remember_login = False
         self._nickname = ""
         self.session_store.save(self.session)
@@ -626,43 +651,26 @@ class TuiApp:
         if target_format is None:
             return
         download_lyric, lyric_mode = self._pick_lyric_mode()
-        session = BatchDownloadSession(
-            rows=chosen,
-            out_dir=out_dir,
-            cookie=self.session.cookie,
-            history_store=self.history_store,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            concurrency=self.session.download_concurrency,
-            download_lyric=download_lyric,
-            lyric_mode=lyric_mode,
-        )
-        self._run_batch_session(session)
+        task_ids: dict[int, str] = {}
+        for index, row in enumerate(rows):
+            if row not in chosen:
+                continue
+            try:
+                output_path = resolve_output_path(out_dir, row.song_id, row.song_name, out_format=target_format)
+                item = self.queue.enqueue(DownloadRequest(
+                    row.song_id, row.song_name, output_path, target_format,
+                    download_lyric, lyric_mode,
+                    timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+                ))
+                task_ids[index] = item.task_id
+            except (MusicFetchError, OSError, ValueError) as err:
+                row.status = "download_failed"
+                row.message = str(err)
+        self._batches.append((rows, task_ids))
         self.session.last_download_dir = str(out_dir)
         self.session_store.save(self.session)
-        if session.auth_expired:
-            self._handle_auth_expired()
-            return
-        failed_rows = retryable_failed_rows(rows)
-        if failed_rows and U.confirm(f"有 {len(failed_rows)} 首下载失败，是否重试？", default=False):
-            retry_session = BatchDownloadSession(
-                rows=failed_rows,
-                out_dir=out_dir,
-                cookie=self.session.cookie,
-                history_store=self.history_store,
-                target_format=target_format,
-                timeout=self.session.download_timeout_sec,
-                retry_count=self.session.download_retry_count,
-                concurrency=self.session.download_concurrency,
-                download_lyric=download_lyric,
-                lyric_mode=lyric_mode,
-            )
-            self._run_batch_session(retry_session)
-            if retry_session.auth_expired:
-                self._handle_auth_expired()
-                return
-        self._offer_batch_export(rows)
+        U.print_success(f"已提交 {len(set(task_ids.values()))} 首到后台，可继续搜索或添加下载。")
+        U.print_info("主菜单 → 下载任务：查看进度、重试失败项或导出批次结果。")
 
     @staticmethod
     def _detect_progress(current: int, total: int, state: list[int]) -> None:
@@ -687,94 +695,147 @@ class TuiApp:
         except OSError as err:
             U.print_error(f"导出失败：{err}")
 
-    # ── download runner / progress UI ─────────────────────────────
+    # ── background tasks ──────────────────────────────────────────
 
-    def _run_job(self, job: DownloadJob) -> Optional[DownloadJobResult]:
-        kb = KeyBindings()
+    def _queue_status(self) -> str:
+        items = self.queue.snapshot()
+        if not items:
+            return ""
+        counts = {state: sum(item.state == state for item in items) for state in STATE_LABELS}
+        parts = [f"{STATE_LABELS[state]} {count}" for state, count in counts.items() if count]
+        running = [item for item in items if item.state == "running"]
+        if running:
+            speed = sum(item.progress.speed for item in running)
+            parts.append(format_speed(speed))
+            parts.append(format_bytes(sum(item.progress.downloaded for item in running)))
+        if self.queue.auth_required:
+            parts.append("请到下载任务重新登录")
+        if self.queue.history_error:
+            parts.append("历史保存失败")
+        return "任务 | " + " · ".join(parts)
 
-        @kb.add("p")
-        def _toggle_pause(event):  # noqa: ANN001 - prompt_toolkit event
-            if job.is_paused:
-                job.request_resume()
-            else:
-                job.request_pause()
+    def _screen_tasks(self) -> None:
+        page = 0
+        while True:
+            items = self.queue.snapshot()
+            total_pages = max(1, (len(items) + 7) // 8)
+            page = max(0, min(page, total_pages - 1))
+            page_items = items[page * 8:(page + 1) * 8]
+            U.clear_screen()
+            U.print_header(MENU_TASKS)
+            if not items:
+                U.print_info("暂无任务。")
+                return
+            rows = []
+            for index, item in enumerate(page_items, start=page * 8 + 1):
+                progress = item.progress
+                size = format_bytes(item.size_bytes if item.state == "success" else progress.downloaded)
+                if progress.total > 0 and item.state not in FINAL_STATES:
+                    size += f"/{format_bytes(progress.total)}"
+                rows.append((str(index), item.request.song_name or item.request.song_id,
+                             STATE_LABELS[item.state], size))
+            U.print_table(["#", "歌曲", "状态", "大小"], rows)
+            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(items)} 个任务；底栏自动刷新，回车刷新列表。")
+            if self.queue.history_error:
+                U.print_warning(self.queue.history_error)
+            raw = U.ask("序号 操作 · p 暂停全部 · r 恢复全部 · c 取消全部 · f 重试失败 · l 登录 · e 批次结果 · n/b 翻页 · 0 返回").lower()
+            if raw in {"0", "q"}:
+                return
+            if raw == "p":
+                self.queue.pause_all()
+            elif raw == "r":
+                self.queue.resume_all()
+            elif raw == "c":
+                if U.confirm("取消所有未完成任务？", default=False):
+                    self.queue.cancel_all()
+            elif raw == "f":
+                for item in items:
+                    if item.state == "failed":
+                        self._retry_task(item.task_id)
+            elif raw == "l":
+                if self.queue.auth_required:
+                    self._clear_login()
+                self._screen_login()
+            elif raw == "e":
+                self._export_queue_batch()
+            elif raw == "n":
+                page += 1
+            elif raw == "b":
+                page -= 1
+            elif raw.isdigit() and page * 8 < int(raw) <= page * 8 + len(page_items):
+                self._task_actions(items[int(raw) - 1])
+            elif raw:
+                U.print_warning("请输入当前页序号或提示中的操作键。")
 
-        @kb.add("c")
-        def _cancel(event):  # noqa: ANN001
-            job.request_cancel()
+    def _task_actions(self, item: QueueItem) -> None:
+        U.print_panel("任务详情", [("歌曲", item.request.song_name or item.request.song_id),
+                                   ("状态", STATE_LABELS[item.state]), ("文件", str(item.output_path)),
+                                   ("说明", item.message or "-")])
+        options = ["打开所在文件夹"]
+        if item.state in {"pending", "running", "waiting_login"}:
+            options.append("暂停")
+        elif item.state == "paused":
+            options.append("恢复")
+        if item.state not in FINAL_STATES:
+            options.append("取消任务")
+        elif item.state in {"failed", "canceled"}:
+            options.append("重试")
+        options.append("返回")
+        action = options[U.menu("操作", options) - 1]
+        if action == "打开所在文件夹":
+            self._open_path(item.output_path.parent)
+        elif action == "暂停":
+            self.queue.pause(item.task_id)
+        elif action == "恢复":
+            self.queue.resume(item.task_id)
+        elif action == "取消任务":
+            self.queue.cancel(item.task_id)
+        elif action == "重试":
+            self._retry_task(item.task_id)
 
-        @kb.add("c-c")
-        def _cancel_ctrl_c(event):  # noqa: ANN001
-            job.request_cancel()
+    def _retry_task(self, task_id: str) -> None:
+        try:
+            item = self.queue.retry(task_id)
+        except (OSError, ValueError) as err:
+            U.print_error(f"无法提交重试：{err}")
+            return
+        for _rows, mapping in self._batches:
+            for index, old_id in mapping.items():
+                if old_id == task_id:
+                    mapping[index] = item.task_id
 
-        job.start()
-        with ProgressBar(
-            title="下载中 — p 暂停/继续 · c 取消",
-            key_bindings=kb,
-            style=U.PROGRESS_STYLE,
-        ) as pb:
-            counter: ProgressBarCounter[object] = pb(total=None, label="准备下载...")
-            while job.state() in JOB_RUNNING_STATES:
-                snap = job.progress()
-                counter.total = snap.total if snap.total > 0 else None
-                counter.items_completed = snap.downloaded
-                paused = "已暂停 · " if job.is_paused else ""
-                size_text = (
-                    f"{format_bytes(snap.downloaded)}/{format_bytes(snap.total)}"
-                    if snap.total > 0
-                    else format_bytes(snap.downloaded)
-                )
-                counter.label = f"{paused}{size_text} · {format_speed(snap.speed)}"
-                pb.invalidate()
-                time.sleep(0.1)
-        return job.result()
-
-    def _run_batch_session(self, session: BatchDownloadSession) -> None:
-        kb = KeyBindings()
-
-        @kb.add("p")
-        def _pause_all(event):  # noqa: ANN001
-            session.request_pause_all()
-
-        @kb.add("r")
-        def _resume_all(event):  # noqa: ANN001
-            session.request_resume_all()
-
-        @kb.add("c")
-        def _cancel_all(event):  # noqa: ANN001
-            session.request_cancel_all()
-
-        @kb.add("c-c")
-        def _cancel_ctrl_c(event):  # noqa: ANN001
-            session.request_cancel_all()
-
-        total_rows = session.counters().total
-        with ProgressBar(
-            title="批量下载 — p 暂停全部 · r 恢复全部 · c 取消",
-            key_bindings=kb,
-            style=U.PROGRESS_STYLE,
-        ) as pb:
-            counter: ProgressBarCounter[object] = pb(total=total_rows if total_rows else None, label="准备...")
-            while not session.done:
-                session.poll()
-                counts = session.counters()
-                partial = 0.0
-                active_labels: list[str] = []
-                for label, snap in session.active_jobs():
-                    if snap.total > 0:
-                        partial += min(snap.downloaded / snap.total, 1.0)
-                    active_labels.append(f"{label[:16]} {format_bytes(snap.downloaded)}")
-                counter.items_completed = int(counts.cursor + partial)
-                state = "已暂停" if counts.paused else ("取消中" if counts.cancel_requested else "下载中")
-                detail = " · ".join(active_labels[:2]) if active_labels else "等待任务启动"
-                counter.label = (
-                    f"{state} {counts.cursor}/{counts.total} 成功 {counts.success} "
-                    f"失败 {counts.failed} 取消 {counts.canceled} | {detail}"
-                )
-                pb.invalidate()
-                time.sleep(0.1)
-        title = "批量下载已停止" if session.stopped else "批量下载完成"
-        U.print_panel(title, session.summary_panel_rows())
+    def _export_queue_batch(self) -> None:
+        if not self._batches:
+            U.print_info("本次运行没有批次。单曲结果可从下载历史导出。")
+            return
+        choices = [f"批次 {index}（{len(rows)} 条）" for index, (rows, _) in enumerate(self._batches, 1)]
+        choices.append("返回")
+        selected = U.menu("选择批次", choices)
+        if selected == len(choices):
+            return
+        rows, mapping = self._batches[selected - 1]
+        by_id = {item.task_id: item for item in self.queue.snapshot()}
+        export_rows = [replace(row) for row in rows]
+        states = {"pending": "download_pending", "running": "downloading", "paused": "download_paused",
+                  "waiting_login": "waiting_login", "canceling": "canceling", "success": "download_success",
+                  "failed": "download_failed", "canceled": "download_canceled"}
+        for index, task_id in mapping.items():
+            item = by_id[task_id]
+            row = export_rows[index]
+            row.status = states[item.state]
+            row.message = item.message or str(item.output_path)
+            row.selected = item.state not in FINAL_STATES
+            if item.state == "success":
+                row.media_size_bytes = item.size_bytes
+        summary = summarize_batch_rows(export_rows)
+        unfinished = sum(by_id[task_id].state not in FINAL_STATES for task_id in mapping.values())
+        panel_rows = [("已提交", str(len(mapping))), ("未完成", str(unfinished)),
+                      ("成功", str(summary.download_success)), ("失败", str(summary.download_failed)),
+                      ("取消", str(summary.download_canceled))]
+        for reason, count in sorted(summary.failure_reasons.items(), key=lambda pair: pair[1], reverse=True)[:3]:
+            panel_rows.append(("失败原因", f"{count} 首：{reason}"))
+        U.print_panel(f"批次 {selected} 结果", panel_rows)
+        self._offer_batch_export(export_rows)
 
     # ── download options ──────────────────────────────────────────
 
@@ -852,70 +913,20 @@ class TuiApp:
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             return False
-        U.print_info(f"输出：{output_path}")
-        job = DownloadJob(
-            task_id=build_task_id(song_id),
-            song_id=song_id,
-            output_path=output_path,
-            cookie=self.session.cookie,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            tags={
-                "title": song_name or "",
-                "artist": artist,
-                "album": album_name,
-                "cover_url": cover_url,
-            },
-            download_lyric=download_lyric,
-            lyric_mode=lyric_mode,
-        )
-        result = self._run_job(job)
+        try:
+            item = self.queue.enqueue(DownloadRequest(
+                song_id, song_name, output_path, target_format, download_lyric, lyric_mode,
+                artist=artist, album_name=album_name, cover_url=cover_url,
+                timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+            ))
+        except (OSError, ValueError) as err:
+            U.print_error(f"无法提交下载：{err}")
+            return False
         self.session.last_download_dir = str(out_dir)
         self.session_store.save(self.session)
-        if result is None:
-            U.print_error("下载任务异常结束。")
-            return False
-        if result.state == "success":
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=result.file_size,
-                status=TASK_STATE_SUCCESS,
-            )
-            U.print_panel(
-                "下载完成",
-                [
-                    ("文件", str(result.output_path)),
-                    ("大小", format_bytes(result.file_size)),
-                ],
-            )
-            if U.confirm("打开所在文件夹？", default=False):
-                self._open_path(result.output_path.parent)
-            return True
-        if result.state == "canceled":
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=0,
-                status=TASK_STATE_CANCELED,
-            )
-            U.print_warning("下载已取消。")
-        else:
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=0,
-                status=TASK_STATE_FAILED,
-                error_code=result.error_code,
-            )
-            U.print_error(f"下载失败：{user_error_message(result.error_code, result.error_message)}")
-            if result.error_code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-        return False
+        U.print_success(f"已加入后台下载：{item.output_path}")
+        U.print_info("可继续搜索或添加歌曲；主菜单 → 下载任务 查看进度。")
+        return True
 
     def _add_record(
         self,
@@ -1076,63 +1087,44 @@ class TuiApp:
             self._retry_record(record)
 
     def _retry_record(self, record: DownloadRecord) -> Optional[bool]:
-        """Retry one failed record; returns True/False on outcome, None on cancel."""
+        """Submit a history retry; True means queued, None means login canceled."""
         if not self.session.cookie:
             U.print_warning(T.MSG_NEED_LOGIN_ANY)
             self._login_and_return()
             if not self.session.cookie:
                 return None
+        # Prefer in-memory options when this record belongs to the current run.
+        for item in reversed(self.queue.snapshot()):
+            if (str(item.output_path) == record.output_path and item.request.song_id == record.song_id
+                    and item.state in {"failed", "canceled"}):
+                self._retry_task(item.task_id)
+                return True
         output_path = Path(record.output_path).expanduser()
-        target_format = retry_target_format(output_path)
-        job = DownloadJob(
-            task_id=build_task_id(record.song_id),
-            song_id=record.song_id,
-            output_path=output_path,
-            cookie=self.session.cookie,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            tags={"title": record.song_name, "artist": None, "album": None, "cover_url": None},
-        )
-        result = self._run_job(job)
-        self.history_store.remove_by_path(str(output_path))
-        if result is None:
-            return None
-        if result.state == "success":
-            size = result.output_path.stat().st_size if result.output_path.exists() else 0
-            self._add_record(
-                record.song_id, record.song_name, str(result.output_path), size, TASK_STATE_SUCCESS,
-            )
-            U.print_success(f"重试成功：{result.output_path}")
-            return True
-        if result.state == "canceled":
-            self._add_record(
-                record.song_id, record.song_name, str(output_path), 0, TASK_STATE_CANCELED,
-            )
-            return None
-        self._add_record(
-            record.song_id, record.song_name, str(output_path), 0, TASK_STATE_FAILED,
-            error_code=result.error_code,
-        )
-        U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
-        if result.error_code == "AUTH_EXPIRED":
-            self._handle_auth_expired()
-        return False
+        try:
+            self.queue.enqueue(DownloadRequest(
+                record.song_id, record.song_name, output_path, retry_target_format(output_path),
+                timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+            ))
+        except (OSError, ValueError) as err:
+            U.print_error(f"无法提交重试：{err}")
+            return False
+        U.print_info("重试已加入后台下载。")
+        return True
 
     def _retry_all_failed(self, records: list[DownloadRecord]) -> None:
         failed = [record for record in records if record.status == TASK_STATE_FAILED]
         if not failed:
             U.print_warning("没有失败的下载记录。")
             return
-        if not U.confirm(f"将依次重试 {len(failed)} 条失败记录，确定？", default=False):
+        if not U.confirm(f"将 {len(failed)} 条失败记录加入后台重试，确定？", default=False):
             return
         if not self.session.cookie:
             U.print_warning(T.MSG_NEED_LOGIN_ANY)
             self._login_and_return()
             if not self.session.cookie:
                 return
-        succeeded = sum(1 for record in failed if self._retry_record(record) is True)
-        U.print_info(f"重试完成：成功 {succeeded}/{len(failed)}，其余仍失败可再次重试。")
+        submitted = sum(1 for record in failed if self._retry_record(record) is True)
+        U.print_info(f"已提交重试 {submitted}/{len(failed)} 条；请到下载任务查看结果。")
 
     def _clear_history(self, records: list[DownloadRecord]) -> None:
         if not records:
@@ -1197,6 +1189,7 @@ class TuiApp:
                     self.session.ui_theme = "dark" if theme_choice == 1 else "light"
                     U.set_theme(self.session.ui_theme)
             elif choice == 8:
+                self.queue.set_concurrency(self.session.download_concurrency)
                 self.session_store.save(self.session)
                 U.print_success("设置已保存。")
                 return

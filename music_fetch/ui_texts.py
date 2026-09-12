@@ -65,6 +65,9 @@ def batch_detect_status_text(status: str) -> str:
         "download_failed": BATCH_STATUS_DOWNLOAD_FAILED,
         "download_canceled": BATCH_STATUS_DOWNLOAD_CANCELED,
         "download_paused": BATCH_STATUS_DOWNLOAD_PAUSED,
+        "download_pending": "等待下载",
+        "waiting_login": "等待登录",
+        "canceling": "取消中",
     }
     return mapping.get(normalized, status or MSG_UNKNOWN)
 
