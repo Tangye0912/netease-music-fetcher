@@ -105,7 +105,8 @@ def is_ffmpeg_available() -> bool:
     return bool(shutil.which("ffmpeg"))
 
 
-def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:
+def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240,
+                       cancel_checker: Optional[CancelChecker] = None) -> None:
     fmt = target_format.lower().strip()
     if fmt not in SUPPORTED_GUI_AUDIO_FORMATS:
         raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
@@ -128,7 +129,10 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
         raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
     logger.info("Start audio conversion. input=%s output=%s format=%s", input_path, output_path, fmt)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if cancel_checker is None:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        else:
+            proc = _run_cancelable_conversion(cmd, timeout, cancel_checker)
     except subprocess.TimeoutExpired:
         if output_path.exists():
             output_path.unlink(missing_ok=True)
@@ -140,6 +144,33 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
             output_path.unlink(missing_ok=True)
         raise MusicFetchError(ErrorCode.CONVERT_FAILED, f"Failed to convert audio to {fmt}: {preview}")
     logger.info("Audio conversion completed. output=%s format=%s", output_path, fmt)
+
+
+def _run_cancelable_conversion(cmd: list[str], timeout: int, cancel_checker: CancelChecker) -> subprocess.CompletedProcess[str]:
+    if cancel_checker():
+        raise DownloadCanceled()
+    child = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            if cancel_checker():
+                raise DownloadCanceled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            try:
+                stdout, stderr = child.communicate(timeout=min(0.1, remaining))
+                return subprocess.CompletedProcess(cmd, child.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate()
 
 
 # ── Download ─────────────────────────────────────────────────────

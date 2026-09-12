@@ -80,6 +80,8 @@ class AppSession:
     proxy_port: int = 0
     proxy_username: str = ""
     proxy_password: str = ""
+    default_target_format: str = "mp3"
+    default_lyric_mode: str = "none"
 
 
 @dataclass
@@ -91,6 +93,11 @@ class DownloadRecord:
     downloaded_at: str
     status: str = TASK_STATE_SUCCESS
     error_code: str = ""
+    target_format: str = ""
+    lyric_mode: str = "none"
+    artist: str = ""
+    album_name: str = ""
+    cover_url: str = ""
 
 
 class SessionStore:
@@ -107,6 +114,8 @@ class SessionStore:
             logger.warning("Failed to parse session file, fallback to empty. path=%s", self.path)
             return AppSession()
 
+        if not isinstance(raw, dict):
+            return AppSession()
         return AppSession(
             cookie=str(raw.get("cookie") or ""),
             remember_login=bool(raw.get("remember_login", True)),
@@ -123,6 +132,8 @@ class SessionStore:
             proxy_port=self._safe_proxy_port(raw.get("proxy_port")),
             proxy_username=str(raw.get("proxy_username") or "").strip(),
             proxy_password=str(raw.get("proxy_password") or ""),
+            default_target_format=self._safe_format(raw.get("default_target_format")),
+            default_lyric_mode=self._safe_lyric_mode(raw.get("default_lyric_mode")),
         )
 
     def save(self, session: AppSession) -> None:
@@ -143,9 +154,20 @@ class SessionStore:
             "proxy_port": self._safe_proxy_port(session.proxy_port),
             "proxy_username": str(session.proxy_username or "").strip(),
             "proxy_password": session.proxy_password,
+            "default_target_format": self._safe_format(session.default_target_format),
+            "default_lyric_mode": self._safe_lyric_mode(session.default_lyric_mode),
         }
         _write_private_json(self.path, payload)
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
+
+    @staticmethod
+    def _safe_format(value: object) -> str:
+        from music_fetch.app_settings import SUPPORTED_AUDIO_FORMATS
+        return str(value) if value in SUPPORTED_AUDIO_FORMATS else "mp3"
+
+    @staticmethod
+    def _safe_lyric_mode(value: object) -> str:
+        return str(value) if value in ("none", "original", "bilingual", "translation") else "none"
 
     @staticmethod
     def _safe_ui_font_size(value: object) -> int:
@@ -226,6 +248,11 @@ class DownloadHistoryStore:
                         downloaded_at=str(row.get("downloaded_at") or ""),
                         status=self._safe_status(row.get("status")),
                         error_code=str(row.get("error_code") or ""),
+                        target_format=str(row.get("target_format") or ""),
+                        lyric_mode=SessionStore._safe_lyric_mode(row.get("lyric_mode")),
+                        artist=str(row.get("artist") or ""),
+                        album_name=str(row.get("album_name") or ""),
+                        cover_url=str(row.get("cover_url") or ""),
                     )
                 )
             # Keep only the most recent records to avoid unbounded memory growth.
@@ -237,7 +264,6 @@ class DownloadHistoryStore:
     def save(self, records: list[DownloadRecord]) -> None:
         with self._lock:
             limited_records = list(records[:MAX_DOWNLOAD_HISTORY_RECORDS])
-            self._cache = limited_records
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = [
                 {
@@ -248,10 +274,16 @@ class DownloadHistoryStore:
                     "downloaded_at": r.downloaded_at,
                     "status": self._safe_status(r.status),
                     "error_code": r.error_code,
+                    "target_format": r.target_format,
+                    "lyric_mode": r.lyric_mode,
+                    "artist": r.artist,
+                    "album_name": r.album_name,
+                    "cover_url": r.cover_url,
                 }
                 for r in limited_records
             ]
-            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_private_json(self.path, payload)
+            self._cache = limited_records
 
     def add(self, record: DownloadRecord) -> None:
         with self._lock:

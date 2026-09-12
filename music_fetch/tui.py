@@ -1,1267 +1,872 @@
-#!/usr/bin/env python3
-"""Interactive terminal UI for music-fetch.
-
-Bare `music-fetch` (no arguments) opens this keyboard-driven interface:
-official browser QR login, numbered menus, checkbox multi-select for batch
-downloads, and progress bars with pause/resume/cancel keys.  All heavy lifting
-stays in the pure modules (api/audio/pipeline/batch_*).
-"""
-
+"""One full-screen terminal application with an application-owned download queue."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import subprocess
 import sys
-import time
+import threading
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, TypeVar
 
+from prompt_toolkit.application import Application
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.input import Input
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts import ProgressBar
-from prompt_toolkit.shortcuts.progress_bar.base import ProgressBarCounter
+from prompt_toolkit.layout import Layout, HSplit, VSplit, Window, DynamicContainer, ConditionalContainer
+from prompt_toolkit.layout.containers import AnyContainer
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.layout import FocusableElement
+from prompt_toolkit.output import Output
+from prompt_toolkit.styles import Style, DynamicStyle
+from prompt_toolkit.widgets import Button, Dialog, Label, TextArea
 
 from music_fetch.api import (
-    MusicFetchError,
-    SUPPORTED_GUI_AUDIO_FORMATS,
-    detect_song,
-    fetch_account_profile,
-    fetch_user_playlists,
-    normalize_cookie,
-    parse_input_resource,
-    search_songs,
+    DownloadCanceled, MusicFetchError, SearchResult, UserPlaylist, fetch_account_profile,
+    fetch_user_playlists, normalize_cookie, search_songs,
 )
 from music_fetch.app_logging import default_log_path, setup_logging
-from music_fetch.app_settings import (
-    APP_NAME,
-    APP_VERSION,
-    CONFIG_DIR,
-    DOWNLOAD_HISTORY_FILE,
-    MAX_CLI_CONCURRENCY,
-    MIN_DOWNLOAD_CONCURRENCY,
-    PROJECT_GITHUB_URL,
-    SESSION_FILE,
-)
+from music_fetch.app_settings import APP_NAME, APP_VERSION, SESSION_FILE, DOWNLOAD_HISTORY_FILE
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
-from music_fetch.batch_download import BatchDownloadSession, format_speed
+from music_fetch.audio import download_preview_to_temp, is_ffmpeg_available, sanitize_filename
 from music_fetch.batch_inspect import run_batch_detect
-from music_fetch.batch_models import format_bytes, format_duration, probe_media_size_bytes
-from music_fetch.batch_results import build_batch_results_csv, retryable_failed_rows, summarize_batch_rows
+from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration
+from music_fetch.batch_results import build_batch_results_csv
+from music_fetch.browser_login import run_official_login
 from music_fetch.diagnostics import (
-    DiagnosticContext,
-    build_diagnostic_report,
-    read_log_tail,
-    run_network_diagnostics,
+    DiagnosticContext, build_diagnostic_report, read_log_tail, redact_diagnostic_text, run_network_diagnostics,
 )
-from music_fetch.download_retry import retry_target_format
-from music_fetch.download_runner import DownloadJob, DownloadJobResult, JOB_RUNNING_STATES
-from music_fetch.download_tasks import (
-    TASK_STATE_CANCELED,
-    TASK_STATE_FAILED,
-    TASK_STATE_SUCCESS,
-    build_task_id,
-)
+from music_fetch.download_queue import DownloadOptions, DownloadQueue, DownloadRequest, FINAL_STATES, STAGE_LABELS, STATE_LABELS
 from music_fetch.error_texts import user_error_message
-from music_fetch.history_results import (
-    build_download_history_csv,
-    filter_download_history,
-    paginate_download_history,
-)
-from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config, normalize_proxy_config
+from music_fetch.history_results import build_download_history_csv, filter_download_history
+from music_fetch.network import ProxyConfigError, configure_proxy
+from music_fetch.terminal_forms import CycleField, DownloadForm, SettingsForm
+from music_fetch.terminal_widgets import Choice, ChoiceList, clean_text, clip
 from music_fetch.version_check import check_for_updates_cached, version_key
-import music_fetch.tui_utils as U
-import music_fetch.ui_texts as T
 
 logger = logging.getLogger("music_fetch.tui")
-
-MENU_SINGLE = "单曲下载"
-MENU_SEARCH = "搜索下载"
-MENU_PLAYLISTS = "我的歌单"
-MENU_BATCH = "批量下载"
-MENU_HISTORY = "下载历史"
-MENU_SETTINGS = "软件设置"
-MENU_DIAGNOSTICS = "诊断中心"
-MENU_UPDATE = "检查更新"
-MENU_LOGOUT = "退出登录"
-MENU_LOGIN = "登录 / 重新登录"
-MENU_QUIT = "退出"
-
-_QUALITY_LABELS = {
-    "standard": "标准",
-    "higher": "较高",
-    "exhigh": "极高",
-    "lossless": "无损",
-    "hires": "Hi-Res",
-}
+R = TypeVar("R")
+NAVIGATION = [("add", "添加下载"), ("search", "搜索"), ("playlists", "我的歌单"),
+              ("tasks", "任务"), ("history", "历史"), ("settings", "设置")]
 
 
-def _quality_label(level: str, encode_type: str = "") -> str:
-    label = _QUALITY_LABELS.get((level or "").strip().lower(), level or "未知")
-    if encode_type:
-        return f"{label}（{encode_type}）"
-    return label
+@dataclass
+class Modal:
+    container: AnyContainer
+    focus: FocusableElement
+    previous_focus: FocusableElement
+
+
+@dataclass
+class Operation:
+    name: str
+    cancel: threading.Event
+    task: asyncio.Task[None]
 
 
 class TuiApp:
-    """Keyboard-driven application shell."""
-
-    def __init__(
-        self,
-        session_store: Optional[SessionStore] = None,
-        history_store: Optional[DownloadHistoryStore] = None,
-    ) -> None:
+    def __init__(self, session_store: SessionStore | None = None,
+                 history_store: DownloadHistoryStore | None = None,
+                 *, input: Input | None = None, output: Output | None = None) -> None:
         self.session_store = session_store or SessionStore(SESSION_FILE)
         self.history_store = history_store or DownloadHistoryStore(DOWNLOAD_HISTORY_FILE)
-        self.session: AppSession = self.session_store.load()
-        U.set_theme(self.session.ui_theme)
-        self._nickname = ""
-        self._apply_proxy()
+        self.session = self.session_store.load()
+        self.nickname = ""
+        self.validated_login = False
+        self.notice = "粘贴链接开始下载，或选择搜索。设置与历史可离线使用。"
+        self.notice_error = False
+        try:
+            self._apply_proxy()
+        except ProxyConfigError:
+            configure_proxy()
+            self.notice = "已保存的代理配置无效，请在设置中修正。"
+        self.queue = DownloadQueue(self.history_store, self.session.cookie, self.session.download_concurrency,
+                                   self.session.download_timeout_sec, self.session.download_retry_count)
+        self.page = "home"
+        self.generation = 0
+        self.modals: list[Modal] = []
+        self.operations: list[Operation] = []
+        self._closing = False
+        self._auth_notified = False
+        self._queue_signature: object = None
+        self._worker_slots = asyncio.Semaphore(3)
+        self.batch_rows: dict[str, BatchDetectRow] = {}
+        self.search_results: dict[str, SearchResult] = {}
+        self.playlists: dict[str, UserPlaylist] = {}
+        self.records: dict[str, DownloadRecord] = {}
+        self.search_loaded = False
+        self.playlists_loaded = False
+        self._playlist_return = False
+        self._ffmpeg = is_ffmpeg_available()
+        self._build_controls()
+        self.application: Application[None] = Application(
+            layout=Layout(self._root(), focused_element=self.home_list),
+            key_bindings=self._key_bindings(), full_screen=True,
+            style=DynamicStyle(self._style), input=input, output=output,
+            mouse_support=False, min_redraw_interval=0.03,
+        )
 
-    # ── bootstrap ─────────────────────────────────────────────────
+    def _build_controls(self) -> None:
+        self.home_list = ChoiceList([Choice(key, label, {
+            "add": "单曲、歌单、专辑与多行分享文案", "search": "按歌名或歌手搜索",
+            "playlists": "浏览账号歌单并选择曲目", "tasks": "后台进度、暂停、取消与重试",
+            "history": "下载记录、文件操作与导出", "settings": "下载偏好、代理、账号与工具",
+        }[key]) for key, label in NAVIGATION], activate=self.navigate)
+        self.nav = ChoiceList([Choice(key, label) for key, label in NAVIGATION], activate=self.navigate)
+        self.add_input = TextArea(multiline=True, scrollbar=True, wrap_lines=True, prompt="› ")
+        self.add_submit = Button("识别内容", handler=self.detect_input)
+        self.search_input = TextArea(multiline=False, prompt="搜索：", accept_handler=lambda _b: self._accept_search())
+        self.batch_filter = TextArea(multiline=False, prompt="筛选：")
+        self.history_filter = TextArea(multiline=False, prompt="筛选：")
+        self.task_filter = TextArea(multiline=False, prompt="筛选：")
+        self.batch_list = ChoiceList(multiple=True, activate=lambda _key: self.download_selection())
+        self.search_list = ChoiceList(activate=self.search_detail)
+        self.playlist_list = ChoiceList(activate=self.playlist_detail)
+        self.task_list = ChoiceList(activate=self.task_detail)
+        self.history_list = ChoiceList(activate=self.history_detail)
+        self.history_status = CycleField("状态", [("all", "全部"), ("success", "成功"), ("failed", "失败"), ("canceled", "取消")], "all")
+        self.history_status.button.handler = self._cycle_history_status
+        self.settings_list = ChoiceList([
+            Choice("general", "下载与外观", "默认目录、格式、歌词、深浅主题"),
+            Choice("network", "代理设置", "系统网络 / HTTP / SOCKS5"),
+            Choice("performance", "下载性能", "超时、重试和并发上限"),
+            Choice("login", "登录 / 重新登录", "官网扫码，使用独立临时浏览器窗口"),
+            Choice("logout", "退出账号", "本地历史仍可使用"),
+            Choice("diagnostics", "诊断与报告", "检查网络并导出脱敏报告"),
+            Choice("update", "检查更新", "手动检查新版本"),
+        ], activate=self.settings_action)
+        self.batch_filter.buffer.on_text_changed += lambda _b: self.batch_list.set_query(self.batch_filter.text)
+        self.task_filter.buffer.on_text_changed += lambda _b: self.task_list.set_query(self.task_filter.text)
+        self.history_filter.buffer.on_text_changed += lambda _b: self.refresh_history()
+        self._pages: dict[str, AnyContainer] = {
+            "home": HSplit([Label("  音乐下载，从这里开始"), self.home_list.window]),
+            "add": HSplit([Label("歌曲 / 歌单 / 专辑链接、ID、分享文案均可，多行一起粘贴。"),
+                           self.add_input, self.add_submit, Label("Enter 换行 · Alt+Enter 提交 · Esc 返回")]),
+            "search": HSplit([self.search_input, self.search_list.window]),
+            "playlists": HSplit([Button("刷新歌单", handler=self.load_playlists), self.playlist_list.window]),
+            "batch": HSplit([self.batch_filter, Window(FormattedTextControl(self._batch_summary), height=1),
+                             self.batch_list.window,
+                             VSplit([Button("下载所选", handler=self.download_selection),
+                                     Button("歌曲详情", handler=self.batch_detail),
+                                     Button("导出结果", handler=self.export_batch)], padding=1)]),
+            "tasks": HSplit([self.task_filter, self.task_list.window,
+                             VSplit([Button("暂停全部", handler=self.queue.pause_all),
+                                     Button("继续全部", handler=self.queue.resume_all),
+                                     Button("取消全部", handler=self.confirm_cancel_all)], padding=1)]),
+            "history": HSplit([self.history_filter, self.history_status.button, self.history_list.window,
+                               Button("导出筛选结果", handler=self.export_history)]),
+            "settings": self.settings_list.window,
+        }
+
+    def _root(self) -> AnyContainer:
+        self._small = HSplit([Label("窗口较小，请放大到至少 60 列 × 18 行。"), Label("任务仍在后台运行 · Ctrl+C 退出")])
+        detail = Window(FormattedTextControl(self._detail_text), wrap_lines=True, style="class:detail")
+        content = VSplit([
+            ConditionalContainer(HSplit([Label(" 导航"), self.nav.window], width=18), filter=Condition(lambda: self.width >= 80 and self.page != "home")),
+            DynamicContainer(lambda: self._pages[self.page]),
+            ConditionalContainer(HSplit([Label(" 当前条目"), detail], width=Dimension(preferred=34, max=42)),
+                                 filter=Condition(lambda: self.width >= 110 and self.page in {"search", "batch", "tasks", "history", "playlists"})),
+        ], padding=1)
+        body = DynamicContainer(lambda: self._small if self.too_small else (self.modals[-1].container if self.modals else content))
+        return HSplit([
+            Window(FormattedTextControl(self._header), height=1, style="class:header"),
+            ConditionalContainer(Window(FormattedTextControl(lambda: clip(" F1 首页 · F2 添加 · F3 搜索 · F4 歌单 · F5 任务 · F6 历史 · F7 设置", self.width)), height=1),
+                                 filter=Condition(lambda: self.width < 80)),
+            body,
+            Window(FormattedTextControl(self._notification), height=1),
+            Window(FormattedTextControl(self._status), height=1, style="class:status"),
+            Window(FormattedTextControl(self._footer), height=1, style="class:muted"),
+        ], style="class:root")
+
+    @property
+    def width(self) -> int:
+        return self.application.output.get_size().columns if hasattr(self, "application") else 80
+
+    @property
+    def too_small(self) -> bool:
+        if not hasattr(self, "application"):
+            return False
+        size = self.application.output.get_size()
+        return size.columns < 60 or size.rows < 18
+
+    def _style(self) -> Style:
+        light = self.session.ui_theme == "light"
+        return Style.from_dict({
+            "root": "bg:#f6f8fa #20242b" if light else "bg:#161b22 #e6edf3",
+            "header": "bg:#087f8c #ffffff bold", "status": "bg:#263d46 #ffffff",
+            "focused": "bg:#087f8c #ffffff bold", "text": "#20242b" if light else "#e6edf3",
+            "secondary": "#52616b" if light else "#96a4b4", "muted": "#52616b" if light else "#96a4b4",
+            "error": "#b42318" if light else "#ff9393", "notice": "#006f58" if light else "#7dd3b0",
+            "button": "bg:#dce5ea #20242b" if light else "bg:#273441 #e6edf3",
+            "button.focused": "bg:#087f8c #ffffff bold",
+            "dialog": "bg:#eef2f5 #20242b" if light else "bg:#202b36 #e6edf3",
+            "dialog.body": "bg:#eef2f5 #20242b" if light else "bg:#202b36 #e6edf3",
+            "text-area": "bg:#ffffff #20242b" if light else "bg:#0e151d #e6edf3",
+            "frame.label": "#087f8c bold" if light else "#63d6e3 bold",
+            "scrollbar.background": "bg:#34424e", "scrollbar.button": "bg:#087f8c",
+        })
+
+    def _header(self) -> str:
+        title = dict(NAVIGATION).get(self.page, "识别结果" if self.page == "batch" else "首页")
+        account = self.nickname or ("已保存登录" if self.session.cookie else "未登录")
+        return clip(f" {APP_NAME} {APP_VERSION}  /  {title}    {account}", self.width)
+
+    def _notification(self) -> StyleAndTextTuples:
+        return [("class:error" if self.notice_error else "class:notice", clip(" " + self.notice, self.width))]
+
+    def _status(self) -> str:
+        counts = self.queue.counts()
+        busy = next((op.name for op in reversed(self.operations) if not op.cancel.is_set()), "")
+        text = f" 任务 {len(self.queue.unfinished)} · 完成 {counts['success']} · 失败 {counts['failed']} · 跳过 {counts['skipped']}"
+        if self.queue.auth_required:
+            text += " · 等待重新登录"
+        elif self.queue.paused:
+            text += " · 全部暂停"
+        if self.queue.active:
+            item = self.queue.active[0]
+            text += f" · {STAGE_LABELS.get(item.progress.stage, '下载中')} {format_bytes(item.progress.downloaded)}"
+        if busy:
+            text += f" · {busy}…"
+        if self._closing:
+            text = " 正在取消任务并清理临时文件，请稍候…"
+        return clip(text, self.width)
+
+    def _footer(self) -> str:
+        if self.modals:
+            text = " Tab 切换 · Enter 确认 · Esc 返回"
+        elif self.page == "batch":
+            text = " ↑↓ 移动 · Space 勾选 · Enter 下载 · Ctrl+A 全选 · Ctrl+U 清空 · Esc 返回"
+        elif self.page == "tasks":
+            text = " ↑↓ 选择 · Enter 详情 · p 暂停/继续 · c 取消 · r 重试 · Esc 首页"
+        else:
+            text = " ↑↓ 选择 · Enter 进入 · Tab 切换 · Esc 返回 · F1 首页 · q 退出"
+        return clip(text, self.width)
+
+    def _detail_text(self) -> str:
+        control = self.current_list()
+        if not control or not control.current:
+            return "\n选择条目查看信息。"
+        row = control.current
+        if self.page == "tasks":
+            item = self.queue.get(row.key)
+            return f"\n{clean_text(item.request.song_name)}\n\n{STATE_LABELS[item.state]}\n{STAGE_LABELS.get(item.progress.stage, '')}\n\n{clean_text(str(item.output_path))}\n\n{clean_text(item.message)}"
+        return f"\n{clean_text(row.title)}\n\n{clean_text(row.subtitle)}\n\nEnter 打开详情或继续。"
+
+    def _batch_summary(self) -> str:
+        return clip(f" 共 {len(self.batch_list.all_rows)} 首 · 筛选 {len(self.batch_list.rows)} 首 · 已选 {len(self.batch_list.selected)} 首", self.width)
+
+    def current_list(self) -> ChoiceList | None:
+        return {"home": self.home_list, "search": self.search_list, "playlists": self.playlist_list,
+                "batch": self.batch_list, "tasks": self.task_list, "history": self.history_list,
+                "settings": self.settings_list}.get(self.page)
+
+    def _key_bindings(self) -> KeyBindings:
+        keys = KeyBindings()
+        editing = Condition(lambda: isinstance(self.application.layout.current_control, BufferControl))
+        unobstructed = Condition(lambda: not self.modals and not self._closing)
+        keys.add("escape", eager=False)(lambda event: self.back())
+        keys.add("c-c")(lambda event: self.back())
+        keys.add("q", filter=~editing)(lambda event: self.request_exit())
+        keys.add("tab")(lambda event: event.app.layout.focus_next())
+        keys.add("s-tab")(lambda event: event.app.layout.focus_previous())
+        keys.add("escape", "enter", filter=Condition(lambda: self.page == "add" and not self.modals))(lambda event: self.detect_input())
+        for index, page in enumerate(["home"] + [key for key, _ in NAVIGATION], 1):
+            keys.add(f"f{index}", filter=unobstructed)(lambda event, page=page: self.navigate(page))
+        for key, action in (("p", self.toggle_task), ("c", self.cancel_task), ("r", self.retry_task)):
+            keys.add(key, filter=~editing & unobstructed & Condition(lambda: self.page == "tasks"))(lambda event, action=action: action())
+        keys.add("/", filter=~editing & unobstructed)(lambda event: self.focus_filter())
+        return keys
+
+    def notify(self, message: str, error: bool = False) -> None:
+        self.notice = redact_diagnostic_text(message, [self.session.cookie, self.session.proxy_password])
+        self.notice_error = error
+        self.application.invalidate()
 
     def _apply_proxy(self) -> None:
+        s = self.session
+        configure_proxy(s.proxy_type, s.proxy_host, s.proxy_port, s.proxy_username, s.proxy_password)
+
+    def _focus_page(self) -> None:
+        target: FocusableElement = self.current_list() or self.add_input
+        if self.page == "search" and not self.search_results:
+            target = self.search_input
+        self.application.layout.focus(target)
+
+    def navigate(self, page: str) -> None:
+        if self._closing:
+            return
+        self.cancel_operations()
+        self.modals.clear()
+        self.generation += 1
+        self.page = page
+        self._focus_page()
+        if page == "history":
+            self.refresh_history()
+        if page == "playlists" and not self.playlists_loaded:
+            self.load_playlists()
+        self.application.invalidate()
+
+    def back(self) -> None:
+        if self._closing:
+            return
+        if self.too_small:
+            self.request_exit()
+        elif self.modals:
+            self.close_modal()
+        elif self.page == "batch":
+            self.navigate("playlists" if self._playlist_return else "add")
+        elif self.page == "home":
+            self.request_exit()
+        else:
+            self.navigate("home")
+
+    def focus_filter(self) -> None:
+        field = {"search": self.search_input, "batch": self.batch_filter,
+                 "history": self.history_filter, "tasks": self.task_filter}.get(self.page)
+        if field:
+            self.application.layout.focus(field)
+
+    def show_modal(self, container: AnyContainer, focus: FocusableElement) -> None:
+        self.modals.append(Modal(container, focus, self.application.layout.current_control))
+        self.application.layout.focus(focus)
+        self.application.invalidate()
+
+    def close_modal(self, *, cancel_operations: bool = True) -> None:
+        if cancel_operations:
+            self.cancel_operations()
+            self.generation += 1
+        if not self.modals:
+            return
+        modal = self.modals.pop()
         try:
-            configure_proxy(
-                self.session.proxy_type,
-                self.session.proxy_host,
-                self.session.proxy_port,
-                self.session.proxy_username,
-                self.session.proxy_password,
-            )
-        except ProxyConfigError as err:
-            logger.warning("Stored proxy invalid, falling back to direct. reason=%s", err)
-            configure_proxy()
-        self._proxy_label = self._proxy_summary()
+            self.application.layout.focus(modal.previous_focus)
+        except ValueError:
+            self._focus_page()
+        self.application.invalidate()
 
-    @staticmethod
-    def _proxy_summary() -> str:
-        config = get_proxy_config()
-        if not config.proxy_type:
-            return "直连"
-        type_label = "SOCKS5" if config.proxy_type == "socks5" else "HTTP"
-        return f"{type_label} {config.host}:{config.port}"
+    def show_text(self, title: str, text: str, actions: list[tuple[str, Callable[[], None]]] | None = None) -> None:
+        body = TextArea(text=redact_diagnostic_text(text, [self.session.cookie, self.session.proxy_password]),
+                        read_only=True, scrollbar=True, wrap_lines=True)
+        buttons = [Button(label, handler=callback) for label, callback in (actions or [])]
+        back = Button("返回", handler=self.close_modal)
+        buttons.append(back)
+        dialog = Dialog(title=clean_text(title), body=body, buttons=buttons, with_background=False)
+        self.show_modal(dialog, buttons[0])
 
-    def _login_label(self) -> str:
-        if not self.session.cookie:
-            return "未登录"
-        if self._nickname:
-            return self._nickname
-        return "已登录"
+    def confirm(self, title: str, message: str, action: Callable[[], None]) -> None:
+        def yes() -> None:
+            self.close_modal(cancel_operations=False)
+            action()
+        no = Button("返回", handler=self.close_modal)
+        dialog = Dialog(title=title, body=Label(message), buttons=[Button("确认", handler=yes), no], with_background=False)
+        self.show_modal(dialog, no)
 
-    def _validate_session_login(self) -> bool:
-        """Return True when a usable login exists; clear expired cookies.
+    def cancel_operations(self) -> None:
+        for op in self.operations:
+            op.cancel.set()
 
-        An expired/invalid session cookie must not silently keep the menu
-        unlocked — the user has to re-login through the browser flow.
-        """
-        if not self.session.cookie:
-            return False
-        try:
-            profile = fetch_account_profile(self.session.cookie, timeout=6)
-            self._nickname = profile.nickname
-            return True
-        except MusicFetchError as err:
-            self._nickname = ""
-            if err.code == "AUTH_EXPIRED":
-                return False
-            # Transient network failure: keep the session and let individual
-            # operations surface the error instead of wrongly logging out.
-            return bool(self.session.cookie)
+    def start_operation(self, name: str, worker: Callable[[threading.Event], R], done: Callable[[R], None],
+                        retry: Callable[[], None] | None = None) -> None:
+        if self._closing:
+            return
+        for op in self.operations:
+            if op.name == name:
+                op.cancel.set()
+        cancel = threading.Event()
+        generation = self.generation
 
-    def run(self) -> int:
-        # A missing or expired app-owned credential always starts the isolated
-        # official QR flow.  No browser profile is inspected for a login state.
-        if self.session.cookie and not self._validate_session_login():
-            self._clear_login()
-        if not self.session.cookie:
-            self._screen_login()
-        while True:
+        async def run() -> None:
             try:
-                U.clear_screen()
-            except Exception:  # pragma: no cover - clear may fail on exotic terminals
+                async with self._worker_slots:
+                    if cancel.is_set():
+                        return
+                    result = await asyncio.to_thread(worker, cancel)
+                if not cancel.is_set() and generation == self.generation and not self._closing:
+                    done(result)
+            except DownloadCanceled:
                 pass
-            U.print_header(f"{APP_NAME} v{APP_VERSION}")
-            if self.session.cookie:
-                U.print_status(
-                    [
-                        ("登录", self._login_label()),
-                        ("代理", self._proxy_label),
-                        ("目录", self.session.last_download_dir),
-                        ("ffmpeg", "可用" if is_ffmpeg_available() else "未安装"),
-                    ]
-                )
-                options = [
-                    MENU_SINGLE,
-                    MENU_SEARCH,
-                    MENU_PLAYLISTS,
-                    MENU_BATCH,
-                    MENU_HISTORY,
-                    MENU_SETTINGS,
-                    MENU_DIAGNOSTICS,
-                    MENU_UPDATE,
-                    MENU_LOGOUT,
-                    MENU_QUIT,
-                ]
-            else:
-                U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
-                options = [MENU_LOGIN, MENU_QUIT]
-            try:
-                choice = U.menu("主菜单", options, shortcuts={"q": len(options)})
-            except (KeyboardInterrupt, EOFError):
-                print()
-                return 0
-            label = options[choice - 1]
-            if label == MENU_QUIT:
-                return 0
-            if not self.session.cookie:
-                if label == MENU_LOGIN:
-                    self._screen_login()
-                continue
-            if label == MENU_SINGLE:
-                self._screen_single()
-            elif label == MENU_SEARCH:
-                self._screen_search()
-            elif label == MENU_PLAYLISTS:
-                self._screen_playlists()
-            elif label == MENU_BATCH:
-                self._screen_batch()
-            elif label == MENU_HISTORY:
-                self._screen_history()
-            elif label == MENU_SETTINGS:
-                self._screen_settings()
-            elif label == MENU_DIAGNOSTICS:
-                self._screen_diagnostics()
-            elif label == MENU_UPDATE:
-                self._screen_check_update()
-            elif label == MENU_LOGOUT:
-                if U.confirm("确定退出当前账号？", default=True):
-                    self._clear_login()
-                    U.print_success("已退出登录。")
+            except MusicFetchError as err:
+                if cancel.is_set() or generation != self.generation:
+                    return
+                if err.code == "AUTH_EXPIRED":
+                    self.clear_login()
+                    self.notify("登录已过期，请重新登录。", True)
+                    self.login(retry)
+                else:
+                    self.notify(user_error_message(err.code, err.message), True)
+            except Exception as err:
+                if not cancel.is_set() and generation == self.generation:
+                    self.notify(str(err), True)
+                    logger.exception("Terminal operation failed. operation=%s", name)
+            finally:
+                self.operations[:] = [op for op in self.operations if op.cancel is not cancel]
+                self.application.invalidate()
 
-    # ── login ─────────────────────────────────────────────────────
+        task = asyncio.create_task(run())
+        self.operations.append(Operation(name, cancel, task))
+        self.application.invalidate()
 
-    def _screen_login(self) -> None:
-        U.print_header("登录")
-        self._login_with_browser()
+    def ensure_login(self, action: Callable[[], None]) -> None:
+        if not self.session.cookie:
+            self.login(action)
+        elif self.validated_login:
+            action()
+        else:
+            cookie = self.session.cookie
+            def ready(profile) -> None:
+                self.nickname = profile.nickname
+                self.validated_login = True
+                action()
+            self.start_operation("校验登录", lambda cancel: fetch_account_profile(cookie, timeout=5), ready, retry=action)
 
-    def _login_with_browser(self) -> None:
-        from music_fetch.browser_login import BrowserLoginError, run_official_login
-
-        U.print_info("即将打开网易云音乐官网登录页（浏览器）...")
-        try:
-            cookie = run_official_login(
-                timeout=300,
-                on_status=lambda message: U.print_info(message),
-            )
-        except BrowserLoginError as err:
-            U.print_error(str(err))
-            return
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            return
-        self._accept_cookie(cookie)
-
-    def _accept_cookie(self, cookie: str) -> None:
-        cookie = normalize_cookie(cookie)
-        if "MUSIC_U=" not in cookie:
-            U.print_error("登录返回的数据里没有 MUSIC_U 凭证，请重试。")
-            return
-        U.print_info("校验登录状态...")
-        try:
-            profile = fetch_account_profile(cookie, timeout=self.session.detect_timeout_sec)
-        except MusicFetchError as err:
-            U.print_error(f"登录校验失败：{user_error_message(err.code, err.message)}")
-            return
-        self.session.cookie = cookie
-        self.session.remember_login = True
-        self.session_store.save(self.session)
-        self._nickname = profile.nickname
-        U.print_success(f"登录成功：{self._nickname or '已登录'}")
-
-    def _require_login(self) -> bool:
-        if self.session.cookie:
-            return True
-        U.print_warning(T.MSG_NEED_LOGIN_ANY)
-        return U.confirm("现在登录？", default=True) and self._login_and_return()
-
-    def _clear_login(self) -> None:
+    def clear_login(self) -> None:
         self.session.cookie = ""
         self.session.remember_login = False
-        self._nickname = ""
-        self.session_store.save(self.session)
-
-    def _handle_auth_expired(self) -> bool:
-        """Discard an expired app credential before starting a fresh QR login."""
-        self._clear_login()
-        U.print_warning("登录凭证已失效，需要重新扫码登录。")
-        return self._login_and_return()
-
-    def _login_and_return(self) -> bool:
-        self._screen_login()
-        return bool(self.session.cookie)
-
-    # ── single song ───────────────────────────────────────────────
-
-    def _screen_single(self) -> None:
-        U.print_header(MENU_SINGLE)
-        value = U.ask("粘贴歌曲链接 / 分享文案 / 歌曲 ID（回车返回）")
-        if not value:
-            return
-        if not self._require_login():
-            return
-        # Album links route into the batch flow (playlist links keep their
-        # dedicated entry under 我的歌单 / 批量下载).
+        self.nickname = ""
+        self.validated_login = False
+        self.queue.set_cookie("")
         try:
-            resource_type, resource_id = parse_input_resource(value)
-        except MusicFetchError:
-            resource_type, resource_id = "song", ""
-        if resource_type == "album":
-            U.print_info("检测到专辑链接，专辑将进入批量下载流程。")
-            if U.confirm(f"批量下载专辑（ID {resource_id}）？", default=True):
-                self._batch_flow(f"https://music.163.com/album?id={resource_id}")
-            return
-        with U.spinner("检测中..."):
-            try:
-                result = detect_song(value, self.session.cookie, timeout=self.session.detect_timeout_sec)
-            except MusicFetchError as err:
-                U.print_error(user_error_message(err.code, err.message))
-                if err.code == "AUTH_EXPIRED":
-                    self._handle_auth_expired()
-                return
-        rows = [
-            ("歌名", result.song_name or "未知"),
-            ("艺人", result.artist or "-"),
-            ("专辑", result.album_name or "-"),
-            ("音质", _quality_label(result.level, result.encode_type)),
-            ("时长", format_duration(result.duration_ms)),
-        ]
-        if result.can_download and result.media_url:
-            size_bytes = probe_media_size_bytes(result.media_url, timeout=min(8, self.session.detect_timeout_sec))
-            if size_bytes:
-                rows.append(("大小", format_bytes(size_bytes)))
-        U.print_panel("歌曲信息", rows)
-        if not result.can_download:
-            U.print_error(f"该歌曲不可下载：{result.unavailable_reason or '版权/地区/VIP 限制'}")
-            return
-        while True:
-            action = U.menu("下一步", ["直接下载", "试听（标准音质临时文件播放）", "返回"], shortcuts={"d": 1, "p": 2})
-            if action == 3:
-                return
-            if action == 2:
-                self._preview_song(result.song_id, result.song_name or "")
-                continue
-            break
-        self._download_song(
-            song_id=result.song_id,
-            song_name=result.song_name or "",
-            artist=result.artist,
-            album_name=result.album_name,
-            duration_ms=result.duration_ms,
-            cover_url=result.cover_url,
-        )
+            self.session_store.save(self.session)
+        except OSError as err:
+            self.notify(f"登录状态保存失败：{err}", True)
 
-    def _preview_song(self, song_id: str, song_name: str) -> None:
-        from music_fetch.audio import download_preview_to_temp
+    def login(self, after: Callable[[], None] | None = None) -> None:
+        if any(op.name == "扫码登录" and not op.cancel.is_set() for op in self.operations):
+            return
+        status = Label("正在打开隔离的官网扫码窗口…")
+        cancel_button = Button("取消登录", handler=self.close_modal)
+        self.show_modal(Dialog(title="网易云官网扫码", body=status, buttons=[cancel_button], with_background=False), cancel_button)
+        loop = asyncio.get_running_loop()
 
-        with U.spinner("准备试听（下载标准音质临时文件）..."):
-            try:
-                preview_path = download_preview_to_temp(
-                    song_id=song_id,
-                    song_name=song_name,
-                    cookie=self.session.cookie,
-                    timeout=self.session.download_timeout_sec,
-                )
-            except MusicFetchError as err:
-                U.print_error(user_error_message(err.code, err.message))
-                return
-        U.print_info(f"试听文件：{preview_path}")
-        self._open_path(preview_path)
+        def worker(cancel: threading.Event):
+            def update(message: str) -> None:
+                def apply() -> None:
+                    if not cancel.is_set():
+                        status.text = clean_text(message)
+                        self.application.invalidate()
+                loop.call_soon_threadsafe(apply)
+            cookie = normalize_cookie(run_official_login(on_status=update, cancel_event=cancel))
+            if cancel.is_set():
+                raise DownloadCanceled()
+            if "MUSIC_U=" not in cookie:
+                raise ValueError("扫码未返回有效登录凭据，请重试。")
+            profile = fetch_account_profile(cookie, timeout=self.session.detect_timeout_sec)
+            return cookie, profile
 
-    # ── search ────────────────────────────────────────────────────
+        def ready(result) -> None:
+            cookie, profile = result
+            draft = replace(self.session, cookie=cookie, remember_login=True)
+            self.session_store.save(draft)
+            self.session = draft
+            self.nickname = profile.nickname
+            self.validated_login = True
+            self.queue.set_cookie(cookie)
+            self._auth_notified = False
+            self.close_modal(cancel_operations=False)
+            self.notify(f"登录成功：{self.nickname or '已登录'}")
+            if after:
+                after()
+        self.start_operation("扫码登录", worker, ready)
 
-    def _screen_search(self) -> None:
-        U.print_header(MENU_SEARCH)
-        keyword = U.ask("输入歌曲名或歌手名（回车返回）")
-        if not keyword:
+    def detect_input(self) -> None:
+        raw = self.add_input.text.strip()
+        if not raw:
+            self.notify("请粘贴链接、歌曲 ID 或分享文案。")
             return
-        if not self._require_login():
-            return
-        with U.spinner("搜索中..."):
-            try:
-                results = search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
-            except MusicFetchError as err:
-                U.print_error(user_error_message(err.code, err.message))
-                if err.code == "AUTH_EXPIRED":
-                    self._handle_auth_expired()
-                return
-        if not results:
-            U.print_warning("未找到相关歌曲。")
-            return
-        # Paginate so one screen always fits in the terminal window.
-        page_size = 10
-        total_pages = (len(results) + page_size - 1) // page_size
-        page = 0
-        while True:
-            start = page * page_size
-            page_results = results[start:start + page_size]
-            rows = [
-                (
-                    str(index),
-                    r.song_name,
-                    r.artist or "-",
-                    r.album or "-",
-                    format_duration(r.duration_ms),
-                )
-                for index, r in enumerate(page_results, start=start + 1)
-            ]
-            U.print_table(["#", "歌名", "歌手", "专辑", "时长"], rows)
-            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(results)} 条")
-            while True:
-                raw = U.ask("输入序号下载（0 返回；n 下一页；p 上一页）").strip()
-                if not raw or raw == "0":
-                    return
-                if raw.lower() == "n":
-                    if page + 1 < total_pages:
-                        page += 1
-                        break
-                    U.print_warning("已经是最后一页。")
-                    continue
-                if raw.lower() == "p":
-                    if page > 0:
-                        page -= 1
-                        break
-                    U.print_warning("已经是第一页。")
-                    continue
-                if raw.isdigit():
-                    idx = int(raw) - 1  # 0-based index into results
-                    if start <= idx < start + len(page_results):
-                        picked = results[idx]
-                        while True:
-                            action = U.menu(
-                                f"《{picked.song_name}》",
-                                ["直接下载", "试听（标准音质临时文件播放）", "返回列表"],
-                                shortcuts={"d": 1, "p": 2},
-                            )
-                            if action == 3:
-                                break
-                            if action == 2:
-                                self._preview_song(picked.song_id, picked.song_name)
-                                continue
-                            self._download_song(
-                                song_id=picked.song_id,
-                                song_name=picked.song_name,
-                                artist=picked.artist or None,
-                                album_name=picked.album or None,
-                                duration_ms=picked.duration_ms,
-                            )
-                            return
-                        continue
-                U.print_warning(f"请输入 {start + 1}-{start + len(page_results)} 的序号，0 返回，n/p 翻页。")
+        self._playlist_return = False
+        self.ensure_login(lambda: self.detect(raw))
 
-    def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
-        """Ask the user to pick a numbered row (1..count) or return (0 / empty)."""
-        while True:
-            raw = U.ask(f"{prompt}（0 返回）")
-            if not raw or raw == "0":
-                return None
-            if raw.isdigit() and 1 <= int(raw) <= count:
-                return int(raw)
-            U.print_warning(f"请输入 1-{count} 的序号，或 0 返回。")
+    def detect(self, raw: str) -> None:
+        cookie = self.session.cookie
+        self.start_operation("识别歌曲", lambda cancel: run_batch_detect(
+            raw, cookie, self.session.detect_timeout_sec, cancel_event=cancel), self.show_batch,
+            retry=lambda: self.detect(raw))
 
-    # ── user playlists ────────────────────────────────────────────
+    def show_batch(self, rows: list[BatchDetectRow]) -> None:
+        auth = next((row for row in rows if "AUTH_EXPIRED" in row.message), None)
+        if auth:
+            self.clear_login()
+            self.notify("识别中登录过期，可重新登录后再次提交。", True)
+        self.batch_rows = {f"{i}:{row.song_id}": row for i, row in enumerate(rows)}
+        choices = [Choice(key, row.song_name or row.song_id or row.raw_input,
+                          f"{row.artist} · {row.album_name} · {format_bytes(row.media_size_bytes) if row.media_size_bytes else '大小未知'} · {row.message or row.status}",
+                          row.status == "ready") for key, row in self.batch_rows.items()]
+        self.batch_list.selected.clear()
+        self.batch_list.set_rows(choices)
+        self.batch_list.select_all()
+        self.page = "batch"
+        self.modals.clear()
+        self._focus_page()
+        self.notify(f"识别完成：{len(rows)} 条，可下载 {sum(row.status == 'ready' for row in rows)} 条。")
 
-    def _screen_playlists(self) -> None:
-        U.print_header(MENU_PLAYLISTS)
-        if not self._require_login():
-            return
-        with U.spinner("获取歌单列表..."):
-            try:
-                playlists = fetch_user_playlists(self.session.cookie, timeout=self.session.detect_timeout_sec)
-            except MusicFetchError as err:
-                U.print_error(user_error_message(err.code, err.message))
-                if err.code == "AUTH_EXPIRED":
-                    self._handle_auth_expired()
-                return
-        if not playlists:
-            U.print_warning("暂无歌单。")
-            return
-        page_size = 10
-        total_pages = (len(playlists) + page_size - 1) // page_size
-        page = 0
-        while True:
-            start = page * page_size
-            page_playlists = playlists[start:start + page_size]
-            rows = [
-                (
-                    str(index),
-                    pl.name,
-                    str(pl.song_count),
-                    pl.creator or "-",
-                )
-                for index, pl in enumerate(page_playlists, start=start + 1)
-            ]
-            U.print_table(["#", "歌单", "歌数", "创建者"], rows)
-            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(playlists)} 个歌单")
-            while True:
-                raw = U.ask("输入序号（0 返回；n 下一页；p 上一页）").strip()
-                if not raw or raw == "0":
-                    return
-                if raw.lower() == "n":
-                    if page + 1 < total_pages:
-                        page += 1
-                        break
-                    U.print_warning("已经是最后一页。")
-                    continue
-                if raw.lower() == "p":
-                    if page > 0:
-                        page -= 1
-                        break
-                    U.print_warning("已经是第一页。")
-                    continue
-                if raw.isdigit():
-                    index = int(raw) - 1
-                    if start <= index < start + len(page_playlists):
-                        picked = playlists[index]
-                        self._batch_flow(f"https://music.163.com/playlist?id={picked.playlist_id}")
-                        return
-                U.print_warning(
-                    f"请输入 {start + 1}-{start + len(page_playlists)} 的序号，0 返回，n/p 翻页。"
-                )
-
-    # ── batch ─────────────────────────────────────────────────────
-
-    def _screen_batch(self) -> None:
-        U.print_header(MENU_BATCH)
-        if not self._require_login():
-            return
-        text = U.input_multiline("粘贴多行链接 / 歌单链接 / 分享文案（留空返回）")
-        if not text.strip():
-            return
-        self._batch_flow(text)
-
-    def _batch_flow(self, raw_input: str) -> None:
-        U.print_info("批量识别中...")
-        detect_total = [0]
-        try:
-            rows = run_batch_detect(
-                raw_input,
-                self.session.cookie,
-                timeout=self.session.detect_timeout_sec,
-                detect_concurrency=5,
-                on_progress=lambda current, total, song_id: self._detect_progress(current, total, detect_total),
-            )
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            if err.code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-            return
-        if detect_total[0] > 0:
-            print()
-        if not rows:
-            U.print_warning("未识别到任何歌曲，请检查输入内容。")
-            return
-        summary = summarize_batch_rows(rows)
-        U.print_info(
-            f"识别完成：共 {summary.total} 条，可下载 {summary.ready} 条，"
-            f"重复 {summary.duplicate} 条，失败/不可下载 {summary.bad} 条。"
-        )
-        table_rows = [
-            (
-                f"{index}",
-                row.song_name or row.song_id,
-                format_bytes(row.media_size_bytes) if row.media_size_bytes else "-",
-                T.batch_detect_status_text(row.status),
-            )
-            for index, row in enumerate(rows, start=1)
-        ]
-        U.print_table(["#", "歌曲", "大小", "状态"], table_rows)
-        ready = [row for row in rows if row.status == "ready"]
-        if not ready:
-            U.print_warning("没有可下载的歌曲。")
-            self._offer_batch_export(rows)
-            return
-        entries = [
-            (f"{row.song_name or row.song_id}（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）", row.selected)
-            for row in ready
-        ]
-        selected = U.multiselect("选择要下载的歌曲（空格勾选，回车确定，Esc 取消）", entries)
+    def download_selection(self) -> None:
+        selected = [row for key, row in self.batch_rows.items() if key in self.batch_list.selected and row.status == "ready"]
         if not selected:
-            self._offer_batch_export(rows)
+            self.notify("请用空格勾选可下载歌曲。")
             return
-        chosen = [ready[index] for index in selected]
-        out_dir_raw = self._ask_with_cancel(
-            "保存目录（直接回车用默认；输入 0 取消）", default=self.session.last_download_dir
-        )
-        if out_dir_raw is None:
-            return
-        out_dir = Path(out_dir_raw).expanduser()
-        target_format = self._pick_format()
-        if target_format is None:
-            return
-        lyric_mode = "bilingual" if U.confirm("同时下载歌词（原文 + 翻译合并）？", default=False) else "original"
-        session = BatchDownloadSession(
-            rows=chosen,
-            out_dir=out_dir,
-            cookie=self.session.cookie,
-            history_store=self.history_store,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            concurrency=self.session.download_concurrency,
-            download_lyric=lyric_mode != "original",
-            lyric_mode=lyric_mode,
-        )
-        self._run_batch_session(session)
-        self.session.last_download_dir = str(out_dir)
-        self.session_store.save(self.session)
-        if session.auth_expired:
-            self._handle_auth_expired()
-            return
-        failed_rows = retryable_failed_rows(rows)
-        if failed_rows and U.confirm(f"有 {len(failed_rows)} 首下载失败，是否重试？", default=False):
-            retry_session = BatchDownloadSession(
-                rows=failed_rows,
-                out_dir=out_dir,
-                cookie=self.session.cookie,
-                history_store=self.history_store,
-                target_format=target_format,
-                timeout=self.session.download_timeout_sec,
-                retry_count=self.session.download_retry_count,
-                concurrency=self.session.download_concurrency,
-                download_lyric=lyric_mode != "original",
-                lyric_mode=lyric_mode,
-            )
-            self._run_batch_session(retry_session)
-            if retry_session.auth_expired:
-                self._handle_auth_expired()
-                return
-        self._offer_batch_export(rows)
+        self.open_download([self.request_for_row(row) for row in selected])
 
-    @staticmethod
-    def _detect_progress(current: int, total: int, state: list[int]) -> None:
-        state[0] = total
-        sys.stdout.write(f"\r  识别中 {current}/{total} ...    ")
-        sys.stdout.flush()
+    def request_for_row(self, row: BatchDetectRow) -> DownloadRequest:
+        return DownloadRequest(row.song_id, row.song_name, self.default_options(), row.artist, row.album_name, row.cover_url)
 
-    def _offer_batch_export(self, rows) -> None:
-        if not rows:
-            return
-        if not U.confirm("导出批次结果 CSV？", default=False):
-            return
-        default_path = Path(self.session.last_download_dir).expanduser() / (
-            f"batch_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        )
-        target = Path(U.ask("导出路径", default=str(default_path))).expanduser()
-        if not target.suffix:
-            target = target.with_suffix(".csv")
-        try:
-            target.write_text(build_batch_results_csv(rows), encoding="utf-8-sig")
-            U.print_success(f"批次结果已导出：{target}")
-        except OSError as err:
-            U.print_error(f"导出失败：{err}")
+    def default_options(self) -> DownloadOptions:
+        return DownloadOptions(self.session.last_download_dir, self.session.default_target_format, self.session.default_lyric_mode)
 
-    # ── download runner / progress UI ─────────────────────────────
-
-    def _run_job(self, job: DownloadJob) -> Optional[DownloadJobResult]:
-        kb = KeyBindings()
-
-        @kb.add("p")
-        def _toggle_pause(event):  # noqa: ANN001 - prompt_toolkit event
-            if job.is_paused:
-                job.request_resume()
-            else:
-                job.request_pause()
-
-        @kb.add("c")
-        def _cancel(event):  # noqa: ANN001
-            job.request_cancel()
-
-        @kb.add("c-c")
-        def _cancel_ctrl_c(event):  # noqa: ANN001
-            job.request_cancel()
-
-        job.start()
-        with ProgressBar(
-            title="下载中 — p 暂停/继续 · c 取消",
-            key_bindings=kb,
-            style=U.PROGRESS_STYLE,
-        ) as pb:
-            counter: ProgressBarCounter[object] = pb(total=None, label="准备下载...")
-            while job.state() in JOB_RUNNING_STATES:
-                snap = job.progress()
-                counter.total = snap.total if snap.total > 0 else None
-                counter.items_completed = snap.downloaded
-                paused = "已暂停 · " if job.is_paused else ""
-                size_text = (
-                    f"{format_bytes(snap.downloaded)}/{format_bytes(snap.total)}"
-                    if snap.total > 0
-                    else format_bytes(snap.downloaded)
-                )
-                counter.label = f"{paused}{size_text} · {format_speed(snap.speed)}"
-                pb.invalidate()
-                time.sleep(0.1)
-        return job.result()
-
-    def _run_batch_session(self, session: BatchDownloadSession) -> None:
-        kb = KeyBindings()
-
-        @kb.add("p")
-        def _pause_all(event):  # noqa: ANN001
-            session.request_pause_all()
-
-        @kb.add("r")
-        def _resume_all(event):  # noqa: ANN001
-            session.request_resume_all()
-
-        @kb.add("c")
-        def _cancel_all(event):  # noqa: ANN001
-            session.request_cancel_all()
-
-        @kb.add("c-c")
-        def _cancel_ctrl_c(event):  # noqa: ANN001
-            session.request_cancel_all()
-
-        total_rows = session.counters().total
-        with ProgressBar(
-            title="批量下载 — p 暂停全部 · r 恢复全部 · c 取消",
-            key_bindings=kb,
-            style=U.PROGRESS_STYLE,
-        ) as pb:
-            counter: ProgressBarCounter[object] = pb(total=total_rows if total_rows else None, label="准备...")
-            while not session.done:
-                session.poll()
-                counts = session.counters()
-                partial = 0.0
-                active_labels: list[str] = []
-                for label, snap in session.active_jobs():
-                    if snap.total > 0:
-                        partial += min(snap.downloaded / snap.total, 1.0)
-                    active_labels.append(f"{label[:16]} {format_bytes(snap.downloaded)}")
-                counter.items_completed = int(counts.cursor + partial)
-                state = "已暂停" if counts.paused else ("取消中" if counts.cancel_requested else "下载中")
-                detail = " · ".join(active_labels[:2]) if active_labels else "等待任务启动"
-                counter.label = (
-                    f"{state} {counts.cursor}/{counts.total} 成功 {counts.success} "
-                    f"失败 {counts.failed} 取消 {counts.canceled} | {detail}"
-                )
-                pb.invalidate()
-                time.sleep(0.1)
-        title = "批量下载已停止" if session.stopped else "批量下载完成"
-        U.print_panel(title, session.summary_panel_rows())
-
-    # ── download options ──────────────────────────────────────────
-
-    def _ask_with_cancel(self, prompt: str, default: str = "") -> Optional[str]:
-        """Ask for input; empty input uses *default*, '0' cancels (None).
-
-        Lets a first-time user bail out of a multi-step wizard instead of
-        being stuck guessing how to go back.
-        """
-        while True:
-            raw = U.ask(prompt, default=default)
-            if raw == "0":
-                return None
-            if raw:
-                return raw
-            if default:
-                return default
-            U.print_warning("输入不能为空（输入 0 取消）。")
-
-    def _pick_format(self) -> Optional[str]:
-        formats = list(SUPPORTED_GUI_AUDIO_FORMATS)
-        labels = formats[:] + ["取消"]
-        if not is_ffmpeg_available():
-            U.print_warning("未安装 ffmpeg：其他格式会自动回退保存为源格式（仅 mp3 一定可用）。")
-        choice = U.menu("选择下载格式", labels)
-        if choice == len(labels):
-            return None
-        return formats[choice - 1]
-
-    @staticmethod
-    def _pick_lyric_mode() -> tuple[bool, str]:
-        """Ask for a lyric mode; returns (download_lyric, lyric_mode)."""
-        choice = U.menu(
-            "歌词模式",
-            ["不下载歌词", "原文歌词", "双语合并（原文 + 翻译）", "仅翻译歌词"],
-        )
-        modes = ["original", "bilingual", "translation"]
-        if choice == 1:
-            return False, "original"
-        return True, modes[choice - 2]
-
-    def _download_song(
-        self,
-        song_id: str,
-        song_name: str,
-        artist: Optional[str] = None,
-        album_name: Optional[str] = None,
-        duration_ms: Optional[int] = None,
-        cover_url: Optional[str] = None,
-    ) -> bool:
-        out_dir_raw = self._ask_with_cancel(
-            "保存目录（直接回车用默认；输入 0 取消）", default=self.session.last_download_dir
-        )
-        if out_dir_raw is None:
-            return False
-        out_dir = Path(out_dir_raw).expanduser()
-        suggested = sanitize_filename(f"{song_name}-{song_id}" if song_name else f"song-{song_id}")
-        rename = self._ask_with_cancel(
-            "文件名（不含后缀；直接回车用默认；输入 0 取消）", default=suggested
-        )
-        if rename is None:
-            return False
-        target_format = self._pick_format()
-        if target_format is None:
-            return False
-        download_lyric, lyric_mode = self._pick_lyric_mode()
-        try:
-            output_path = resolve_output_path(
-                out_dir=out_dir,
-                song_id=song_id,
-                song_name=song_name or None,
-                rename=rename,
-                out_format=target_format,
-            )
-        except MusicFetchError as err:
-            U.print_error(user_error_message(err.code, err.message))
-            return False
-        U.print_info(f"输出：{output_path}")
-        job = DownloadJob(
-            task_id=build_task_id(song_id),
-            song_id=song_id,
-            output_path=output_path,
-            cookie=self.session.cookie,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            tags={
-                "title": song_name or "",
-                "artist": artist,
-                "album": album_name,
-                "cover_url": cover_url,
-            },
-            download_lyric=download_lyric,
-            lyric_mode=lyric_mode,
-        )
-        result = self._run_job(job)
-        self.session.last_download_dir = str(out_dir)
-        self.session_store.save(self.session)
-        if result is None:
-            U.print_error("下载任务异常结束。")
-            return False
-        if result.state == "success":
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=result.file_size,
-                status=TASK_STATE_SUCCESS,
-            )
-            U.print_panel(
-                "下载完成",
-                [
-                    ("文件", str(result.output_path)),
-                    ("大小", format_bytes(result.file_size)),
-                ],
-            )
-            if U.confirm("打开所在文件夹？", default=False):
-                self._open_path(result.output_path.parent)
-            return True
-        if result.state == "canceled":
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=0,
-                status=TASK_STATE_CANCELED,
-            )
-            U.print_warning("下载已取消。")
-        else:
-            self._add_record(
-                song_id=song_id,
-                song_name=song_name,
-                output_path=str(result.output_path),
-                size_bytes=0,
-                status=TASK_STATE_FAILED,
-                error_code=result.error_code,
-            )
-            U.print_error(f"下载失败：{user_error_message(result.error_code, result.error_message)}")
-            if result.error_code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
-        return False
-
-    def _add_record(
-        self,
-        song_id: str,
-        song_name: str,
-        output_path: str,
-        size_bytes: int,
-        status: str,
-        error_code: str = "",
-    ) -> None:
-        self.history_store.add(
-            DownloadRecord(
-                song_id=song_id,
-                song_name=song_name or f"song-{song_id}",
-                output_path=output_path,
-                size_bytes=size_bytes,
-                downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                status=status,
-                error_code=error_code,
-            )
-        )
-
-    # ── history ───────────────────────────────────────────────────
-
-    def _screen_history(self) -> None:
-        status_filter = "all"
-        query = ""
-        page = 0
-        while True:
-            records = self.history_store.load()
-            filtered = filter_download_history(records, status_filter=status_filter, query=query)
-            page_records, total_pages, page = paginate_download_history(filtered, page)
-            U.print_header(MENU_HISTORY)
-            if query:
-                U.print_info(f"搜索：{query}")
-            U.print_info(f"状态：{self._filter_label(status_filter)}")
-            if not filtered:
-                U.print_warning(T.MSG_DOWNLOADS_EMPTY if not records else T.MSG_DOWNLOADS_FILTER_EMPTY)
-            else:
-                rows = [
-                    (
-                        str(index),
-                        record.song_name,
-                        Path(record.output_path).name,
-                        T.manager_status_text(record.status),
-                        format_bytes(record.size_bytes) if record.size_bytes else "-",
-                        record.downloaded_at,
-                    )
-                    for index, record in enumerate(page_records, start=1)
-                ]
-                U.print_table(["#", "歌曲", "文件名", "状态", "大小", "时间"], rows)
-                U.print_info(
-                    f"第 {page + 1 if total_pages else 0}/{total_pages} 页 · 共 {len(filtered)} 条"
-                )
-            record_actions = [
-                f"操作第 {index} 条（{page_records[index - 1].song_name}）"
-                for index in range(1, len(page_records) + 1)
-            ]
-            actions = record_actions + ["搜索关键词", "状态筛选", "上一页", "下一页", "导出筛选结果 CSV", "返回"]
-            choice = U.menu("操作", actions)
-            if choice <= len(page_records):
-                self._history_record_actions(page_records[choice - 1])
-            elif actions[choice - 1] == "搜索关键词":
-                query = U.ask("搜索（歌曲名/ID/文件名/路径/错误码，留空清除）")
-                page = 0
-            elif actions[choice - 1] == "状态筛选":
-                status_filter = self._pick_status_filter()
-                page = 0
-            elif actions[choice - 1] == "上一页" and page > 0:
-                page -= 1
-            elif actions[choice - 1] == "下一页" and page + 1 < total_pages:
-                page += 1
-            elif actions[choice - 1] == "导出筛选结果 CSV":
-                self._export_history_csv(filtered)
-            else:
-                return
-
-    @staticmethod
-    def _filter_label(status_filter: str) -> str:
-        mapping = {
-            "all": T.MANAGER_FILTER_ALL,
-            "success": T.MANAGER_FILTER_SUCCESS,
-            "failed": T.MANAGER_FILTER_FAILED,
-            "canceled": T.MANAGER_FILTER_CANCELED,
-            "pending": T.MANAGER_FILTER_PENDING,
-            "downloading": T.MANAGER_FILTER_DOWNLOADING,
-        }
-        return mapping.get(status_filter, status_filter)
-
-    def _pick_status_filter(self) -> str:
-        options = [
-            T.MANAGER_FILTER_ALL,
-            T.MANAGER_FILTER_SUCCESS,
-            T.MANAGER_FILTER_FAILED,
-            T.MANAGER_FILTER_CANCELED,
-            T.MANAGER_FILTER_PENDING,
-            T.MANAGER_FILTER_DOWNLOADING,
-        ]
-        keys = ["all", "success", "failed", "canceled", "pending", "downloading"]
-        choice = U.menu("状态筛选", options)
-        return keys[choice - 1]
-
-    def _export_history_csv(self, filtered) -> None:
-        if not filtered:
-            U.print_warning(T.MANAGER_EXPORT_EMPTY)
-            return
-        default_path = Path(self.session.last_download_dir).expanduser() / (
-            f"download-history-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
-        )
-        target = Path(U.ask("导出路径", default=str(default_path))).expanduser()
-        if not target.suffix:
-            target = target.with_suffix(".csv")
-        try:
-            target.write_text(build_download_history_csv(filtered), encoding="utf-8-sig")
-            U.print_success(f"下载历史已导出：{target}")
-        except OSError as err:
-            U.print_error(f"导出失败：{err}")
-
-    def _history_record_actions(self, record: DownloadRecord) -> None:
-        U.print_header("记录操作")
-        U.print_info(
-            f"{record.song_name}（{record.song_id}）· {T.manager_status_text(record.status)} · {record.output_path}"
-        )
-        options = ["打开所在文件夹", "删除文件并移除记录"]
-        if record.status == TASK_STATE_FAILED:
-            options.append("重试下载")
-        options.append("返回")
-        choice = U.menu("操作", options)
-        action = options[choice - 1]
-        if action == "打开所在文件夹":
-            self._open_path(Path(record.output_path).expanduser().parent)
-        elif action == "删除文件并移除记录":
-            path = Path(record.output_path).expanduser()
-            if U.confirm(f"确定删除文件并移除记录？\n{path}", default=False):
-                try:
-                    if path.exists():
-                        path.unlink()
-                except OSError as err:
-                    U.print_warning(f"删除文件失败：{err}")
-                self.history_store.remove_by_path(str(path))
-                U.print_success("已删除。")
-        elif action == "重试下载":
-            self._retry_record(record)
-
-    def _retry_record(self, record: DownloadRecord) -> None:
+    def open_download(self, requests: list[DownloadRequest], *, force: bool = False) -> None:
         if not self.session.cookie:
-            U.print_warning(T.MSG_NEED_LOGIN_ANY)
-            self._login_and_return()
-            if not self.session.cookie:
-                return
-        output_path = Path(record.output_path).expanduser()
-        target_format = retry_target_format(output_path)
-        job = DownloadJob(
-            task_id=build_task_id(record.song_id),
-            song_id=record.song_id,
-            output_path=output_path,
-            cookie=self.session.cookie,
-            target_format=target_format,
-            timeout=self.session.download_timeout_sec,
-            retry_count=self.session.download_retry_count,
-            tags={"title": record.song_name, "artist": None, "album": None, "cover_url": None},
-        )
-        result = self._run_job(job)
-        self.history_store.remove_by_path(str(output_path))
-        if result is None:
+            self.login(lambda: self.open_download(requests, force=force))
             return
-        if result.state == "success":
-            size = result.output_path.stat().st_size if result.output_path.exists() else 0
-            self._add_record(
-                record.song_id, record.song_name, str(result.output_path), size, TASK_STATE_SUCCESS,
-            )
-            U.print_success(f"重试成功：{result.output_path}")
-        elif result.state == "canceled":
-            self._add_record(
-                record.song_id, record.song_name, str(output_path), 0, TASK_STATE_CANCELED,
-            )
-        else:
-            self._add_record(
-                record.song_id, record.song_name, str(output_path), 0, TASK_STATE_FAILED,
-                error_code=result.error_code,
-            )
-            U.print_error(f"重试失败：{user_error_message(result.error_code, result.error_message)}")
-            if result.error_code == "AUTH_EXPIRED":
-                self._handle_auth_expired()
+        options = requests[0].options
+        if len(requests) == 1 and not options.rename:
+            options = replace(options, rename=sanitize_filename(f"{requests[0].song_name or 'song'}-{requests[0].song_id}"))
 
-    @staticmethod
-    def _open_path(path: Path) -> None:
-        """Open a file or folder with the system default handler."""
-        if not path.exists():
-            U.print_warning(f"路径不存在：{path}")
+        def save(chosen: DownloadOptions) -> None:
+            # Save first so a persistence failure cannot silently enqueue a second copy on retry.
+            draft = replace(self.session, last_download_dir=chosen.out_dir)
+            self.session_store.save(draft)
+            self.session = draft
+            before = len(self.queue.items)
+            for request in requests:
+                self.queue.enqueue(replace(request, options=chosen), force=force)
+            self.modals.clear()
+            self._focus_page()
+            self.refresh_tasks()
+            self.notify(f"已处理 {len(requests)} 首，新增 {len(self.queue.items) - before} 个任务；F5 查看进度。")
+        form = DownloadForm(options, len(requests), save, self.close_modal, self._ffmpeg)
+        self.show_modal(form.dialog, form.submit)
+
+    def batch_detail(self) -> None:
+        current = self.batch_list.current
+        if not current:
+            return
+        row = self.batch_rows[current.key]
+        actions: list[tuple[str, Callable[[], None]]] = []
+        if row.status == "ready":
+            actions = [("下载", lambda: self.open_download([self.request_for_row(row)])),
+                       ("试听", lambda: self.preview(row.song_id, row.song_name))]
+        self.show_text(row.song_name or "识别结果", f"歌曲：{row.song_name}\n歌手：{row.artist}\n专辑：{row.album_name}\n"
+                       f"时长：{format_duration(row.duration_ms)}\n大小：{format_bytes(row.media_size_bytes)}\n"
+                       f"状态：{row.status}\n{row.message}", actions)
+
+    def _accept_search(self) -> bool:
+        self.search()
+        return True
+
+    def search(self) -> None:
+        keyword = self.search_input.text.strip()
+        if not keyword:
+            self.notify("请输入歌曲名或歌手名。")
+            return
+        def action() -> None:
+            self.start_operation("搜索", lambda cancel: search_songs(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec),
+                                 self.show_search, retry=self.search)
+        self.ensure_login(action)
+
+    def show_search(self, results: list[SearchResult]) -> None:
+        self.search_loaded = True
+        self.search_results = {row.song_id: row for row in results}
+        self.search_list.set_rows([Choice(row.song_id, row.song_name,
+                                         f"{row.artist} · {row.album} · {format_duration(row.duration_ms)}") for row in results])
+        self.application.layout.focus(self.search_list)
+        self.notify(f"找到 {len(results)} 首歌曲。" if results else "未找到相关歌曲，可修改关键词重试。")
+
+    def search_detail(self, key: str) -> None:
+        row = self.search_results[key]
+        request = DownloadRequest(row.song_id, row.song_name, self.default_options(), row.artist or "", row.album or "")
+        self.show_text(row.song_name, f"歌名：{row.song_name}\n歌手：{row.artist}\n专辑：{row.album}\n时长：{format_duration(row.duration_ms)}",
+                       [("下载", lambda: self.open_download([request])), ("试听", lambda: self.preview(row.song_id, row.song_name))])
+
+    def preview(self, song_id: str, song_name: str) -> None:
+        self.ensure_login(lambda: self.start_operation("准备试听", lambda cancel: download_preview_to_temp(
+            song_id, song_name, self.session.cookie, self.session.download_timeout_sec, cancel_checker=cancel.is_set),
+            self.open_path, retry=lambda: self.preview(song_id, song_name)))
+
+    def load_playlists(self) -> None:
+        self.ensure_login(lambda: self.start_operation("获取歌单", lambda cancel: fetch_user_playlists(
+            self.session.cookie, timeout=self.session.detect_timeout_sec), self.show_playlists, retry=self.load_playlists))
+
+    def show_playlists(self, playlists: list[UserPlaylist]) -> None:
+        self.playlists_loaded = True
+        self.playlists = {row.playlist_id: row for row in playlists}
+        self.playlist_list.set_rows([Choice(row.playlist_id, row.name, f"{row.song_count} 首 · {row.creator}") for row in playlists])
+        self.application.layout.focus(self.playlist_list)
+        self.notify(f"共 {len(playlists)} 个歌单。" if playlists else "账号暂无歌单。")
+
+    def playlist_detail(self, key: str) -> None:
+        self._playlist_return = True
+        self.ensure_login(lambda: self.detect(f"https://music.163.com/playlist?id={key}"))
+
+    def refresh_tasks(self) -> None:
+        self.task_list.set_rows([Choice(item.task_id, item.request.song_name,
+            f"{STATE_LABELS[item.state]} · {STAGE_LABELS.get(item.progress.stage, '') if item.state in {'running', 'paused'} else item.message} · "
+            f"{format_bytes(item.progress.downloaded) if item.state not in FINAL_STATES else format_bytes(item.size_bytes)}") for item in self.queue.items])
+
+    def task_detail(self, key: str) -> None:
+        item = self.queue.get(key)
+        actions: list[tuple[str, Callable[[], None]]] = []
+        if item.state in {"failed", "canceled"}:
+            actions.append(("重试", lambda: self.retry_task(key)))
+        elif item.state in {"success", "skipped"}:
+            actions += [("打开目录", lambda: self.open_path(item.output_path.parent)),
+                        ("重新下载", lambda: self.open_download([item.request], force=True))]
+        elif item.state == "waiting_login":
+            actions.append(("登录继续", lambda: self.login()))
+        else:
+            actions += [("暂停/继续", lambda: self.toggle_task(key)), ("取消任务", lambda: self.cancel_task(key))]
+        self.show_text(item.request.song_name, f"状态：{STATE_LABELS[item.state]}\n文件：{item.output_path}\n"
+                       f"格式：{item.request.options.target_format}\n歌词：{item.request.options.lyric_mode}\n{item.message}", actions)
+
+    def _task_key(self, key: str | None) -> str | None:
+        return key or (self.task_list.current.key if self.task_list.current else None)
+
+    def toggle_task(self, key: str | None = None) -> None:
+        key = self._task_key(key)
+        if key:
+            item = self.queue.get(key)
+            if item.state == "paused":
+                self.queue.resume(key)
+            else:
+                self.queue.pause(key)
+            self.refresh_tasks()
+            self.notify(f"{item.request.song_name}：{STATE_LABELS[item.state]}")
+
+    def cancel_task(self, key: str | None = None) -> None:
+        key = self._task_key(key)
+        if key:
+            self.queue.cancel(key)
+            self.refresh_tasks()
+            self.notify("已取消任务；运行中的任务正在清理。")
+
+    def retry_task(self, key: str | None = None) -> None:
+        key = self._task_key(key)
+        if key:
+            item = self.queue.get(key)
+            if item.state in {"failed", "canceled"}:
+                self.open_download([item.request])
+            else:
+                self.notify("只有失败或取消的任务需要重试。")
+
+    def confirm_cancel_all(self) -> None:
+        if self.queue.unfinished:
+            self.confirm("取消所有任务", f"取消 {len(self.queue.unfinished)} 个未完成任务？", self.queue.cancel_all)
+
+    def refresh_history(self) -> None:
+        try:
+            rows = filter_download_history(self.history_store.load(), query=self.history_filter.text,
+                                           status_filter=self.history_status.value)
+            self.records = {record.output_path: record for record in rows}
+            self.history_list.set_rows([Choice(record.output_path, record.song_name,
+                f"{STATE_LABELS.get(record.status, record.status)} · {record.downloaded_at} · {Path(record.output_path).name}") for record in rows])
+        except OSError as err:
+            self.notify(f"历史读取失败：{err}", True)
+
+    def _cycle_history_status(self) -> None:
+        self.history_status.cycle()
+        self.refresh_history()
+
+    def history_detail(self, key: str) -> None:
+        record = self.records[key]
+        actions = [("打开目录", lambda: self.open_path(Path(record.output_path).expanduser().parent)),
+                   ("重试" if record.status in {"failed", "canceled"} else "重新下载",
+                    lambda: self.open_download([DownloadRequest.from_record(record)], force=record.status == "success")),
+                   ("删除", lambda: self.confirm("删除文件与记录", f"确认删除？\n{record.output_path}", lambda: self.delete_record(record)))]
+        self.show_text(record.song_name, f"歌曲：{record.song_name}\n状态：{STATE_LABELS.get(record.status, record.status)}\n"
+                       f"文件：{record.output_path}\n大小：{format_bytes(record.size_bytes)}\n时间：{record.downloaded_at}\n"
+                       f"{user_error_message(record.error_code, '') if record.error_code else ''}", actions)
+
+    def delete_record(self, record: DownloadRecord) -> None:
+        path = Path(record.output_path).expanduser()
+        if any(item.output_path == path for item in self.queue.unfinished):
+            self.notify("该文件有未完成任务，请先取消任务。", True)
             return
         try:
+            path.unlink(missing_ok=True)
+            self.history_store.remove_by_path(record.output_path)
+        except OSError as err:
+            self.notify(f"删除失败，记录已保留：{err}", True)
+            return
+        self.modals.clear()
+        self._focus_page()
+        self.refresh_history()
+        self.notify("文件和记录已删除。")
+
+    def export_text(self, title: str, content: str, filename: str) -> None:
+        target = TextArea(text=str(Path(self.session.last_download_dir).expanduser() / filename), multiline=False)
+        error = Label("")
+        def save() -> None:
+            path = Path(target.text).expanduser()
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("x", encoding="utf-8-sig") as handle:
+                    handle.write(content)
+                self.close_modal(cancel_operations=False)
+                self.notify(f"已导出：{path}")
+            except FileExistsError:
+                error.text = "文件已存在，请更换文件名。"
+            except OSError as err:
+                error.text = f"导出失败：{err}"
+        submit = Button("导出", handler=save)
+        dialog = Dialog(title=title, body=HSplit([Label("导出路径"), target, error]),
+                        buttons=[submit, Button("返回", handler=self.close_modal)], with_background=False)
+        self.show_modal(dialog, submit)
+
+    def export_batch(self) -> None:
+        self.export_text("导出识别结果", build_batch_results_csv(list(self.batch_rows.values())), self.export_name("batch", "csv"))
+
+    def export_history(self) -> None:
+        self.export_text("导出筛选历史", build_download_history_csv(list(self.records.values())), self.export_name("history", "csv"))
+
+    @staticmethod
+    def export_name(prefix: str, suffix: str) -> str:
+        return f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.{suffix}"
+
+    def settings_action(self, key: str) -> None:
+        if key in {"general", "network", "performance"}:
+            form = SettingsForm(self.session, lambda draft: self.save_settings(draft, key), self.close_modal, key)
+            self.show_modal(form.dialog, form.submit)
+        elif key == "login":
+            self.login()
+        elif key == "logout":
+            self.confirm("退出账号", "退出账号会取消未完成任务，历史记录保留。", self.logout)
+        elif key == "diagnostics":
+            self.diagnostics()
+        elif key == "update":
+            self.check_update()
+
+    def save_settings(self, draft: AppSession, section: str) -> None:
+        names = {"general": ["last_download_dir", "default_target_format", "default_lyric_mode", "ui_theme"],
+                 "network": ["proxy_type", "proxy_host", "proxy_port", "proxy_username", "proxy_password"],
+                 "performance": ["detect_timeout_sec", "download_timeout_sec", "download_retry_count", "download_concurrency"]}[section]
+        # Merge only edited preferences; a background login expiry may have changed credentials.
+        saved = replace(self.session, **{name: getattr(draft, name) for name in names})
+        self.session_store.save(saved)
+        self.session = saved
+        self._apply_proxy()
+        self.queue.concurrency = saved.download_concurrency
+        self.queue.timeout = saved.download_timeout_sec
+        self.queue.retry_count = saved.download_retry_count
+        self.close_modal(cancel_operations=False)
+        self.notify("设置已保存。")
+
+    def logout(self) -> None:
+        self.queue.cancel_all()
+        self.clear_login()
+        self.playlists_loaded = False
+        self.playlists.clear()
+        self.playlist_list.set_rows([])
+        self.notify("已退出账号，设置和历史仍可使用。")
+
+    def diagnostics(self) -> None:
+        session = replace(self.session)
+        def worker(cancel: threading.Event) -> str:
+            probes = run_network_diagnostics(timeout=5)
+            context = DiagnosticContext(APP_VERSION, default_log_path(), bool(session.cookie), session.proxy_type,
+                                        session.proxy_host, session.proxy_port, bool(session.proxy_username), is_ffmpeg_available())
+            return build_diagnostic_report(context, probes=probes, log_tail=read_log_tail(default_log_path()),
+                                           sensitive_values=[session.cookie, session.proxy_password])
+        def done(report: str) -> None:
+            self.show_text("诊断结果", report, [("导出报告", lambda: self.export_text("导出诊断报告", report, self.export_name("diagnostics", "txt")))])
+        self.start_operation("网络诊断", worker, done)
+
+    def check_update(self) -> None:
+        def done(result: tuple[str, str]) -> None:
+            latest, url = result
+            text = f"当前版本：{APP_VERSION}\n最新版本：{latest}\n{url}"
+            if version_key(latest) <= version_key(APP_VERSION):
+                text = f"当前已是最新版本：{APP_VERSION}"
+            self.show_text("检查更新", text)
+        self.start_operation("检查更新", lambda cancel: check_for_updates_cached(timeout=8), done)
+
+    def open_path(self, path: Path) -> None:
+        if not path.exists():
+            self.notify(f"路径不存在：{path}", True)
+            return
+        def worker(cancel: threading.Event) -> None:
             if sys.platform == "win32":
                 os.startfile(str(path))
-            elif sys.platform == "darwin":
-                subprocess.run(["open", str(path)], check=False)
             else:
-                subprocess.run(["xdg-open", str(path)], check=False)
-        except OSError as err:
-            U.print_warning(f"打开失败：{err}")
+                subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", str(path)],
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        self.start_operation("打开文件", worker, lambda result: self.notify("已交给系统打开。"))
 
-    # ── settings ──────────────────────────────────────────────────
+    def request_exit(self) -> None:
+        if self._closing:
+            return
+        if self.queue.unfinished:
+            self.confirm("退出程序", f"还有 {len(self.queue.unfinished)} 个任务。确认取消并退出？", self.begin_shutdown)
+        else:
+            self.begin_shutdown()
 
-    def _screen_settings(self) -> None:
+    def begin_shutdown(self) -> None:
+        self._closing = True
+        self.cancel_operations()
+        self.queue.close()
+        self.modals.clear()
+        self._focus_page()
+
+    async def _drive(self) -> None:
         while True:
-            U.print_header(MENU_SETTINGS)
-            proxy_type_label = self.session.proxy_type or "直连"
-            theme_label = "浅色" if self.session.ui_theme == "light" else "深色"
-            options = [
-                f"下载目录：{self.session.last_download_dir}",
-                f"检测超时：{self.session.detect_timeout_sec}s",
-                f"下载超时：{self.session.download_timeout_sec}s",
-                f"下载重试次数：{self.session.download_retry_count}",
-                f"并发上限：{self.session.download_concurrency}",
-                f"代理：{proxy_type_label}",
-                f"界面主题：{theme_label}",
-                "保存设置",
-                "返回（不保存）",
-            ]
-            choice = U.menu("设置项", options)
-            if choice == 1:
-                value = U.ask_required("下载目录", default=self.session.last_download_dir)
-                self.session.last_download_dir = value
-            elif choice == 2:
-                self.session.detect_timeout_sec = U.ask_int("检测超时（秒）", self.session.detect_timeout_sec, 1, 5)
-            elif choice == 3:
-                self.session.download_timeout_sec = U.ask_int("下载超时（秒）", self.session.download_timeout_sec, 3, 10)
-            elif choice == 4:
-                self.session.download_retry_count = U.ask_int("下载重试次数", self.session.download_retry_count, 0, 5)
-            elif choice == 5:
-                self.session.download_concurrency = U.ask_int("并发上限", self.session.download_concurrency, MIN_DOWNLOAD_CONCURRENCY, MAX_CLI_CONCURRENCY)
-            elif choice == 6:
-                self._edit_proxy()
-            elif choice == 7:
-                theme_choice = U.menu("界面主题", ["深色", "浅色", "返回"])
-                if theme_choice in (1, 2):
-                    self.session.ui_theme = "dark" if theme_choice == 1 else "light"
-                    U.set_theme(self.session.ui_theme)
-            elif choice == 8:
-                self.session_store.save(self.session)
-                U.print_success("设置已保存。")
+            self.queue.poll()
+            signature = [(item.task_id, item.state, item.progress, item.message) for item in self.queue.items]
+            if signature != self._queue_signature:
+                self._queue_signature = signature
+                self.refresh_tasks()
+                if self.page == "history":
+                    self.refresh_history()
+            if self.queue.auth_required and not self._auth_notified:
+                self._auth_notified = True
+                self.clear_login()
+                self.notify("登录已过期，任务已保留。设置 → 登录后继续。", True)
+            if self.queue.history_error:
+                self.notify(self.queue.history_error, True)
+            if self._closing and not self.queue.unfinished and not self.operations:
+                self.application.exit()
                 return
-            else:
-                return
+            self.application.invalidate()
+            await asyncio.sleep(0.1)
 
-    def _edit_proxy(self) -> None:
-        options = ["直连（跟随系统网络）", "HTTP 代理", "SOCKS5 代理", "返回"]
-        choice = U.menu("代理类型", options)
-        if choice == len(options):
-            return
-        if choice == 1:
-            self.session.proxy_type = ""
-            self.session.proxy_host = ""
-            self.session.proxy_port = 0
-            self.session.proxy_username = ""
-            self.session.proxy_password = ""
-        else:
-            proxy_type = "http" if choice == 2 else "socks5"
-            host = U.ask_required("代理主机（hostname 或 IP）")
-            port = U.ask_int("代理端口", 0, 1, 65535)
-            username = U.ask("用户名（可选）")
-            password = U.ask("密码（可选）")
-            try:
-                normalize_proxy_config(proxy_type, host, port, username, password)
-            except ProxyConfigError as err:
-                U.print_error(f"代理配置无效：{err}")
-                return
-            self.session.proxy_type = proxy_type
-            self.session.proxy_host = host
-            self.session.proxy_port = port
-            self.session.proxy_username = username
-            self.session.proxy_password = password
+    async def run_async(self) -> int:
+        driver: asyncio.Task[None] | None = None
+        def started() -> None:
+            nonlocal driver
+            driver = asyncio.create_task(self._drive())
         try:
-            configure_proxy(
-                self.session.proxy_type,
-                self.session.proxy_host,
-                self.session.proxy_port,
-                self.session.proxy_username,
-                self.session.proxy_password,
-            )
-        except ProxyConfigError as err:
-            U.print_error(f"代理配置无效：{err}")
-            return
-        self._proxy_label = self._proxy_summary()
-        U.print_success("代理已生效（保存设置后持久化）。")
+            await self.application.run_async(pre_run=started)
+        finally:
+            self.begin_shutdown()
+            if driver:
+                driver.cancel()
+                try:
+                    await driver
+                except asyncio.CancelledError:
+                    pass
+            # On EOF or terminal disconnect, wait for workers before returning.
+            if self.operations:
+                await asyncio.gather(*(op.task for op in self.operations), return_exceptions=True)
+            while self.queue.unfinished:
+                self.queue.poll()
+                await asyncio.sleep(0.05)
+        return 0
 
-    # ── diagnostics ───────────────────────────────────────────────
-
-    def _screen_diagnostics(self) -> None:
-        U.print_header(MENU_DIAGNOSTICS)
-        U.print_info(f"应用版本：{APP_VERSION}")
-        U.print_info(f"登录凭证：{'已配置 MUSIC_U' if self.session.cookie else '未配置 MUSIC_U'}")
-        U.print_info(f"网络代理：{self._proxy_label}")
-        U.print_info(f"ffmpeg：{'可用' if is_ffmpeg_available() else '不可用'}")
-        U.print_info(f"日志目录：{CONFIG_DIR / 'logs'}")
-        U.print_info("")
-        U.print_info("运行网络检测（API / 音乐 CDN）...")
-        probes = run_network_diagnostics(timeout=5)
-        for probe in probes:
-            status = "可达" if probe.reachable else "不可达"
-            detail = f"（{probe.detail}）" if probe.detail else ""
-            if probe.reachable:
-                U.print_success(f"{probe.name}：{status}{detail}")
-            else:
-                U.print_error(f"{probe.name}：{status}{detail}")
-        log_tail = read_log_tail(default_log_path(), max_lines=200)
-        issues = [line for line in log_tail.splitlines() if "WARNING" in line or "ERROR" in line or "CRITICAL" in line]
-        U.print_info("")
-        U.print_info("最近警告与错误：")
-        if issues:
-            for line in issues[-10:]:
-                U.print_warning(line)
-        else:
-            U.print_info("（无）")
-        if U.confirm("导出诊断报告？", default=False):
-            default_path = Path(self.session.last_download_dir).expanduser() / (
-                f"diagnostics-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
-            )
-            target = Path(U.ask("导出路径", default=str(default_path))).expanduser()
-            try:
-                context = DiagnosticContext(
-                    app_version=APP_VERSION,
-                    log_path=default_log_path(),
-                    login_configured=bool(self.session.cookie),
-                    proxy_type=self.session.proxy_type,
-                    proxy_host=self.session.proxy_host,
-                    proxy_port=self.session.proxy_port,
-                    proxy_authenticated=bool(self.session.proxy_username),
-                    ffmpeg_available=is_ffmpeg_available(),
-                )
-                report = build_diagnostic_report(
-                    context,
-                    probes=probes,
-                    log_tail=log_tail,
-                    sensitive_values=[self.session.cookie, self.session.proxy_password],
-                )
-                target.write_text(report, encoding="utf-8")
-                U.print_success(f"诊断报告已导出：{target}")
-            except OSError as err:
-                U.print_error(f"导出失败：{err}")
-
-    # ── version check ─────────────────────────────────────────────
-
-    def _screen_check_update(self) -> None:
-        U.print_header(MENU_UPDATE)
-        U.print_info(f"当前版本：v{APP_VERSION}")
-        with U.spinner("检查中..."):
-            try:
-                latest, url = check_for_updates_cached(timeout=8)
-            except RuntimeError as err:
-                U.print_warning(f"无法检查更新：{err}")
-                return
-        if version_key(latest) > version_key(APP_VERSION):
-            U.print_success(f"发现新版本：{latest}（当前 {APP_VERSION}）")
-            U.print_info(f"下载地址：{url or PROJECT_GITHUB_URL}")
-        else:
-            U.print_success(f"当前已是最新版本（v{APP_VERSION}）。")
+    def run(self) -> int:
+        return asyncio.run(self.run_async())
 
 
 def main() -> int:
     setup_logging(default_log_path(), level=logging.INFO)
-    logger.info("TUI started. version=%s", APP_VERSION)
-    app = TuiApp()
     try:
-        return app.run()
-    except KeyboardInterrupt:
-        print()
-        U.print_info("再见！")
+        return TuiApp().run()
+    except (KeyboardInterrupt, EOFError):
         return 0
-    except EOFError:
-        return 0
+    except Exception as err:
+        logger.exception("Terminal application stopped unexpectedly.")
+        print(f"启动失败：{redact_diagnostic_text(str(err))}", file=sys.stderr)
+        return 1
 
 
 __all__ = ["TuiApp", "main"]

@@ -84,3 +84,7 @@ class BatchDetectRow:
     media_size_bytes: int = 0
     selected: bool = False
     _progress: float = 0.0  # 0.0–1.0, cached for progress bar aggregation
+    artist: str = ""
+    album_name: str = ""
+    cover_url: str = ""
+    duration_ms: Optional[int] = None

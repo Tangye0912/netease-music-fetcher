@@ -89,13 +89,13 @@ from music_fetch.batch_download import (
     format_speed,
 )
 
-from music_fetch.cli import (
-    run_download,
-    run_playlist_download,
-    run_album_download,
-    build_parser,
-    main,
-)
+from music_fetch.download_queue import DownloadOptions, DownloadQueue, DownloadRequest
+
+
+def main(argv: list[str] | None = None) -> int:
+    from music_fetch.app import main as app_main
+    return app_main(argv)
+
 
 # Explicit public surface — keeps `from music_fetch import *` deterministic and
 # prevents incidental re-exports from leaking into downstream code.
@@ -168,11 +168,10 @@ __all__ = [
     "get_proxy_config",
     "normalize_proxy_config",
     "open_url",
-    # CLI entry points
-    "run_download",
-    "run_playlist_download",
-    "run_album_download",
-    "build_parser",
+    # Application and queue
+    "DownloadOptions",
+    "DownloadQueue",
+    "DownloadRequest",
     "main",
     # Constants
     "SUPPORTED_GUI_AUDIO_FORMATS",

@@ -39,6 +39,7 @@ class DownloadProgressSnapshot:
     downloaded: int
     total: int  # -1 when the server did not report a total size
     speed: float  # bytes per second, averaged over the whole run
+    stage: str = "resolving"
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ class DownloadJob:
         self._downloaded = 0
         self._total = -1
         self._speed = 0.0
+        self._stage = "resolving"
         self._started_at: Optional[float] = None
         self._state = JOB_STATE_PENDING
         self._result: Optional[DownloadJobResult] = None
@@ -132,6 +134,7 @@ class DownloadJob:
                 downloaded=self._downloaded,
                 total=self._total,
                 speed=self._speed,
+                stage=self._stage,
             )
 
     def result(self) -> Optional[DownloadJobResult]:
@@ -170,6 +173,10 @@ class DownloadJob:
         def should_pause() -> bool:
             return self._pause_event.is_set()
 
+        def on_stage(stage: str) -> None:
+            with self._lock:
+                self._stage = stage
+
         try:
             result = run_download_pipeline(
                 song_id=self.song_id,
@@ -184,6 +191,7 @@ class DownloadJob:
                 tags=self._tags,
                 download_lyric=self.download_lyric,
                 lyric_mode=self.lyric_mode,
+                stage_callback=on_stage,
             )
             self._finish(
                 DownloadJobResult(
@@ -222,12 +230,6 @@ class DownloadJob:
                 )
             )
             logger.exception("DownloadJob unexpected error. task_id=%s", self.task_id)
-        finally:
-            for suffix in (".source", ".part", ".source.part", ".part.src", ".source.part.src"):
-                stale = self.output_path.with_name(f"{self.output_path.name}{suffix}")
-                if stale.exists():
-                    stale.unlink(missing_ok=True)
-
 
 __all__ = [
     "DownloadJob",

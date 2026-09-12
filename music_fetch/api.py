@@ -2,7 +2,7 @@
 NetEase Cloud Music API client.
 
 Data-flow: constants → data-classes → URL/cookie helpers → HTTP helpers → API functions.
-Depended on by music_fetch.audio.py (download) and music_fetch.cli.py (CLI entry point).  No reverse dependency.
+Used by the terminal application and audio pipeline. No reverse dependency.
 """
 
 from __future__ import annotations

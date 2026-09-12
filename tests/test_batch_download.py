@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional
 from unittest import mock
 
-from music_fetch.api import MusicFetchError
 from music_fetch.app_stores import DownloadHistoryStore
 from music_fetch.batch_download import BatchDownloadSession
 from music_fetch.batch_models import BatchDetectRow
@@ -159,9 +158,9 @@ class BatchDownloadSessionTests(unittest.TestCase):
         self.assertTrue(session.auth_expired)
         self.assertTrue(session.stopped)
         self.assertEqual(len(FakeJob.instances), 1)
-        self.assertEqual(rows[1].status, "ready")
+        self.assertEqual(rows[1].status, "download_canceled")
 
-    def test_cancel_all_stops_dispatch_and_keeps_pending_rows_ready(self):
+    def test_cancel_all_marks_pending_rows_canceled(self):
         rows = [_row("1"), _row("2"), _row("3")]
         with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob):
             session = self._session(rows, concurrency=1)
@@ -175,11 +174,12 @@ class BatchDownloadSessionTests(unittest.TestCase):
         self.assertTrue(session.done)
         self.assertTrue(session.stopped)
         self.assertEqual(rows[0].status, "download_canceled")
-        self.assertEqual([r.status for r in rows[1:]], ["ready", "ready"])
+        self.assertEqual([r.status for r in rows[1:]], ["download_canceled", "download_canceled"])
         counters = session.counters()
-        self.assertEqual(counters.pending, 2)
-        self.assertIn("未开始 2", session.summary_text())
-        self.assertEqual(dict(session.summary_panel_rows())["状态"], "已停止（未开始 2）")
+        self.assertEqual(counters.pending, 0)
+        self.assertEqual(counters.canceled, 3)
+        self.assertIn("未开始 0", session.summary_text())
+        self.assertEqual(dict(session.summary_panel_rows())["状态"], "已停止（未开始 0）")
 
     def test_pause_blocks_new_dispatch_and_resume_continues(self):
         rows = [_row("1"), _row("2"), _row("3")]
@@ -209,8 +209,8 @@ class BatchDownloadSessionTests(unittest.TestCase):
 
     def test_output_path_failure_marks_row_failed_without_job(self):
         rows = [_row("1")]
-        err = MusicFetchError("DOWNLOAD_FAILED", "no filename")
-        with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob),              mock.patch("music_fetch.batch_download.resolve_output_path", side_effect=err):
+        err = OSError("no filename")
+        with mock.patch("music_fetch.batch_download.DownloadJob", new=FakeJob),              mock.patch("music_fetch.download_queue.Path.is_file", side_effect=err):
             session = self._session(rows, concurrency=1)
             self._poll_until_done(session)
         self.assertTrue(session.done)

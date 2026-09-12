@@ -20,12 +20,13 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib import request
 
-from music_fetch.api import MusicFetchError, normalize_cookie
+from music_fetch.api import DownloadCanceled, MusicFetchError, normalize_cookie
 
 LOGIN_URL = "https://music.163.com/#/login"
 _DIRECT_OPENER = request.build_opener(request.ProxyHandler({}))
@@ -287,6 +288,7 @@ def _read_music_cookies(port: int, timeout: float = 10.0) -> str:
 def run_official_login(
     timeout: float = 300.0,
     on_status: Optional[Callable[[str], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> str:
     """Open the official login page and capture the NetEase cookie.
 
@@ -298,6 +300,9 @@ def run_official_login(
     MusicFetchError (AUTH_EXPIRED/NETWORK_ERROR) or BrowserLoginError.
     """
     log = on_status or (lambda _message: None)
+    cancel = cancel_event or threading.Event()
+    if cancel.is_set():
+        raise DownloadCanceled()
     exe = find_browser_exe()
     if not exe:
         raise BrowserLoginError(
@@ -322,7 +327,11 @@ def run_official_login(
         stale_reads = 0
         cookie = ""
         while time.time() < deadline:
-            cookie = _read_music_cookies(cdp_port, timeout=8)
+            if cancel.is_set():
+                raise DownloadCanceled()
+            if isinstance(proc.poll(), int):
+                raise BrowserLoginError("扫码窗口已关闭，可重新发起登录。")
+            cookie = _read_music_cookies(cdp_port, timeout=2 if cancel_event is not None else 8)
             if "MUSIC_U=" in cookie:
                 break
             if cookie:
@@ -342,13 +351,18 @@ def run_official_login(
             if not prompted:
                 log("请在打开的浏览器中扫码登录网易云音乐（扫码后稍候将自动完成）。")
                 prompted = True
-            time.sleep(3)
+            if cancel_event is None:
+                time.sleep(3)
+            elif cancel.wait(0.5):
+                raise DownloadCanceled()
 
         if "MUSIC_U=" not in cookie:
             raise MusicFetchError(
                 "AUTH_EXPIRED",
                 f"等待扫码登录超时（{int(timeout)} 秒）。请重新发起官网登录。",
             )
+        if cancel.is_set():
+            raise DownloadCanceled()
         log("已获取登录凭证。")
         return normalize_cookie(cookie)
     finally:

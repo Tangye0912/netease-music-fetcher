@@ -165,7 +165,7 @@ class DownloadJobFailureTests(unittest.TestCase):
             assert result is not None
             self.assertEqual(result.error_code, "UNKNOWN_ERROR")
 
-    def test_stale_temp_files_are_cleaned_after_run(self):
+    def test_runner_does_not_delete_files_it_did_not_create(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "song.mp3"
             for suffix in (".source", ".part", ".source.part"):
@@ -179,7 +179,7 @@ class DownloadJobFailureTests(unittest.TestCase):
                 job.start()
                 self.assertTrue(job.wait(timeout=5))
             for suffix in (".source", ".part", ".source.part"):
-                self.assertFalse(output_path.with_name(f"{output_path.name}{suffix}").exists())
+                self.assertEqual(output_path.with_name(f"{output_path.name}{suffix}").read_bytes(), b"stale")
 
     def test_unstarted_job_is_pending_and_wait_returns_false(self):
         job = DownloadJob(

@@ -8,10 +8,13 @@ cancel/pause checkers.  No Qt dependency.
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from music_fetch.api import (
     DownloadCanceled,
@@ -46,162 +49,126 @@ class DownloadPipelineResult:
 
 
 def run_download_pipeline(
-    *,
-    song_id: str,
-    cookie: str,
-    output_path: Path,
-    target_format: str = DEFAULT_GUI_TARGET_FORMAT,
-    timeout: int = 30,
-    retry_count: int = 1,
-    progress_callback: Optional[ProgressCallback] = None,
+    *, song_id: str, cookie: str, output_path: Path,
+    target_format: str = DEFAULT_GUI_TARGET_FORMAT, timeout: int = 30,
+    retry_count: int = 1, progress_callback: Optional[ProgressCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
     pause_checker: Optional[PauseChecker] = None,
     tags: Optional[dict[str, Optional[str]]] = None,
-    download_lyric: bool = False,
-    lyric_mode: str = "original",
+    download_lyric: bool = False, lyric_mode: str = "original",
+    stage_callback: Optional[Callable[[str], None]] = None,
 ) -> DownloadPipelineResult:
-    """Execute the full download pipeline: retry loop, fallback, conversion.
-
-    Raises DownloadCanceled or MusicFetchError.
-    """
-    logger.info(
-        "Download pipeline started. song_id=%s output=%s format=%s timeout=%s retry=%s",
-        song_id, output_path, target_format, timeout, retry_count,
-    )
+    """Download into an owned staging directory; publish only complete files."""
+    def checkpoint(stage: str) -> None:
+        if stage_callback:
+            stage_callback(stage)
+        while pause_checker and pause_checker():
+            if cancel_checker and cancel_checker():
+                raise DownloadCanceled()
+            time.sleep(0.05)
+        if cancel_checker and cancel_checker():
+            raise DownloadCanceled()
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-    except PermissionError as err:
+    except OSError as err:
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Cannot write to output directory: {output_path.parent}") from err
 
-    temp_source_path = output_path.with_name(f"{output_path.name}.source")
-    if temp_source_path.exists():
-        temp_source_path.unlink(missing_ok=True)
-
-    # ── Retry loop ──────────────────────────────────────────────
-    selected: Optional[PlayableCandidate] = None
-    for attempt in range(1, retry_count + 2):
-        try:
-            selected = download_song_with_fallback(
-                song_id=song_id,
-                cookie=cookie,
-                output_path=temp_source_path,
-                timeout=timeout,
-                prefer_format=target_format,
-                progress_callback=progress_callback,
-                cancel_checker=cancel_checker,
-                pause_checker=pause_checker,
-            )
-            break
-        except DownloadCanceled:
-            raise
-        except MusicFetchError as err:
-            is_last_attempt = attempt >= retry_count + 1
-            retriable = err.code in {"DOWNLOAD_FAILED", "NETWORK_ERROR"}
-            if not retriable or is_last_attempt:
-                raise
-            logger.warning(
-                "Download attempt failed and will retry. song_id=%s attempt=%s/%s code=%s",
-                song_id, attempt, retry_count + 1, err.code,
-            )
-
-    if selected is None:
-        raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Retry loop ended without a playable candidate.")
-
-    source_format = infer_audio_format_from_url(selected.media_url) or "unknown"
-    logger.info(
-        "Download source completed. song_id=%s source_format=%s target_format=%s",
-        song_id, source_format, target_format,
-    )
-
-    # ── Cancel check after download ─────────────────────────────
-    if cancel_checker and cancel_checker():
-        _cleanup_paths(temp_source_path, output_path)
-        raise DownloadCanceled()
-
-    # ── Format conversion / move ────────────────────────────────
-    if source_format == target_format:
-        temp_source_path.replace(output_path)
-        if cancel_checker and cancel_checker():
-            _cleanup_paths(output_path)
-            raise DownloadCanceled()
-    else:
-        if not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
-            fallback_output = output_path.with_suffix(f".{source_format}")
-            if fallback_output.exists():
-                fallback_output = fallback_output.with_name(
-                    f"{fallback_output.stem}_{int(time.time())}{fallback_output.suffix}"
+    # Cancellation only cleans this task's directory, never a previous file.
+    with tempfile.TemporaryDirectory(prefix=".music-fetch-", dir=output_path.parent) as staging:
+        source = Path(staging) / "source"
+        selected: Optional[PlayableCandidate] = None
+        for attempt in range(retry_count + 1):
+            checkpoint("resolving")
+            try:
+                def progress(downloaded: int, total: Optional[int]) -> None:
+                    if stage_callback:
+                        stage_callback("downloading")
+                    if progress_callback:
+                        progress_callback(downloaded, total)
+                selected = download_song_with_fallback(
+                    song_id=song_id, cookie=cookie, output_path=source, timeout=timeout,
+                    prefer_format=target_format, progress_callback=progress,
+                    cancel_checker=cancel_checker, pause_checker=pause_checker,
                 )
-            if cancel_checker and cancel_checker():
-                _cleanup_paths(temp_source_path, fallback_output)
-                raise DownloadCanceled()
-            temp_source_path.replace(fallback_output)
-            if cancel_checker and cancel_checker():
-                _cleanup_paths(fallback_output)
-                raise DownloadCanceled()
-            file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
-            logger.warning(
-                "ffmpeg missing. song_id=%s saved source format directly. requested=%s source=%s output=%s",
-                song_id, target_format, source_format, fallback_output,
-            )
-            return DownloadPipelineResult(
-                output_path=fallback_output, file_size=file_size,
-                candidate=selected, source_format=source_format,
-            )
-
-        if cancel_checker and cancel_checker():
-            _cleanup_paths(temp_source_path, output_path)
-            raise DownloadCanceled()
-        try:
-            convert_audio_file(
-                temp_source_path, output_path, target_format,
-                timeout=max(240, timeout * 8),
-            )
-        except Exception:
-            _cleanup_paths(temp_source_path, output_path)
-            raise
-        temp_source_path.unlink(missing_ok=True)
-        if cancel_checker and cancel_checker():
-            _cleanup_paths(output_path)
-            raise DownloadCanceled()
-
-    if tags:
-        # Tag writing must never fail an already-completed download.
-        try:
-            write_audio_tags(
-                output_path,
-                title=tags.get("title") or "",
-                artist=tags.get("artist"),
-                album=tags.get("album"),
-                cover_url=tags.get("cover_url"),
-            )
-        except Exception:
-            logger.warning("Failed to write audio tags. song_id=%s", song_id, exc_info=True)
-    if download_lyric:
-        from music_fetch.api import fetch_lyric
-        from music_fetch.audio import merge_bilingual_lyric, save_lyric_file, embed_lyric_tag
-        try:
-            lyric_result = fetch_lyric(song_id, timeout=timeout)
-            if lyric_result.lyric:
-                if lyric_mode == "translation" and lyric_result.translated_lyric:
-                    lyric_text = lyric_result.translated_lyric
+                break
+            except DownloadCanceled:
+                raise
+            except MusicFetchError as err:
+                if attempt >= retry_count or err.code not in {"DOWNLOAD_FAILED", "NETWORK_ERROR"}:
+                    raise
+                logger.warning("Retrying download. song_id=%s attempt=%s code=%s", song_id, attempt + 1, err.code)
+        if selected is None:
+            raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "No playable candidate.")
+        source_format = infer_audio_format_from_url(selected.media_url) or selected.encode_type or "unknown"
+        checkpoint("converting")
+        actual_format = target_format
+        if source_format != target_format and not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
+            actual_format = source_format
+        prepared = Path(staging) / f"audio.{actual_format}"
+        if source_format == actual_format:
+            source.replace(prepared)
+        else:
+            convert_audio_file(source, prepared, target_format, timeout=max(240, timeout * 8),
+                               cancel_checker=cancel_checker)
+        checkpoint("tagging")
+        if tags:
+            try:
+                write_audio_tags(prepared, title=tags.get("title") or "", artist=tags.get("artist"),
+                                 album=tags.get("album"), cover_url=tags.get("cover_url"))
+            except Exception:
+                logger.warning("Failed to write audio tags. song_id=%s", song_id, exc_info=True)
+        checkpoint("lyrics")
+        if download_lyric:
+            from music_fetch.api import fetch_lyric
+            from music_fetch.audio import merge_bilingual_lyric, save_lyric_file, embed_lyric_tag
+            try:
+                lyric = fetch_lyric(song_id, timeout=timeout)
+                text = lyric.lyric
+                if lyric_mode == "translation":
+                    text = lyric.translated_lyric or lyric.lyric
                 elif lyric_mode == "bilingual":
-                    lyric_text = merge_bilingual_lyric(lyric_result.lyric, lyric_result.translated_lyric)
-                else:
-                    lyric_text = lyric_result.lyric
-                save_lyric_file(output_path, lyric_text)
-                embed_lyric_tag(output_path, lyric_text)
-        except Exception:
-            logger.warning("Failed to download lyric. song_id=%s", song_id, exc_info=True)
-    file_size = output_path.stat().st_size if output_path.exists() else 0
-    logger.info(
-        "Download pipeline completed. song_id=%s output=%s size=%s",
-        song_id, output_path, file_size,
-    )
-    return DownloadPipelineResult(
-        output_path=output_path, file_size=file_size,
-        candidate=selected, source_format=source_format,
-    )
+                    text = merge_bilingual_lyric(lyric.lyric, lyric.translated_lyric)
+                if text:
+                    save_lyric_file(prepared, text)
+                    embed_lyric_tag(prepared, text)
+            except Exception:
+                logger.warning("Failed to download lyric. song_id=%s", song_id, exc_info=True)
+        checkpoint("finishing")
+        final_path = _publish_file(prepared, output_path.with_suffix(f".{actual_format}"))
+        lyric_path = prepared.with_suffix(".lrc")
+        if lyric_path.exists():
+            try:
+                _publish_file(lyric_path, final_path.with_suffix(".lrc"))
+            except OSError:
+                logger.warning("Failed to save lyric sidecar. song_id=%s", song_id, exc_info=True)
+        return DownloadPipelineResult(final_path, final_path.stat().st_size, selected, source_format)
+
+
+def _publish_file(source: Path, target: Path) -> Path:
+    """Claim an output name without overwriting a file, including concurrent writes."""
+    for index in range(10000):
+        candidate = target if index == 0 else target.with_name(f"{target.stem}_{index}{target.suffix}")
+        try:
+            os.link(source, candidate)
+            return candidate
+        except FileExistsError:
+            continue
+        except OSError:
+            # External drives may not support hard links. Exclusive creation
+            # keeps the same no-overwrite guarantee on those filesystems.
+            try:
+                handle = candidate.open("xb")
+            except FileExistsError:
+                continue
+            try:
+                with handle, source.open("rb") as reader:
+                    shutil.copyfileobj(reader, handle)
+            except BaseException:
+                candidate.unlink(missing_ok=True)
+                raise
+            return candidate
+    raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Could not allocate an output filename.")
 
 
 def write_audio_tags(

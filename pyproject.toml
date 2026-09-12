@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-fetch"
-version = "3.4.0"
-description = "网易云音乐单曲下载工具（终端 TUI + CLI）"
+version = "4.0.0"
+description = "网易云音乐全屏终端下载应用"
 requires-python = ">=3.10"
 dependencies = [
     "mutagen>=1.45",

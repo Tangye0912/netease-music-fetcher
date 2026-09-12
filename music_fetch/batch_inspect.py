@@ -145,6 +145,10 @@ def run_batch_detect(
                 message=result.unavailable_reason or "",
                 media_size_bytes=size_bytes,
                 selected=bool(result.can_download),
+                artist=result.artist or "",
+                album_name=result.album_name or "",
+                cover_url=result.cover_url or "",
+                duration_ms=result.duration_ms,
             ))
         except MusicFetchError as err:
             return (index, BatchDetectRow(
