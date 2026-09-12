@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.5.0 (2026-09-12)
 
 ### Added
 
@@ -14,6 +14,14 @@
 ### Removed
 
 - 移除已被任务队列取代的 `BatchDownloadSession`/`BatchDownloadCounters`（`music_fetch/batch_download.py` 整个模块）；`format_speed` 移至 `music_fetch/batch_models.py`，公开导出面同步收敛。
+
+### Fixed
+
+- 下载历史每页 50 → 15 条，逐条记录菜单改为直接输入序号（原菜单在 50 条时必然超出屏幕），`n/p` 翻页与 `s` 搜索、`f` 筛选、`e` 导出、`r` 重试、`c` 清空快捷键和搜索/歌单页交互统一。
+- 「重试全部失败」只重试当前筛选命中的失败记录，不再波及全部历史。
+- 搜索下载完成后返回结果列表，可连续下载多首而无需重新搜索。
+- 批量试听仅接受可下载歌曲的序号，并列出可试听范围。
+- 搜索接口网络故障不再被吞成空结果，界面改为提示网络请求失败。
 
 ### QA
 
