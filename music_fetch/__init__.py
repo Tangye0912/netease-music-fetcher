@@ -79,11 +79,7 @@ from music_fetch.download_runner import (
     DownloadProgressSnapshot,
 )
 from music_fetch.batch_inspect import run_batch_detect
-from music_fetch.batch_download import (
-    BatchDownloadCounters,
-    BatchDownloadSession,
-    format_speed,
-)
+from music_fetch.batch_models import format_speed
 
 # Explicit public surface — keeps `from music_fetch import *` deterministic and
 # prevents incidental re-exports from leaking into downstream code.
@@ -134,8 +130,6 @@ __all__ = [
     "DownloadJobResult",
     "DownloadProgressSnapshot",
     "run_batch_detect",
-    "BatchDownloadCounters",
-    "BatchDownloadSession",
     "format_speed",
     # Audio helpers
     "sanitize_filename",

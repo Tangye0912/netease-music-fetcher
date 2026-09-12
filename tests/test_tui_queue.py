@@ -212,3 +212,35 @@ def test_task_details_apply_controls(app, tmp_path, action, state):
     ):
         app._task_actions(item)
     assert app.queue.snapshot()[0].state == state
+
+
+def test_task_page_retry_failed_requires_confirmation(app, tmp_path):
+    for i, state in enumerate(("failed", "failed", "canceled", "success")):
+        app.queue.enqueue(DownloadRequest(str(i), "song", tmp_path / f"{i}.mp3"))
+        app.queue._items[-1].state = state  # white-box: skip real job runs
+    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+        "music_fetch.tui.U.confirm", return_value=False
+    ) as confirm_mock, mock.patch.object(app, "_retry_task") as retry_mock:
+        app._screen_tasks()
+    # Declined confirmation: nothing is retried, prompt loop continues.
+    confirm_mock.assert_called_once()
+    assert "2 个失败任务" in confirm_mock.call_args.args[0]
+    assert retry_mock.call_count == 0
+
+    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+        "music_fetch.tui.U.confirm", return_value=True
+    ), mock.patch.object(app, "_retry_task") as retry_mock:
+        app._screen_tasks()
+    assert retry_mock.call_count == 2
+    retried_ids = {call.args[0] for call in retry_mock.call_args_list}
+    assert len(retried_ids) == 2  # only the two failed tasks, not canceled/success
+
+
+def test_task_page_retry_failed_without_failures_warns(app, tmp_path):
+    app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
+    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+        "music_fetch.tui.U.print_warning"
+    ) as warning_mock, mock.patch.object(app, "_retry_task") as retry_mock:
+        app._screen_tasks()
+    warning_mock.assert_called_once_with("没有失败的任务。")
+    assert retry_mock.call_count == 0

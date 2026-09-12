@@ -19,7 +19,13 @@ logger = get_logger("music_fetch.gui")
 
 
 
-__all__ = ['BatchDetectRow', 'format_bytes', 'format_duration', 'probe_media_size_bytes']
+__all__ = ['BatchDetectRow', 'format_bytes', 'format_duration', 'format_speed', 'probe_media_size_bytes']
+
+
+def format_speed(speed: float) -> str:
+    return f"{format_bytes(int(speed))}/s"
+
+
 def format_duration(duration_ms: Optional[int]) -> str:
     if duration_ms is None:
         return T.MSG_UNKNOWN

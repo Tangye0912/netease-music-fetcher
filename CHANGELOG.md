@@ -9,11 +9,16 @@
 
 - **批量流程试听**：批量识别结果（含歌单展开）在下载前可先试听任意一条——「下一步」菜单新增「试听某首」，输入序号即下载标准音质临时文件并用系统播放器播放。
 - **下载历史增强**：历史操作新增「重试全部失败」（将筛选范围内的失败记录提交后台重试）与「清空历史」（确认后仅清空记录，不删文件）。
+- **任务页重试需确认**：`f`（重试全部失败）先显示失败数量并确认，与下载历史的重试流程保持一致。
+
+### Removed
+
+- 移除已被任务队列取代的 `BatchDownloadSession`/`BatchDownloadCounters`（`music_fetch/batch_download.py` 整个模块）；`format_speed` 移至 `music_fetch/batch_models.py`，公开导出面同步收敛。
 
 ### QA
 
-- 回归测试：`python3 -m pytest tests/ -q`（446 通过，10 个参数化子测试通过）。
-- 覆盖率：79.75%，通过 75% 门槛；队列模块覆盖率 99%。
+- 回归测试：`python3 -m pytest tests/ -q`（440 通过，10 个参数化子测试通过）。
+- 覆盖率：79.25%，通过 75% 门槛；队列模块覆盖率 99%。
 - 静态检查：`mypy --strict`（28 个源文件零错误）、ruff、compileall 与 `git diff --check` 全部通过。
 - 交互验证：真实 prompt_toolkit 输入循环中状态自动刷新且保留未提交的中文输入；Windows/SSH 真机冒烟尚未执行。
 

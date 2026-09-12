@@ -41,9 +41,8 @@ from music_fetch.app_settings import (
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
-from music_fetch.batch_download import format_speed
 from music_fetch.batch_inspect import run_batch_detect
-from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration, probe_media_size_bytes
+from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration, format_speed, probe_media_size_bytes
 from music_fetch.batch_results import build_batch_results_csv, summarize_batch_rows
 from music_fetch.diagnostics import (
     DiagnosticContext,
@@ -749,8 +748,11 @@ class TuiApp:
                 if U.confirm("取消所有未完成任务？", default=False):
                     self.queue.cancel_all()
             elif raw == "f":
-                for item in items:
-                    if item.state == "failed":
+                failed_items = [item for item in items if item.state == "failed"]
+                if not failed_items:
+                    U.print_warning("没有失败的任务。")
+                elif U.confirm(f"将 {len(failed_items)} 个失败任务加入后台重试，确定？", default=False):
+                    for item in failed_items:
                         self._retry_task(item.task_id)
             elif raw == "l":
                 if self.queue.auth_required:
