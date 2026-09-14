@@ -7,34 +7,39 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v3.4.0)
+## Current Backlog (after v3.6.0)
 
 > v3.4 起移除脚本模式（CLI），所有后续工作聚焦 TUI 体验。
+> v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化（详见 CHANGELOG）。
 
 ### TUI Experience
 
-- [x] 试听入口扩展到批量识别结果与"我的歌单"流程（批量结果可先听后下）。
-- [x] 下载历史增强：一键清空 + 失败项批量重试。
 - [ ] 我喜欢的音乐：主菜单直达"喜欢列表"批量下载（新增 likelist API）。
 - [ ] 歌单搜索：按关键词搜索歌单并整单下载。
 - [ ] 大歌单曲目明细分页，避免一次渲染过长列表。
+- [ ] 分组视图的批次信息跨重启保留（当前 `_batches` 仅存在于本次运行）。
+- [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。
 
-### v3.5.0 — Download Efficiency and API Evolution
+### v3.7 — Download Efficiency and API Evolution
 
-- [ ] 增量下载：下载前识别已有文件，并提供跳过、覆盖或重命名策略。
-- [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径。
+- [ ] 增量下载：下载前识别已有文件，并提供跳过、覆盖或重命名策略（v3.6 的队列恢复已落地"文件已存在即视为完成"判定，可复用）。
+- [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径（CHANGELOG v3.3.0 起的既定方向）。
 - [ ] 为 M4A/FLAC 补齐封面嵌入，统一 MP3/M4A/FLAC 的元数据能力。
 
-### v4.0 — Fullscreen Experiment
+### v4.0 — Fullscreen Experiment（待定）
 
-- [ ] 在 `tui-fullscreen-rewrite` 分支整理全屏重写的失败测试并修到全绿（归档提交 `4dbb214`，基点 `41ec0df`，尚未验收）。
-- [ ] 合并前逐项对齐菜单版功能：专辑路由、四档歌词、无损/Hi-Res、标签、主题持久化、批量试听、历史筛选/重试/导出、后台队列与退出清理。
-- [ ] 完成 Windows（含 GBK 控制台）、macOS、Linux 真机冒烟，覆盖 SSH/tmux、焦点与布局、登录恢复和下载任务控制，再评估是否合并。
+> 2026-09 评估结论：`tui-fullscreen-rewrite`（`4dbb214`，基点 `41ec0df`）整体复活约需 5-10
+> 人天——8 个测试文件需重写/合并、3 项功能缺失、两套 `download_queue` API 不兼容、
+> 且分支自带 `.part` 清理回归。已摘取其 `stage_callback` 思路与 `tests/test_pipeline_safety.py`
+> 的关键用例进入主线（v3.6.0）。分支继续存档；仅当菜单版 TUI 的形态确实无法满足需求时，
+> 才按"分支修绿 → 功能对齐 → 三平台真机冒烟"的流程重启，否则维持存档。
+
+- [ ] （重启前必做）重新评估：菜单版任务中心是否已覆盖全屏版的核心价值。
 
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
-- [ ] 逐步把覆盖率从 75% 提升到 95%，优先覆盖 TUI 路由和错误恢复分支。
+- [ ] 逐步把覆盖率从 75% 门槛提升到 95%，优先覆盖 TUI 路由和错误恢复分支。
 - [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
 
 ### Distribution
