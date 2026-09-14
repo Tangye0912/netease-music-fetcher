@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,16 @@ class TuiApp:
         self._apply_proxy()
         self.queue = DownloadQueue(self.history_store, self.session.cookie, self.session.download_concurrency)
         self._batches: list[tuple[list[BatchDetectRow], dict[int, str]]] = []
+        # Deferred UI notices: worker threads append, the menu loop prints.
+        self._notice_lock = threading.Lock()
+        self._pending_notices: list[tuple[str, bool]] = []
+        # Background startup validation of the saved cookie (generation guard
+        # so a manual login/logout supersedes an in-flight check).
+        self._login_checking = False
+        self._login_check_result = ""  # "" | ok | expired | transient
+        self._login_check_name = ""
+        self._login_check_gen = 0
+        self._login_thread: threading.Thread | None = None
 
     # ── bootstrap ─────────────────────────────────────────────────
 
@@ -137,34 +148,83 @@ class TuiApp:
         return f"{type_label} {config.host}:{config.port}"
 
     def _login_label(self) -> str:
+        if self._login_checking:
+            return "校验中…"
         if not self.session.cookie:
             return "未登录"
         if self._nickname:
             return self._nickname
         return "已登录"
 
-    def _validate_session_login(self) -> bool:
-        """Return True when a usable login exists; clear expired cookies.
+    # ── deferred notices (thread-safe) ────────────────────────────
 
-        An expired/invalid session cookie must not silently keep the menu
-        unlocked — the user has to re-login through the browser flow.
+    def _enqueue_notice(self, message: str, error: bool = False) -> None:
+        with self._notice_lock:
+            self._pending_notices.append((message, error))
+            del self._pending_notices[:-20]  # cap buildup during long subscreens
+
+    def _flush_notices(self) -> None:
+        with self._notice_lock:
+            notices, self._pending_notices = self._pending_notices, []
+        for message, error in notices:
+            if error:
+                U.print_warning(message)
+            else:
+                U.print_info(message)
+
+    # ── background startup login check ────────────────────────────
+
+    def _start_login_check(self) -> None:
+        """Validate the saved cookie in the background; the menu renders now.
+
+        Results are applied later by _drain_login_check on the UI thread so
+        the first screen never waits on the network.
         """
-        if not self.session.cookie:
-            return False
-        try:
-            profile = fetch_account_profile(self.session.cookie, timeout=6)
-            self._nickname = profile.nickname
-            return True
-        except MusicFetchError as err:
-            self._nickname = ""
-            if err.code == "AUTH_EXPIRED":
-                return False
-            # Transient network failure: keep the session and let individual
-            # operations surface the error instead of wrongly logging out.
-            return bool(self.session.cookie)
+        self._login_checking = True
+        self._login_check_result = ""
+        generation = self._login_check_gen
+        cookie = self.session.cookie
+
+        def worker() -> None:
+            try:
+                profile = fetch_account_profile(cookie, timeout=6)
+            except MusicFetchError as err:
+                result, name = ("expired", "") if err.code == "AUTH_EXPIRED" else ("transient", "")
+            else:
+                result, name = "ok", profile.nickname
+            if generation != self._login_check_gen:
+                return  # superseded by a manual login/logout while checking
+            self._login_check_name = name
+            self._login_check_result = result
+            self._login_checking = False
+
+        self._login_thread = threading.Thread(target=worker, name="login-check", daemon=True)
+        self._login_thread.start()
+
+    def _invalidate_login_check(self) -> None:
+        self._login_check_gen += 1
+        self._login_checking = False
+        self._login_check_result = ""
+
+    def _drain_login_check(self) -> None:
+        """Apply a finished background validation once, on the UI thread."""
+        if self._login_checking or not self._login_check_result:
+            return
+        result, name = self._login_check_result, self._login_check_name
+        self._login_check_result = ""
+        if result == "ok":
+            self._nickname = name
+            self._enqueue_notice(f"欢迎回来：{name or '已登录'}")
+        elif result == "expired":
+            self._clear_login()
+            self._enqueue_notice("登录状态已过期，请重新扫码登录。", error=True)
+        else:
+            self._enqueue_notice("暂时无法核实登录状态（网络问题），先使用已保存的会话。", error=True)
 
     def run(self) -> int:
         self.queue.start()
+        if self.session.cookie:
+            self._start_login_check()
         try:
             with U.background_status(self._queue_status):
                 return self._run_menu()
@@ -182,15 +242,15 @@ class TuiApp:
                 U.print_warning(self.queue.history_error)
 
     def _run_menu(self) -> int:
-        # A missing or expired app-owned credential always starts the isolated
-        # official QR flow.  No browser profile is inspected for a login state.
-        if self.session.cookie and not self._validate_session_login():
-            self._clear_login()
+        # A fresh install (no saved cookie) starts the isolated official QR
+        # flow immediately; an existing cookie is validated in the background.
         if not self.session.cookie:
             self._screen_login()
         while True:
             if self.queue.auth_required and self.session.cookie:
                 self._clear_login()
+                self._enqueue_notice("登录已失效，未完成任务已转入等待登录。", error=True)
+            self._drain_login_check()
             try:
                 U.clear_screen()
             except Exception:  # pragma: no cover - clear may fail on exotic terminals
@@ -205,6 +265,7 @@ class TuiApp:
                         ("ffmpeg", "可用" if is_ffmpeg_available() else "未安装"),
                     ]
                 )
+                self._flush_notices()
                 options = [
                     MENU_SINGLE,
                     MENU_SEARCH,
@@ -301,6 +362,7 @@ class TuiApp:
         self.session_store.save(self.session)
         self._nickname = profile.nickname
         self.queue.set_cookie(cookie)
+        self._invalidate_login_check()
         U.print_success(f"登录成功：{self._nickname or '已登录'}")
 
     def _require_login(self) -> bool:
@@ -314,6 +376,7 @@ class TuiApp:
         self.queue.set_cookie("")
         self.session.remember_login = False
         self._nickname = ""
+        self._invalidate_login_check()
         self.session_store.save(self.session)
 
     def _handle_auth_expired(self) -> bool:

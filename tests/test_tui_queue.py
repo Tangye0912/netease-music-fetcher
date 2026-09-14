@@ -98,7 +98,7 @@ def test_main_menu_can_search_after_submission_and_quit_can_be_declined(app, tmp
         assert MENU_TASKS in options
         return options.index(next(labels)) + 1
 
-    with mock.patch.object(app, "_validate_session_login", return_value=True), mock.patch(
+    with mock.patch("music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")), mock.patch(
         "music_fetch.tui.U.menu", side_effect=pick
     ), mock.patch.object(app, "_screen_search") as search, mock.patch(
         "music_fetch.tui.U.confirm", side_effect=[False, True]
@@ -142,7 +142,7 @@ def test_task_page_paging_pause_resume_cancel(app, tmp_path):
 def test_interrupted_subscreen_still_shuts_down_queue(app, tmp_path, error):
     app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "song.mp3"))
     app.queue.pause_all()
-    with mock.patch.object(app, "_validate_session_login", return_value=True), mock.patch(
+    with mock.patch("music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")), mock.patch(
         "music_fetch.tui.U.menu", side_effect=error
     ), mock.patch("music_fetch.tui.U.print_status"):
         assert app.run() == 0

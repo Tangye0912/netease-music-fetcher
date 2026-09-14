@@ -1,5 +1,6 @@
 import io
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -85,19 +86,109 @@ class TuiAppHelperTests(unittest.TestCase):
         # Not logged in -> the menu only offers 登录 / 退出.
         self.assertEqual(menu_mock.call_args.args[1], [music_fetch.tui.MENU_LOGIN, music_fetch.tui.MENU_QUIT])
 
-    def test_run_clears_expired_cookie_before_automatic_login(self):
+    def test_run_clears_expired_cookie_via_background_check(self):
         self.app.session.cookie = "MUSIC_U=expired"
         self.app.session.remember_login = True
-        with mock.patch.object(self.app, "_validate_session_login", return_value=False), mock.patch.object(
-            self.app, "_screen_login"
-        ) as login_mock, mock.patch("music_fetch.tui.U.menu", return_value=2), mock.patch(
-            "music_fetch.tui.U.clear_screen"
-        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch("music_fetch.tui.U.print_info"):
-            self.assertEqual(self.app.run(), 0)
-        login_mock.assert_called_once_with()
+        err = MusicFetchError("AUTH_EXPIRED", "expired")
+        with mock.patch("music_fetch.tui.fetch_account_profile", side_effect=err):
+            self.app._start_login_check()
+            self.app._login_thread.join(2)
+            self.assertFalse(self.app._login_checking)
+            self.app._drain_login_check()
+        self.assertEqual(self.app.session.cookie, "")
         stored = self.session_store.load()
         self.assertEqual(stored.cookie, "")
         self.assertFalse(stored.remember_login)
+        # The expired notice is queued for the menu loop to print.
+        self.assertTrue(any("重新扫码" in message for message, _error in self.app._pending_notices))
+
+    def test_login_label_shows_checking_state(self):
+        self.app.session.cookie = "MUSIC_U=abc"
+        self.app._login_checking = True
+        self.assertEqual(self.app._login_label(), "校验中…")
+        self.app._login_checking = False
+        self.assertEqual(self.app._login_label(), "已登录")
+
+    def test_background_login_check_success_applies_nickname(self):
+        self.app.session.cookie = "MUSIC_U=abc"
+        with mock.patch("music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测试用户")):
+            self.app._start_login_check()
+            self.app._login_thread.join(2)
+        self.assertFalse(self.app._login_checking)
+        self.app._drain_login_check()
+        self.assertEqual(self.app._nickname, "测试用户")
+        self.assertEqual(self.app.session.cookie, "MUSIC_U=abc")
+        self.assertTrue(any("欢迎回来" in message for message, _error in self.app._pending_notices))
+
+    def test_background_login_check_transient_keeps_session(self):
+        self.app.session.cookie = "MUSIC_U=abc"
+        with mock.patch("music_fetch.tui.fetch_account_profile",
+                        side_effect=MusicFetchError("NETWORK_ERROR", "timeout")):
+            self.app._start_login_check()
+            self.app._login_thread.join(2)
+        self.app._drain_login_check()
+        self.assertEqual(self.app.session.cookie, "MUSIC_U=abc")
+        self.assertTrue(any("网络问题" in message for message, _error in self.app._pending_notices))
+
+    def test_accept_cookie_supersedes_pending_check(self):
+        self.app.session.cookie = "MUSIC_U=old"
+        release = threading.Event()
+        started = threading.Event()
+
+        def slow_fetch(cookie, timeout):
+            if "old" in cookie:
+                started.set()
+                release.wait(2)
+                return mock.Mock(nickname="迟到的校验")
+            return mock.Mock(nickname="新用户")
+
+        with mock.patch("music_fetch.tui.fetch_account_profile", side_effect=slow_fetch):
+            self.app._start_login_check()
+            self.assertTrue(started.wait(2))
+            # A manual login finishes while the startup check is in flight.
+            self.app._accept_cookie("MUSIC_U=fresh; __csrf=x")
+            release.set()
+            self.app._login_thread.join(2)
+        # The superseded check must not overwrite the manual login.
+        self.assertEqual(self.app._nickname, "新用户")
+        self.assertEqual(self.app._login_check_result, "")
+
+    def test_run_renders_immediately_while_check_in_flight(self):
+        self.app.session.cookie = "MUSIC_U=abc"
+        release = threading.Event()
+
+        def slow_fetch(_cookie, timeout):
+            release.wait(2)
+            return mock.Mock(nickname="测试用户")
+
+        with mock.patch("music_fetch.tui.fetch_account_profile", side_effect=slow_fetch), \
+                mock.patch("music_fetch.tui.U.menu", return_value=11) as menu_mock, \
+                mock.patch("music_fetch.tui.U.print_status") as status_mock, \
+                mock.patch("music_fetch.tui.U.clear_screen"), \
+                mock.patch("music_fetch.tui.U.print_header"), \
+                mock.patch("music_fetch.tui.U.print_info"):
+            self.assertEqual(self.app.run(), 0)
+            release.set()
+        # The very first render already happened, with the checking label.
+        self.assertEqual(menu_mock.call_count, 1)
+        label = dict(status_mock.call_args.args[0])["登录"]
+        self.assertEqual(label, "校验中…")
+        if self.app._login_thread is not None:
+            self.app._login_thread.join(2)
+
+    def test_flush_notices_prints_and_clears(self):
+        self.app._enqueue_notice("普通消息")
+        self.app._enqueue_notice("错误消息", error=True)
+        with mock.patch("music_fetch.tui.U.print_info") as info_mock, mock.patch(
+            "music_fetch.tui.U.print_warning"
+        ) as warning_mock:
+            self.app._flush_notices()
+            self.app._flush_notices()
+        self.assertEqual(info_mock.call_args.args[0], "普通消息")
+        self.assertEqual(warning_mock.call_args.args[0], "错误消息")
+        # Second flush printed nothing.
+        self.assertEqual(info_mock.call_count, 1)
+        self.assertEqual(warning_mock.call_count, 1)
 
     @mock.patch("music_fetch.tui.U.print_warning")
     def test_handle_auth_expired_clears_cookie_before_relogin(self, _warning_mock):
