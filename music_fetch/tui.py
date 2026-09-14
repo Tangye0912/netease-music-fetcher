@@ -38,6 +38,7 @@ from music_fetch.app_settings import (
     MAX_UI_CONCURRENCY,
     MIN_DOWNLOAD_CONCURRENCY,
     PROJECT_GITHUB_URL,
+    QUEUE_FILE,
     SESSION_FILE,
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
@@ -103,6 +104,7 @@ class TuiApp:
         self,
         session_store: Optional[SessionStore] = None,
         history_store: Optional[DownloadHistoryStore] = None,
+        queue_path: Optional[Path] = None,
     ) -> None:
         self.session_store = session_store or SessionStore(SESSION_FILE)
         self.history_store = history_store or DownloadHistoryStore(DOWNLOAD_HISTORY_FILE)
@@ -110,7 +112,15 @@ class TuiApp:
         U.set_theme(self.session.ui_theme)
         self._nickname = ""
         self._apply_proxy()
-        self.queue = DownloadQueue(self.history_store, self.session.cookie, self.session.download_concurrency)
+        self.queue = DownloadQueue(self.history_store, self.session.cookie,
+                                   self.session.download_concurrency,
+                                   persist_path=queue_path if queue_path is not None else QUEUE_FILE)
+        restored, completed = self.queue.restore_saved()
+        if restored or completed:
+            message = f"已从上次运行恢复 {restored} 个未完成任务"
+            if completed:
+                message += f"，{completed} 个文件已存在、直接记为完成"
+            self._enqueue_notice(message + "。")
         self._batches: list[tuple[list[BatchDetectRow], dict[int, str]]] = []
         # Deferred UI notices: worker threads append, the menu loop prints.
         self._notice_lock = threading.Lock()

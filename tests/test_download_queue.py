@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from music_fetch.app_stores import DownloadHistoryStore
+from music_fetch.app_stores import DownloadHistoryStore, QueueStore
 from music_fetch.download_queue import DownloadQueue, DownloadRequest
 from music_fetch.download_runner import DownloadJob, DownloadJobResult, DownloadProgressSnapshot
 
@@ -346,3 +346,80 @@ def test_item_returns_snapshot_or_none(setup_queue, tmp_path):
     assert found.task_id == item.task_id
     assert found.job is None  # snapshots never expose the live worker
     assert queue.item("missing-task") is None
+
+
+def test_persist_writes_pending_tasks_only(setup_queue, tmp_path):
+    import json
+    queue, jobs, _history = setup_queue
+    queue._queue_store = QueueStore(tmp_path / "queue.json")
+    a = queue.enqueue(DownloadRequest("1", "song", tmp_path / "a.mp3"))
+    queue.enqueue(DownloadRequest("2", "song", tmp_path / "b.mp3"))
+    queue.poll()
+    queue.enqueue(DownloadRequest("3", "song", tmp_path / "c.mp3"))
+    queue.cancel(a.task_id)  # user-cancel of a dispatched task
+    next(j for j in jobs if j.output_path.name == "a.mp3").finish(state="canceled")
+    queue.poll()
+    entries = json.loads((tmp_path / "queue.json").read_text(encoding="utf-8"))
+    ids = {entry["request"]["song_id"] for entry in entries}
+    assert "1" not in ids  # canceled by the user, recorded, not persisted
+    assert ids == {"2", "3"}
+
+
+def test_close_with_persist_keeps_jobless_and_cancels_running(setup_queue, tmp_path):
+    import json
+    queue, jobs, history = setup_queue
+    queue._queue_store = QueueStore(tmp_path / "queue.json")
+    queue.enqueue(DownloadRequest("1", "jobless", tmp_path / "a.mp3"))
+    queue.enqueue(DownloadRequest("2", "running", tmp_path / "b.mp3"))
+    queue.poll()
+    assert len(jobs) == 2
+    running = next(j for j in jobs if j.output_path.name == "b.mp3")
+    running.start()
+    queue.close()
+    running.finish(state="canceled")
+    queue.poll()
+    # The live worker was canceled and recorded…
+    record = {r.song_id: r for r in history.load()}
+    assert record["2"].status == "canceled"
+    assert record.get("1") is None  # jobless task NOT recorded as canceled
+    # …while the jobless task is persisted for the next run.
+    entries = json.loads((tmp_path / "queue.json").read_text(encoding="utf-8"))
+    assert [entry["request"]["song_id"] for entry in entries] == ["1"]
+def test_restore_reenqueues_missing_and_records_existing(tmp_path):
+    import json
+    store_path = tmp_path / "queue.json"
+    existing_target = tmp_path / "done.mp3"
+    existing_target.write_bytes(b"finished")
+    store_path.write_text(json.dumps([
+        {"request": {"song_id": "1", "song_name": "已有", "output_path": str(existing_target)},
+         "state": "paused"},
+        {"request": {"song_id": "2", "song_name": "缺失", "output_path": str(tmp_path / "missing.mp3")},
+         "state": "pending"},
+    ], ensure_ascii=False), encoding="utf-8")
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 2, persist_path=store_path)
+    restored, completed = queue.restore_saved()
+    assert (restored, completed) == (1, 1)
+    # The existing file was recorded as a completed download, not re-downloaded.
+    record = {r.song_id: r for r in history.load()}
+    assert record["1"].status == "success"
+    assert record["1"].size_bytes == len(b"finished")
+    # The missing file was re-enqueued.
+    assert [i.request.song_id for i in queue.snapshot()] == ["2"]
+    # And the store no longer lists the completed one.
+    entries = json.loads(store_path.read_text(encoding="utf-8"))
+    assert [entry["request"]["song_id"] for entry in entries] == ["2"]
+
+
+def test_restore_tolerates_malformed_store(tmp_path):
+    store_path = tmp_path / "queue.json"
+    store_path.write_text("not-json-at-all", encoding="utf-8")
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    assert queue.restore_saved() == (0, 0)
+    assert queue.snapshot() == ()
+
+
+def test_restore_without_store_is_noop(setup_queue):
+    queue, _jobs, _history = setup_queue
+    assert queue.restore_saved() == (0, 0)

@@ -15,6 +15,7 @@ PROJECT_TAGS_API = "https://api.github.com/repos/Tangye0912/netease-music-fetche
 CONFIG_DIR = Path.home() / ".config" / APP_NAME
 SESSION_FILE = CONFIG_DIR / "session.json"
 DOWNLOAD_HISTORY_FILE = CONFIG_DIR / "downloads.json"
+QUEUE_FILE = CONFIG_DIR / "queue.json"
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads")
 
 DEFAULT_GUI_TARGET_FORMAT = "mp3"

@@ -15,7 +15,7 @@ import music_fetch.tui_utils as U
 
 @pytest.fixture
 def app(tmp_path):
-    app = TuiApp(SessionStore(tmp_path / "session.json"), DownloadHistoryStore(tmp_path / "history.json"))
+    app = TuiApp(SessionStore(tmp_path / "session.json"), DownloadHistoryStore(tmp_path / "history.json"), queue_path=tmp_path / "queue.json")
     app.session.cookie = "MUSIC_U=test"
     app.queue.set_cookie(app.session.cookie)
     with mock.patch("music_fetch.tui.U.print_info"), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
@@ -105,7 +105,10 @@ def test_main_menu_can_search_after_submission_and_quit_can_be_declined(app, tmp
     ), mock.patch("music_fetch.tui.U.print_status"):
         assert app.run() == 0
     search.assert_called_once()
-    assert app.queue.snapshot()[0].state == "canceled"
+    # Quitting keeps unfinished (jobless) tasks for the next run instead of
+    # recording them as canceled.
+    assert app.queue.snapshot()[0].state == "paused"
+    assert (tmp_path / "queue.json").exists()
 
 
 def test_task_page_accessible_when_logged_out(app, tmp_path):
@@ -169,7 +172,10 @@ def test_interrupted_subscreen_still_shuts_down_queue(app, tmp_path, error):
         "music_fetch.tui.U.menu", side_effect=error
     ), mock.patch("music_fetch.tui.U.print_status"):
         assert app.run() == 0
-    assert app.queue.snapshot()[0].state == "canceled"
+    # The queue shuts down cleanly; the jobless task is persisted, not canceled.
+    assert app.queue.wait(2)
+    assert app.queue.snapshot()[0].state == "paused"
+    assert (tmp_path / "queue.json").exists()
 
 
 def test_status_provider_refreshes_during_real_input_and_preserves_typed_text():

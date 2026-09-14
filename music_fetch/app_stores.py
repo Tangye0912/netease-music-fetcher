@@ -289,3 +289,27 @@ class DownloadHistoryStore:
         if is_valid_task_state(normalized):
             return normalized
         return TASK_STATE_SUCCESS
+
+
+class QueueStore:
+    """Persisted pending-download list (atomic private JSON).
+
+    Entries are opaque dicts shaped by download_queue._request_to_dict;
+    this store only handles durable load/save.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def load(self) -> list[dict[str, object]]:
+        if not self.path.exists():
+            return []
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            logger.warning("Failed to parse queue file, ignoring. path=%s", self.path)
+            return []
+        return data if isinstance(data, list) else []
+
+    def save(self, entries: list[dict[str, object]]) -> None:
+        _write_private_json(self.path, entries)

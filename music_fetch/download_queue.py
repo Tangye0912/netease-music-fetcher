@@ -9,10 +9,13 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import MAX_UI_CONCURRENCY
-from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord
+from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord, QueueStore
 from music_fetch.download_runner import DownloadJob, DownloadProgressSnapshot
 from music_fetch.error_texts import user_error_message
+
+logger = get_logger("music_fetch.queue")
 
 FINAL_STATES = frozenset({"success", "failed", "canceled"})
 STATE_LABELS = {
@@ -41,6 +44,46 @@ class DownloadRequest:
     retry_count: int = 1
 
 
+_REQUEST_FIELDS = (
+    "song_id", "song_name", "output_path", "target_format", "download_lyric",
+    "lyric_mode", "artist", "album_name", "cover_url", "timeout", "retry_count",
+)
+
+
+def _request_to_dict(request: DownloadRequest) -> dict[str, object]:
+    data: dict[str, object] = {}
+    for name in _REQUEST_FIELDS:
+        value = getattr(request, name)
+        data[name] = str(value) if isinstance(value, Path) else value
+    return data
+
+
+def _request_from_dict(data: dict[str, object]) -> DownloadRequest:
+    def text(name: str) -> str:
+        return str(data.get(name, ""))
+
+    def optional_text(name: str) -> str | None:
+        value = data.get(name)
+        return str(value) if value not in (None, "") else None
+
+    output = data.get("output_path")
+    if not isinstance(output, str) or not output:
+        raise KeyError("output_path")
+    return DownloadRequest(
+        song_id=text("song_id"),
+        song_name=text("song_name"),
+        output_path=Path(output),
+        target_format=text("target_format") or "mp3",
+        download_lyric=bool(data.get("download_lyric", False)),
+        lyric_mode=text("lyric_mode") or "original",
+        artist=optional_text("artist"),
+        album_name=optional_text("album_name"),
+        cover_url=optional_text("cover_url"),
+        timeout=int(data.get("timeout", 10) or 10),
+        retry_count=int(data.get("retry_count", 1) or 1),
+    )
+
+
 @dataclass
 class QueueItem:
     request: DownloadRequest
@@ -64,7 +107,8 @@ class DownloadQueue:
     """
 
     def __init__(self, history_store: DownloadHistoryStore, cookie: str = "", concurrency: int = 1,
-                 job_factory: Callable[..., DownloadJob] = DownloadJob) -> None:
+                 job_factory: Callable[..., DownloadJob] = DownloadJob,
+                 persist_path: Path | None = None) -> None:
         self._history_store = history_store
         self._cookie = cookie
         self._concurrency = max(1, min(MAX_UI_CONCURRENCY, concurrency))
@@ -77,6 +121,8 @@ class DownloadQueue:
         self._paused = False
         self._history_error = ""
         self._last_history_retry = 0.0
+        self._queue_store = QueueStore(persist_path) if persist_path is not None else None
+        self._persist_sig: object = None
 
     def start(self) -> None:
         with self._lock:
@@ -220,7 +266,17 @@ class DownloadQueue:
     def close(self) -> None:
         with self._lock:
             self._closing = True
-            self.cancel_all()
+            if self._queue_store is None:
+                self.cancel_all()
+            else:
+                # Interrupt live workers only; jobless unfinished tasks stay
+                # in the queue and are persisted for the next run instead of
+                # being recorded as canceled.
+                for item in self._items:
+                    if item.job:
+                        item.state = "canceling"
+                        item.job.request_cancel()
+                        item.job.request_resume()
             self._last_history_retry = 0
             self.poll()
         self._wake.set()
@@ -291,6 +347,65 @@ class DownloadQueue:
                 for item in self._items:
                     if item.state in FINAL_STATES:
                         self._record(item)
+            self._persist_if_changed()
+
+    # ── cross-restart persistence ─────────────────────────────────
+
+    def _persist_if_changed(self) -> None:
+        """Save unfinished tasks when the pending set changed since last write."""
+        if self._queue_store is None:
+            return
+        signature = tuple(sorted(
+            (item.task_id, item.state) for item in self._items if item.state not in FINAL_STATES
+        ))
+        if signature == self._persist_sig:
+            return
+        self._persist_sig = signature
+        entries: list[dict[str, object]] = [
+            {"request": _request_to_dict(item.request), "state": item.state}
+            for item in self._items if item.state not in FINAL_STATES
+        ]
+        try:
+            self._queue_store.save(entries)
+        except OSError as err:
+            logger.warning("Failed to persist queue. path=%s reason=%s",
+                           self._queue_store.path, err)
+
+    def restore_saved(self) -> tuple[int, int]:
+        """Re-enqueue tasks persisted by a previous run.
+
+        Tasks whose target file already exists are treated as completed and
+        recorded to history instead of being downloaded again.  Returns
+        (restored, completed_on_disk).
+        """
+        if self._queue_store is None:
+            return (0, 0)
+        restored = completed = 0
+        for entry in self._queue_store.load():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                payload = entry.get("request")
+                if not isinstance(payload, dict):
+                    continue
+                request = _request_from_dict(payload)
+            except (KeyError, TypeError, ValueError, OSError):
+                logger.warning("Skipping malformed persisted task. entry=%r", entry)
+                continue
+            if request.output_path.exists():
+                done = QueueItem(
+                    request=request, output_path=request.output_path, state="success",
+                    size_bytes=request.output_path.stat().st_size,
+                )
+                self._record(done)
+                completed += 1
+                continue
+            self.enqueue(request)
+            restored += 1
+        self._persist_sig = None  # force the next poll to rewrite the store
+        with self._lock:
+            self._persist_if_changed()
+        return (restored, completed)
 
     def _record(self, item: QueueItem) -> None:
         if item.recorded:

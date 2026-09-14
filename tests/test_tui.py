@@ -33,7 +33,8 @@ class TuiAppHelperTests(unittest.TestCase):
         base = Path(self._tmp.name)
         self.session_store = SessionStore(base / "session.json")
         self.history_store = DownloadHistoryStore(base / "history.json")
-        self.app = TuiApp(session_store=self.session_store, history_store=self.history_store)
+        self.app = TuiApp(session_store=self.session_store, history_store=self.history_store,
+                          queue_path=Path(self._tmp.name) / "queue.json")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -342,7 +343,8 @@ class TuiAppHelperTests(unittest.TestCase):
         self.session_store.save(stored)
 
         with mock.patch("music_fetch.tui.U.set_theme", return_value="light") as set_theme_mock:
-            TuiApp(session_store=self.session_store, history_store=self.history_store)
+            TuiApp(session_store=self.session_store, history_store=self.history_store,
+                           queue_path=Path(self._tmp.name) / "queue.json")
 
         set_theme_mock.assert_called_once_with("light")
 
