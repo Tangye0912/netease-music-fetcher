@@ -292,3 +292,41 @@ def test_task_page_retry_failed_without_failures_warns(app, tmp_path):
         app._screen_tasks()
     warning_mock.assert_called_once_with("没有失败的任务。")
     assert retry_mock.call_count == 0
+
+
+def test_task_page_batch_column_and_grouped_view(app, tmp_path):
+    from music_fetch.batch_models import BatchDetectRow
+
+    # A batch of two + one standalone single.
+    batch_rows = [
+        BatchDetectRow(raw_input="x", song_id="1", song_name="歌一", status="ready", selected=True),
+        BatchDetectRow(raw_input="y", song_id="2", song_name="歌二", status="ready", selected=True),
+    ]
+    task_ids: dict[int, str] = {}
+    for index, row in enumerate(batch_rows):
+        item = app.queue.enqueue(DownloadRequest(row.song_id, row.song_name, tmp_path / f"{row.song_id}.mp3"))
+        task_ids[index] = item.task_id
+    app.queue.enqueue(DownloadRequest("9", "单曲歌", tmp_path / "9.mp3"))
+    app._batches.append((batch_rows, task_ids))
+    app.queue._items[0].state = "success"  # batch song 1 is already done
+
+    flat = app._render_task_screen(0, grouped=False)
+    assert "B1" in flat and "单曲" in flat
+
+    grouped = app._render_task_screen(0, grouped=True)
+    assert "批次 B1：共 2 首 · 完成 1（成功 1）" in grouped
+    assert "歌一" in grouped and "歌二" in grouped
+    assert "单曲（1）" in grouped and "单曲歌" in grouped
+
+    # g toggles the view between renders.
+    rendered = []
+    inputs = iter(["g", "g", "0"])
+    def fake_live_ask(render, prompt_text=""):
+        rendered.append(render())
+        return next(inputs)
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=fake_live_ask), mock.patch(
+        "music_fetch.tui.U.print_warning"
+    ):
+        app._screen_tasks()
+    assert "批次 B1：共 2 首" in rendered[1]
+    assert "第 1/1 页" in rendered[2]

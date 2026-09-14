@@ -17,7 +17,7 @@ import threading
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from music_fetch.api import (
     MusicFetchError,
@@ -786,39 +786,74 @@ class TuiApp:
             parts.append("历史保存失败")
         return "任务 | " + " · ".join(parts)
 
+    def _batch_label_map(self) -> dict[str, str]:
+        """task_id → 批次 label (B1/B2/…)；不在任何批次里的任务是单曲。"""
+        labels: dict[str, str] = {}
+        for batch_no, (_rows, mapping) in enumerate(self._batches, start=1):
+            for task_id in mapping.values():
+                labels.setdefault(task_id, f"B{batch_no}")
+        return labels
+
+    @staticmethod
+    def _task_row(item: QueueItem, index: str, batch: str) -> tuple[str, str, str, str, str]:
+        progress = item.progress
+        size = format_bytes(item.size_bytes if item.state == "success" else progress.downloaded)
+        if progress.total > 0 and item.state not in FINAL_STATES:
+            size += f"/{format_bytes(progress.total)}（{progress.downloaded * 100 // progress.total}%）"
+        return (index, item.request.song_name or item.request.song_id, batch,
+                STATE_LABELS[item.state], size)
+
     def _render_task_screen(self, page: int, grouped: bool) -> str:
         """Full task-page content for live rendering; re-reads the queue snapshot."""
         items = self.queue.snapshot()
         if not items:
             return " 暂无任务。"
-        total_pages = max(1, (len(items) + 7) // 8)
-        page = max(0, min(page, total_pages - 1))
-        start = page * 8
-        page_items = items[start:start + 8]
-        rows = []
-        for index, item in enumerate(page_items, start=start + 1):
-            progress = item.progress
-            size = format_bytes(item.size_bytes if item.state == "success" else progress.downloaded)
-            if progress.total > 0 and item.state not in FINAL_STATES:
-                size += f"/{format_bytes(progress.total)}（{progress.downloaded * 100 // progress.total}%）"
-            rows.append((str(index), item.request.song_name or item.request.song_id,
-                         STATE_LABELS[item.state], size))
-        parts = [
-            U.format_header(MENU_TASKS),
-            "",
-            U.format_table(["#", "歌曲", "状态", "大小"], rows),
-            f" 第 {page + 1}/{total_pages} 页 · 共 {len(items)} 个任务 · 表格每 0.5 秒自动刷新",
-        ]
+        labels = self._batch_label_map()
+        parts = [U.format_header(MENU_TASKS), ""]
+        if grouped:
+            parts.append(self._render_grouped_tasks(items, labels))
+        else:
+            total_pages = max(1, (len(items) + 7) // 8)
+            page = max(0, min(page, total_pages - 1))
+            start = page * 8
+            page_items = items[start:start + 8]
+            rows = [self._task_row(item, str(index), labels.get(item.task_id, "单曲"))
+                    for index, item in enumerate(page_items, start=start + 1)]
+            parts.append(U.format_table(["#", "歌曲", "批次", "状态", "大小"], rows))
+            parts.append(f" 第 {page + 1}/{total_pages} 页 · 共 {len(items)} 个任务 · 表格每 0.5 秒自动刷新")
         if self.queue.history_error:
             parts.append(f" ! {self.queue.history_error}")
         return "\n".join(parts)
+
+    def _render_grouped_tasks(self, items: Sequence[QueueItem], labels: dict[str, str]) -> str:
+        """Batch-section view: one table per batch plus a leftovers section."""
+        by_id = {item.task_id: item for item in items}
+        sections: list[str] = []
+        grouped_ids: set[str] = set()
+        for batch_no, (_rows, mapping) in enumerate(self._batches, start=1):
+            members = [by_id[task_id] for task_id in mapping.values() if task_id in by_id]
+            if not members:
+                continue
+            grouped_ids.update(member.task_id for member in members)
+            finished = sum(member.state in FINAL_STATES for member in members)
+            ok = sum(member.state == "success" for member in members)
+            rows = [self._task_row(member, str(i), f"B{batch_no}") for i, member in enumerate(members, start=1)]
+            header = f" 批次 B{batch_no}：共 {len(members)} 首 · 完成 {finished}（成功 {ok}）"
+            sections.append(header + "\n" + U.format_table(["#", "歌曲", "批次", "状态", "大小"], rows))
+        singles = [item for item in items if item.task_id not in grouped_ids]
+        if singles:
+            rows = [self._task_row(item, str(i), "单曲") for i, item in enumerate(singles, start=1)]
+            sections.append(f" 单曲（{len(singles)}）\n" + U.format_table(["#", "歌曲", "批次", "状态", "大小"], rows))
+        if not sections:
+            return " 暂无任务。"
+        return "\n\n".join(sections)
 
     def _screen_tasks(self) -> None:
         if not self.queue.snapshot():
             U.print_info("暂无任务。")
             return
         page = 0
-        grouped = False  # reserved for the batch-grouping view (v3.6.0)
+        grouped = False
         while True:
             items = self.queue.snapshot()
             total_pages = max(1, (len(items) + 7) // 8)
@@ -827,7 +862,7 @@ class TuiApp:
             page_items = items[start:start + 8]
             raw = U.live_ask(
                 lambda: self._render_task_screen(page, grouped),
-                "序号 操作 · P 暂停全部 · R 恢复全部 · c 取消全部 · f 重试失败 · l 登录 · e 批次结果 · n/p 翻页 · 0 返回",
+                "序号 操作 · P 暂停全部 · R 恢复全部 · c 取消全部 · f 重试失败 · l 登录 · e 批次结果 · g 分组 · n/p 翻页 · 0 返回",
             )
             if raw in {"0", "q"}:
                 return
@@ -835,6 +870,8 @@ class TuiApp:
                 self.queue.pause_all()
             elif raw == "R":
                 self.queue.resume_all()
+            elif raw == "g":
+                grouped = not grouped
             elif raw == "c":
                 if U.confirm("取消所有未完成任务？", default=False):
                     self.queue.cancel_all()
