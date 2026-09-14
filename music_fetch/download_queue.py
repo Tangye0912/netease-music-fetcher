@@ -20,6 +20,10 @@ STATE_LABELS = {
     "canceling": "取消中", "waiting_login": "等待登录",
     "success": "已完成", "failed": "失败", "canceled": "已取消",
 }
+STAGE_LABELS = {
+    "resolving": "解析播放地址", "downloading": "下载中", "retrying": "重试中",
+    "converting": "转码中", "tagging": "写入标签", "lyrics": "下载歌词",
+}
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,14 @@ class DownloadQueue:
     def snapshot(self) -> tuple[QueueItem, ...]:
         with self._lock:
             return tuple(replace(item, job=None) for item in self._items)
+
+    def item(self, task_id: str) -> QueueItem | None:
+        """Snapshot copy of one task, or None when the id is unknown."""
+        with self._lock:
+            for item in self._items:
+                if item.task_id == task_id:
+                    return replace(item, job=None)
+        return None
 
     @property
     def auth_required(self) -> bool:

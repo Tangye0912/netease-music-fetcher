@@ -176,10 +176,16 @@ class PrintPanelTests(unittest.TestCase):
         captured: list[str] = []
         with mock.patch.object(tui_utils, "print_info", side_effect=captured.append):
             tui_utils.print_panel("歌曲信息", [("歌名", "天下"), ("音质", "较高")], max_width=40)
-        plain = [_plain(line) for line in captured]
+        plain = _plain(captured[0]).splitlines()
         self.assertIn("歌曲信息", plain[0])
         self.assertTrue(any("天下" in line for line in plain))
         self.assertEqual(plain[-1][:1], "└")
+
+    def test_format_panel_returns_lines_without_printing(self) -> None:
+        panel = tui_utils.format_panel("歌曲信息", [("歌名", "天下")], max_width=40)
+        plain = _plain(panel).splitlines()
+        self.assertEqual(plain[-1][:1], "└")
+        self.assertIn("天下", plain[1])
 
 
 if __name__ == "__main__":

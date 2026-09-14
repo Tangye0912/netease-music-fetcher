@@ -39,6 +39,7 @@ class DownloadProgressSnapshot:
     downloaded: int
     total: int  # -1 when the server did not report a total size
     speed: float  # bytes per second, averaged over the whole run
+    stage: str = ""  # pipeline phase: resolving/downloading/converting/tagging/lyrics
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ class DownloadJob:
         self._downloaded = 0
         self._total = -1
         self._speed = 0.0
+        self._stage = ""
         self._started_at: Optional[float] = None
         self._state = JOB_STATE_PENDING
         self._result: Optional[DownloadJobResult] = None
@@ -132,6 +134,7 @@ class DownloadJob:
                 downloaded=self._downloaded,
                 total=self._total,
                 speed=self._speed,
+                stage=self._stage,
             )
 
     def result(self) -> Optional[DownloadJobResult]:
@@ -145,6 +148,10 @@ class DownloadJob:
             self._downloaded = downloaded
             self._total = total if total is not None else -1
             self._speed = speed
+
+    def _set_stage(self, stage: str) -> None:
+        with self._lock:
+            self._stage = stage
 
     def _finish(self, result: DownloadJobResult) -> None:
         with self._lock:
@@ -184,6 +191,7 @@ class DownloadJob:
                 tags=self._tags,
                 download_lyric=self.download_lyric,
                 lyric_mode=self.lyric_mode,
+                stage_callback=self._set_stage,
             )
             self._finish(
                 DownloadJobResult(

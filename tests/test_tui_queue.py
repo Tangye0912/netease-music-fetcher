@@ -8,7 +8,7 @@ from prompt_toolkit.output import DummyOutput
 
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.batch_models import BatchDetectRow
-from music_fetch.download_queue import DownloadRequest
+from music_fetch.download_queue import DownloadProgressSnapshot, DownloadRequest
 from music_fetch.tui import MENU_QUIT, MENU_SEARCH, MENU_TASKS, TuiApp
 import music_fetch.tui_utils as U
 
@@ -231,10 +231,29 @@ def test_batch_summary_keeps_failures_and_reason_counts(app, tmp_path):
 def test_task_details_apply_controls(app, tmp_path, action, state):
     item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "song.mp3"))
     with mock.patch("music_fetch.tui.U.print_panel"), mock.patch(
-        "music_fetch.tui.U.menu", side_effect=lambda title, options: options.index(action) + 1
-    ):
+        "music_fetch.tui.U.live_ask", return_value=""
+    ), mock.patch("music_fetch.tui.U.menu", side_effect=lambda title, options: options.index(action) + 1):
         app._task_actions(item)
     assert app.queue.snapshot()[0].state == state
+
+
+def test_task_detail_live_view_shows_stage_and_progress(app, tmp_path):
+    item = app.queue.enqueue(DownloadRequest("1", "歌一", tmp_path / "1.mp3"))
+    app.queue._items[0].state = "running"
+    app.queue._items[0].progress = DownloadProgressSnapshot(2048, 4096, 1024.0, "downloading")
+    rendered = []
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=lambda render, prompt_text="": (rendered.append(render()), "")[1]), mock.patch(
+        "music_fetch.tui.U.print_panel"
+    ) as panel, mock.patch(
+        "music_fetch.tui.U.menu", return_value=len(app._task_action_options(item))
+    ):
+        app._task_actions(item)
+    text = rendered[0]
+    assert "任务详情" in text
+    assert "下载中" in text
+    assert "2.0KB/4.0KB（50%）" in text
+    # After Enter, the static panel is printed with the fresh snapshot.
+    assert panel.called
 
 
 def test_task_page_retry_failed_requires_confirmation(app, tmp_path):

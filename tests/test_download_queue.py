@@ -336,3 +336,13 @@ def test_individually_paused_task_stays_paused_after_auth_expiry(setup_queue, tm
     queue.resume(item.task_id)
     queue.poll()
     assert len(jobs) == 2 and jobs[1].cookie == "new"
+
+
+def test_item_returns_snapshot_or_none(setup_queue, tmp_path):
+    queue, _jobs, _history = setup_queue
+    item = queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
+    found = queue.item(item.task_id)
+    assert found is not None
+    assert found.task_id == item.task_id
+    assert found.job is None  # snapshots never expose the live worker
+    assert queue.item("missing-task") is None

@@ -350,3 +350,75 @@ class LyricModeTests(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertIn("[00:01.00]orig", saved[0])
         self.assertIn("[00:01.00]trans", saved[0])
+
+
+class StageCallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.output_path = Path(self.tmp.name) / "test.mp3"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_stages_reported_in_order(self):
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.write_bytes(b"data")
+            return PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        stages = []
+        with mock.patch("music_fetch.pipeline.download_song_with_fallback", side_effect=fake_fallback), \
+                mock.patch("music_fetch.api.fetch_lyric", return_value=mock.Mock(lyric="[00:01]x", translated_lyric="")), \
+                mock.patch("music_fetch.audio.save_lyric_file"), \
+                mock.patch("music_fetch.audio.embed_lyric_tag"):
+            run_download_pipeline(
+                song_id="42",
+                cookie="MUSIC_U=test",
+                output_path=self.output_path,
+                target_format="mp3",
+                download_lyric=True,
+                stage_callback=stages.append,
+            )
+        self.assertEqual(stages[0], "resolving")
+        self.assertIn("downloading", stages)
+        self.assertIn("converting", stages)
+        self.assertEqual(stages[-1], "lyrics")
+
+    def test_stage_callback_exception_is_swallowed(self):
+        def fake_fallback(song_id, cookie, output_path, timeout, prefer_format, **kwargs):
+            output_path.write_bytes(b"data")
+            return PlayableCandidate(
+                media_url="https://example.com/song.mp3",
+                duration_ms=120000,
+                level="standard",
+                encode_type="mp3",
+            )
+
+        with mock.patch("music_fetch.pipeline.download_song_with_fallback", side_effect=fake_fallback):
+            result = run_download_pipeline(
+                song_id="42",
+                cookie="MUSIC_U=test",
+                output_path=self.output_path,
+                target_format="mp3",
+                stage_callback=mock.Mock(side_effect=RuntimeError("ui boom")),
+            )
+        self.assertTrue(result.output_path.exists())
+
+    def test_cancel_preserves_pre_existing_target_file(self):
+        self.output_path.write_bytes(b"already-here")
+        with mock.patch(
+            "music_fetch.pipeline.download_song_with_fallback",
+            side_effect=DownloadCanceled(),
+        ):
+            with self.assertRaises(DownloadCanceled):
+                run_download_pipeline(
+                    song_id="42",
+                    cookie="MUSIC_U=test",
+                    output_path=self.output_path,
+                    target_format="mp3",
+                )
+        self.assertEqual(self.output_path.read_bytes(), b"already-here")

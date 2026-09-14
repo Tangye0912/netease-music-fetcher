@@ -52,7 +52,7 @@ from music_fetch.diagnostics import (
     run_network_diagnostics,
 )
 from music_fetch.download_retry import retry_target_format
-from music_fetch.download_queue import DownloadQueue, DownloadRequest, QueueItem, FINAL_STATES, STATE_LABELS
+from music_fetch.download_queue import DownloadQueue, DownloadRequest, QueueItem, FINAL_STATES, STATE_LABELS, STAGE_LABELS
 from music_fetch.download_tasks import TASK_STATE_FAILED
 from music_fetch.error_texts import user_error_message
 from music_fetch.history_results import (
@@ -850,10 +850,28 @@ class TuiApp:
             elif raw:
                 U.print_warning("请输入当前页序号或提示中的操作键。")
 
-    def _task_actions(self, item: QueueItem) -> None:
-        U.print_panel("任务详情", [("歌曲", item.request.song_name or item.request.song_id),
-                                   ("状态", STATE_LABELS[item.state]), ("文件", str(item.output_path)),
-                                   ("说明", item.message or "-")])
+    @staticmethod
+    def _task_detail_rows(item: QueueItem) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = [
+            ("歌曲", item.request.song_name or item.request.song_id),
+            ("状态", STATE_LABELS[item.state]),
+        ]
+        progress = item.progress
+        if item.state == "running":
+            rows.append(("阶段", STAGE_LABELS.get(progress.stage, "下载中")))
+            size_text = format_bytes(progress.downloaded)
+            if progress.total > 0:
+                size_text += f"/{format_bytes(progress.total)}（{progress.downloaded * 100 // progress.total}%）"
+            rows.append(("进度", f"{size_text} · {format_speed(progress.speed)}"))
+        elif item.state == "success" and item.size_bytes:
+            rows.append(("大小", format_bytes(item.size_bytes)))
+        rows.append(("文件", str(item.output_path)))
+        if item.message:
+            rows.append(("说明", item.message))
+        return rows
+
+    @staticmethod
+    def _task_action_options(item: QueueItem) -> list[str]:
         options = ["打开所在文件夹"]
         if item.state in {"pending", "running", "waiting_login"}:
             options.append("暂停")
@@ -864,6 +882,24 @@ class TuiApp:
         elif item.state in {"failed", "canceled"}:
             options.append("重试")
         options.append("返回")
+        return options
+
+    def _task_actions(self, item: QueueItem) -> None:
+        task_id = item.task_id
+        current = self.queue.item(task_id) or item
+        if current.state not in FINAL_STATES:
+            # Live detail: the panel re-renders every 0.5s while the user waits.
+            def render() -> str:
+                live = self.queue.item(task_id) or item
+                return (U.format_header("任务详情") + "\n\n" + U.format_panel("任务详情", self._task_detail_rows(live))
+                        + "\n\n 回车打开操作菜单 · 0 返回列表（详情每 0.5 秒刷新）")
+
+            raw = U.live_ask(render)
+            if raw == "0":
+                return
+            current = self.queue.item(task_id) or current
+        U.print_panel("任务详情", self._task_detail_rows(current))
+        options = self._task_action_options(current)
         action = options[U.menu("操作", options) - 1]
         if action == "打开所在文件夹":
             self._open_path(item.output_path.parent)

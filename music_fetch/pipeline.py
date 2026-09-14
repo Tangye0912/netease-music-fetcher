@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from music_fetch.api import (
     DownloadCanceled,
@@ -59,11 +59,24 @@ def run_download_pipeline(
     tags: Optional[dict[str, Optional[str]]] = None,
     download_lyric: bool = False,
     lyric_mode: str = "original",
+    stage_callback: Optional[Callable[[str], None]] = None,
 ) -> DownloadPipelineResult:
     """Execute the full download pipeline: retry loop, fallback, conversion.
 
+    *stage_callback* (optional) reports coarse progress phases — "resolving",
+    "downloading", "converting", "tagging", "lyrics" — for UI display.
+
     Raises DownloadCanceled or MusicFetchError.
     """
+
+    def emit_stage(stage: str) -> None:
+        if stage_callback is None:
+            return
+        try:
+            stage_callback(stage)
+        except Exception:  # a UI callback must never break the download
+            logger.debug("stage callback failed. stage=%s", stage, exc_info=True)
+
     logger.info(
         "Download pipeline started. song_id=%s output=%s format=%s timeout=%s retry=%s",
         song_id, output_path, target_format, timeout, retry_count,
@@ -81,7 +94,9 @@ def run_download_pipeline(
     # ── Retry loop ──────────────────────────────────────────────
     selected: Optional[PlayableCandidate] = None
     for attempt in range(1, retry_count + 2):
+        emit_stage("resolving" if attempt == 1 else "retrying")
         try:
+            emit_stage("downloading")
             selected = download_song_with_fallback(
                 song_id=song_id,
                 cookie=cookie,
@@ -120,6 +135,7 @@ def run_download_pipeline(
         raise DownloadCanceled()
 
     # ── Format conversion / move ────────────────────────────────
+    emit_stage("converting")
     if source_format == target_format:
         temp_source_path.replace(output_path)
         if cancel_checker and cancel_checker():
@@ -165,6 +181,7 @@ def run_download_pipeline(
             _cleanup_paths(output_path)
             raise DownloadCanceled()
 
+    emit_stage("tagging")
     if tags:
         # Tag writing must never fail an already-completed download.
         try:
@@ -178,6 +195,7 @@ def run_download_pipeline(
         except Exception:
             logger.warning("Failed to write audio tags. song_id=%s", song_id, exc_info=True)
     if download_lyric:
+        emit_stage("lyrics")
         from music_fetch.api import fetch_lyric
         from music_fetch.audio import merge_bilingual_lyric, save_lyric_file, embed_lyric_tag
         try:

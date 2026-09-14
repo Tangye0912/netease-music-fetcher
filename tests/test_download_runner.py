@@ -192,3 +192,36 @@ class DownloadJobFailureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StageProgressTests(unittest.TestCase):
+    def test_stage_visible_in_progress_snapshot(self):
+        import threading as th
+        import time as t
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "song.mp3"
+            stage_seen = th.Event()
+            release = th.Event()
+
+            def fake_pipeline(**kwargs):
+                kwargs["stage_callback"]("downloading")
+                stage_seen.set()
+                release.wait(2)
+                output.write_bytes(b"data")
+                return DownloadPipelineResult(
+                    output_path=output,
+                    file_size=4,
+                    candidate=PlayableCandidate("https://example.invalid/a.mp3", 0, "standard", "mp3"),
+                    source_format="mp3",
+                )
+
+            job = DownloadJob(task_id="t", song_id="1", output_path=output, cookie="MUSIC_U=x")
+            with mock.patch("music_fetch.download_runner.run_download_pipeline", side_effect=fake_pipeline):
+                job.start()
+                self.assertTrue(stage_seen.wait(2))
+                deadline = t.time() + 2
+                while t.time() < deadline and job.progress().stage != "downloading":
+                    t.sleep(0.01)
+                self.assertEqual(job.progress().stage, "downloading")
+                release.set()
+                self.assertTrue(job.wait(2))

@@ -341,12 +341,12 @@ def menu(
         print_warning(f"请输入 1-{len(options)} 之间的数字。")
 
 
-def print_panel(
+def format_panel(
     title: str,
     rows: Sequence[tuple[str, str]],
     max_width: int = MAX_CONTENT_WIDTH,
-) -> None:
-    """Print a bordered info card with a centered title and key-value rows."""
+) -> str:
+    """Render a bordered info card as a multi-line string (no printing)."""
     terminal_width = min(shutil.get_terminal_size((80, 24)).columns, max_width)
     width = max(terminal_width, 20)
     inner_width = max(width - 2, 1)
@@ -355,7 +355,7 @@ def print_panel(
     top = "┌" + "─" * (remaining // 2) + title_text + "─" * (
         remaining - remaining // 2
     ) + "┐"
-    print_info(_ansi(_theme_color("title") + ANSI_BOLD, top))
+    lines = [_ansi(_theme_color("title") + ANSI_BOLD, top)]
     for label, value in rows:
         text = f"{label}：{value}"
         if _display_width(text) > inner_width - 2:
@@ -364,13 +364,23 @@ def print_panel(
             _theme_color("text"), f"：{value}"
         )
         padding = " " * max(inner_width - 2 - _display_width(text), 0)
-        print_info(
+        lines.append(
             _ansi(_theme_color("muted"), "│ ")
             + body
             + padding
             + _ansi(_theme_color("muted"), " │")
         )
-    print_info(_ansi(_theme_color("title") + ANSI_BOLD, "└" + "─" * inner_width + "┘"))
+    lines.append(_ansi(_theme_color("title") + ANSI_BOLD, "└" + "─" * inner_width + "┘"))
+    return "\n".join(lines)
+
+
+def print_panel(
+    title: str,
+    rows: Sequence[tuple[str, str]],
+    max_width: int = MAX_CONTENT_WIDTH,
+) -> None:
+    """Print a bordered info card with a centered title and key-value rows."""
+    print_info(format_panel(title, rows, max_width))
 
 
 # ASCII-only frames: braille spinners crash on GBK-codepage Windows consoles
@@ -551,6 +561,7 @@ __all__ = [
     "ask_int",
     "ask_required",
     "format_header",
+    "format_panel",
     "format_table",
     "input_multiline",
     "get_theme_name",
