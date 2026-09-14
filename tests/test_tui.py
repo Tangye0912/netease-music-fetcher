@@ -9,6 +9,7 @@ import music_fetch.tui
 from music_fetch.api import MusicFetchError, UserPlaylist
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
+from music_fetch.download_queue import DownloadRequest
 from music_fetch.tui import TuiApp
 
 
@@ -407,3 +408,46 @@ class AlbumRoutingTests(TuiAppHelperTests):
         self.app.session.cookie = "MUSIC_U=x"
         self.app._screen_single()
         batch_mock.assert_called_once_with("https://music.163.com/album?id=1")
+
+
+class ConsistencyTests(TuiAppHelperTests):
+    def test_submenu_ctrl_c_returns_to_menu_instead_of_exiting(self):
+        # Footer promises "Ctrl+C 返回" on sub-screens: it must not quit.
+        self.app.session.cookie = "MUSIC_U=x"
+        menu_inputs = iter([1, 11])  # 单曲下载 → Ctrl+C inside → 退出
+        def fake_menu(title, options, **kwargs):
+            if title == "主菜单":
+                return next(menu_inputs)
+            return 1
+        with mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
+            self.app, "_screen_single", side_effect=KeyboardInterrupt
+        ), mock.patch("music_fetch.tui.U.clear_screen"), mock.patch(
+            "music_fetch.tui.U.print_header"
+        ), mock.patch("music_fetch.tui.U.print_status"), mock.patch(
+            "music_fetch.tui.U.print_info"
+        ) as info_mock:
+            self.assertEqual(self.app.run(), 0)
+        # The interrupt became a notice printed by the menu loop.
+        self.assertTrue(any("已返回主菜单" in str(call) for call in info_mock.call_args_list))
+
+    def test_notify_finished_tasks_reports_delta(self):
+        self.app.queue.enqueue(DownloadRequest("1", "歌一", Path(self._tmp.name) / "1.mp3"))
+        self.app.queue._items[0].state = "success"
+        seen = self.app._notify_finished_tasks((0, 0, 0))
+        self.assertEqual(seen, (1, 0, 0))
+        self.assertTrue(any("成功 1 首" in m for m, _e in self.app._pending_notices))
+        # No delta → no new notice.
+        before = len(self.app._pending_notices)
+        self.app._notify_finished_tasks(seen)
+        self.assertEqual(len(self.app._pending_notices), before)
+
+    def test_print_fallback_replaces_unencodable_characters(self):
+        import io
+        import sys as _sys
+        plain_ascii = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+        text = "\x1b[92m✓ 完成\x1b[0m"
+        with mock.patch.object(_sys, "stdout", plain_ascii):
+            music_fetch.tui.U._safe_print_formatted(text)  # must not raise
+        plain_ascii.seek(0)
+        output = plain_ascii.read()
+        self.assertNotIn("\x1b", output)

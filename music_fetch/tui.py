@@ -256,11 +256,13 @@ class TuiApp:
         # flow immediately; an existing cookie is validated in the background.
         if not self.session.cookie:
             self._screen_login()
+        seen = self._task_state_counts()
         while True:
             if self.queue.auth_required and self.session.cookie:
                 self._clear_login()
                 self._enqueue_notice("登录已失效，未完成任务已转入等待登录。", error=True)
             self._drain_login_check()
+            seen = self._notify_finished_tasks(seen)
             try:
                 U.clear_screen()
             except Exception:  # pragma: no cover - clear may fail on exotic terminals
@@ -275,7 +277,6 @@ class TuiApp:
                         ("ffmpeg", "可用" if is_ffmpeg_available() else "未安装"),
                     ]
                 )
-                self._flush_notices()
                 options = [
                     MENU_SINGLE,
                     MENU_SEARCH,
@@ -290,12 +291,14 @@ class TuiApp:
                     MENU_QUIT,
                 ]
             else:
-                U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
                 options = [MENU_LOGIN, MENU_QUIT]
                 if self.queue.snapshot():
                     options.insert(1, MENU_TASKS)
+            self._flush_notices()
+            if not self.session.cookie:
+                U.print_info("  尚未登录：请选择 1 登录后使用全部功能。")
             try:
-                choice = U.menu("主菜单", options, shortcuts={"q": len(options)})
+                choice = U.menu("主菜单", options, shortcuts={"q": len(options)}, ctrl_c="退出程序")
             except (KeyboardInterrupt, EOFError):
                 print()
                 return 0
@@ -312,26 +315,58 @@ class TuiApp:
                 if label == MENU_LOGIN:
                     self._screen_login()
                 continue
-            if label == MENU_SINGLE:
-                self._screen_single()
-            elif label == MENU_SEARCH:
-                self._screen_search()
-            elif label == MENU_PLAYLISTS:
-                self._screen_playlists()
-            elif label == MENU_BATCH:
-                self._screen_batch()
-            elif label == MENU_HISTORY:
-                self._screen_history()
-            elif label == MENU_SETTINGS:
-                self._screen_settings()
-            elif label == MENU_DIAGNOSTICS:
-                self._screen_diagnostics()
-            elif label == MENU_UPDATE:
-                self._screen_check_update()
-            elif label == MENU_LOGOUT:
-                if U.confirm("确定退出当前账号？", default=True):
-                    self._clear_login()
-                    U.print_success("已退出登录。")
+            try:
+                self._dispatch_screen(label)
+            except KeyboardInterrupt:
+                # Sub-screen Ctrl+C backs out to the main menu, as the footer
+                # promises; main-menu Ctrl+C (handled above) exits.
+                self._enqueue_notice("已返回主菜单。")
+                continue
+
+    def _dispatch_screen(self, label: str) -> None:
+        if label == MENU_SINGLE:
+            self._screen_single()
+        elif label == MENU_SEARCH:
+            self._screen_search()
+        elif label == MENU_PLAYLISTS:
+            self._screen_playlists()
+        elif label == MENU_BATCH:
+            self._screen_batch()
+        elif label == MENU_HISTORY:
+            self._screen_history()
+        elif label == MENU_SETTINGS:
+            self._screen_settings()
+        elif label == MENU_DIAGNOSTICS:
+            self._screen_diagnostics()
+        elif label == MENU_UPDATE:
+            self._screen_check_update()
+        elif label == MENU_LOGOUT:
+            if U.confirm("确定退出当前账号？", default=True):
+                self._clear_login()
+                U.print_success("已退出登录。")
+
+    def _task_state_counts(self) -> tuple[int, int, int]:
+        items = self.queue.snapshot()
+        return (
+            sum(item.state == "success" for item in items),
+            sum(item.state == "failed" for item in items),
+            sum(item.state == "canceled" for item in items),
+        )
+
+    def _notify_finished_tasks(self, seen: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Queue a summary notice when finished-task counts grew; return new baseline."""
+        now = self._task_state_counts()
+        delta_ok, delta_bad, delta_cancel = (now[i] - seen[i] for i in range(3))
+        if delta_ok or delta_bad or delta_cancel:
+            parts = []
+            if delta_ok:
+                parts.append(f"成功 {delta_ok} 首")
+            if delta_bad:
+                parts.append(f"失败 {delta_bad} 首")
+            if delta_cancel:
+                parts.append(f"取消 {delta_cancel} 首")
+            self._enqueue_notice("下载结束：" + "、".join(parts) + "。")
+        return now
 
     # ── login ─────────────────────────────────────────────────────
 

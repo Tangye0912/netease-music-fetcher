@@ -162,9 +162,11 @@ def _safe_print_formatted(text: str) -> None:
     try:
         print_formatted_text(ANSI(text))
     except Exception:
-        # Strip ANSI escape codes for the plain-text fallback.
+        # Strip ANSI escape codes, then drop characters the console cannot
+        # encode (✓/✕ crash GBK stdout) for the plain-text fallback.
         plain = _ANSI_STRIP_RE.sub("", text)
-        print(plain)
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(plain.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 def print_info(text: str) -> None:
@@ -292,6 +294,7 @@ def menu(
     options: Sequence[str],
     prompt_text: str = "请选择",
     shortcuts: Optional[dict[str, int]] = None,
+    ctrl_c: str = "返回",
 ) -> int:
     """Print a numbered menu and return the selected index (1-based input).
 
@@ -326,7 +329,7 @@ def menu(
         )
         print_info(line)
     print_info(_ansi(_theme_color("title") + ANSI_BOLD, "└" + "─" * inner_width + "┘"))
-    footer = "  输入序号确认 · Ctrl+C 返回"
+    footer = f"  输入序号确认 · Ctrl+C {ctrl_c}"
     if shortcuts:
         footer += " · " + " · ".join(f"{key} {options[choice - 1]}" for key, choice in shortcuts.items())
     print_info(_ansi(_theme_color("muted"), footer))
