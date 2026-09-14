@@ -194,19 +194,35 @@ def print_status(items: Sequence[tuple[str, str]]) -> None:
     )
 
 
-def print_header(text: str) -> None:
+def format_header(text: str) -> str:
+    """Centered full-width header line (no leading blank line, no printing)."""
     width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     label = _truncate_to_width(str(text), max(width - 4, 1))
     label_width = _display_width(label) + 2
     remaining = max(width - label_width, 0)
     left = remaining // 2
     right = remaining - left
+    return _ansi(_theme_color("title") + ANSI_BOLD, "─" * left + f" {label} " + "─" * right)
+
+
+def print_header(text: str) -> None:
     print_info("")
-    print_info(_ansi(_theme_color("title") + ANSI_BOLD, "─" * left + f" {label} " + "─" * right))
+    print_info(format_header(text))
 
 
 def clear_screen() -> None:
     _safe_print_formatted("\x1b[2J\x1b[H")
+
+
+def live_ask(build_screen: Callable[[], str], prompt_text: str = "") -> str:
+    """Blocking line input whose screen content re-renders every 0.5s.
+
+    *build_screen* returns the full text above the input line (header, table,
+    hints) and is re-evaluated on every refresh, so live data such as queue
+    progress updates while the user thinks.  Typed input survives refreshes.
+    """
+    message = lambda: ANSI(build_screen() + "\n" + prompt_text)  # noqa: E731
+    return prompt(message, refresh_interval=0.5).strip()
 
 
 def ask(message: str, default: str = "") -> str:
@@ -456,13 +472,13 @@ def _truncate_to_width(text: str, max_width: int) -> str:
     return out
 
 
-def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = MAX_CONTENT_WIDTH) -> None:
-    """Print a bordered, aligned table with truncated cells.
+def format_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = MAX_CONTENT_WIDTH) -> str:
+    """Render a bordered, aligned table as a multi-line string (no printing).
 
     Uses wcwidth so CJK full-width characters align correctly in a terminal.
     """
     if not headers:
-        return
+        return ""
     width = min(shutil.get_terminal_size((80, 24)).columns, max_width)
     columns = len(headers)
     header_widths = [_display_width(str(h)) for h in headers]
@@ -505,18 +521,25 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width
         line = left + join.join("─" * (col_width + 2) for col_width in cell_widths) + right
         return _ansi(color or _theme_color("muted"), line)
 
-    print_info(border("┌", "┬", "┐", _theme_color("title")))
-    print_info(fmt_row(headers, header=True))
-    print_info(border("├", "┼", "┤"))
+    lines = [border("┌", "┬", "┐", _theme_color("title")), fmt_row(headers, header=True),
+             border("├", "┼", "┤")]
     truncated = False
     for row in rows:
         for index, cell in enumerate(row):
             if index < columns and _display_width(str(cell)) > cell_widths[index]:
                 truncated = True
-        print_info(fmt_row(row))
-    print_info(border("└", "┴", "┘", _theme_color("title")))
+        lines.append(fmt_row(row))
+    lines.append(border("└", "┴", "┘", _theme_color("title")))
     if truncated:
-        print_info(_ansi(_theme_color("muted"), "（窗口较窄，部分内容已截断；加宽终端窗口可查看完整信息）"))
+        lines.append(_ansi(_theme_color("muted"), "（窗口较窄，部分内容已截断；加宽终端窗口可查看完整信息）"))
+    return "\n".join(lines)
+
+
+def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]], max_width: int = MAX_CONTENT_WIDTH) -> None:
+    """Print a bordered, aligned table with truncated cells."""
+    table = format_table(headers, rows, max_width)
+    if table:
+        print_info(table)
 
 
 __all__ = [
@@ -527,10 +550,13 @@ __all__ = [
     "ask",
     "ask_int",
     "ask_required",
+    "format_header",
+    "format_table",
     "input_multiline",
     "get_theme_name",
     "clear_screen",
     "confirm",
+    "live_ask",
     "menu",
     "multiselect",
     "print_error",

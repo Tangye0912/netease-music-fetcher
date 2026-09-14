@@ -776,36 +776,54 @@ class TuiApp:
             parts.append("历史保存失败")
         return "任务 | " + " · ".join(parts)
 
+    def _render_task_screen(self, page: int, grouped: bool) -> str:
+        """Full task-page content for live rendering; re-reads the queue snapshot."""
+        items = self.queue.snapshot()
+        if not items:
+            return " 暂无任务。"
+        total_pages = max(1, (len(items) + 7) // 8)
+        page = max(0, min(page, total_pages - 1))
+        start = page * 8
+        page_items = items[start:start + 8]
+        rows = []
+        for index, item in enumerate(page_items, start=start + 1):
+            progress = item.progress
+            size = format_bytes(item.size_bytes if item.state == "success" else progress.downloaded)
+            if progress.total > 0 and item.state not in FINAL_STATES:
+                size += f"/{format_bytes(progress.total)}（{progress.downloaded * 100 // progress.total}%）"
+            rows.append((str(index), item.request.song_name or item.request.song_id,
+                         STATE_LABELS[item.state], size))
+        parts = [
+            U.format_header(MENU_TASKS),
+            "",
+            U.format_table(["#", "歌曲", "状态", "大小"], rows),
+            f" 第 {page + 1}/{total_pages} 页 · 共 {len(items)} 个任务 · 表格每 0.5 秒自动刷新",
+        ]
+        if self.queue.history_error:
+            parts.append(f" ! {self.queue.history_error}")
+        return "\n".join(parts)
+
     def _screen_tasks(self) -> None:
+        if not self.queue.snapshot():
+            U.print_info("暂无任务。")
+            return
         page = 0
+        grouped = False  # reserved for the batch-grouping view (v3.6.0)
         while True:
             items = self.queue.snapshot()
             total_pages = max(1, (len(items) + 7) // 8)
             page = max(0, min(page, total_pages - 1))
-            page_items = items[page * 8:(page + 1) * 8]
-            U.clear_screen()
-            U.print_header(MENU_TASKS)
-            if not items:
-                U.print_info("暂无任务。")
-                return
-            rows = []
-            for index, item in enumerate(page_items, start=page * 8 + 1):
-                progress = item.progress
-                size = format_bytes(item.size_bytes if item.state == "success" else progress.downloaded)
-                if progress.total > 0 and item.state not in FINAL_STATES:
-                    size += f"/{format_bytes(progress.total)}"
-                rows.append((str(index), item.request.song_name or item.request.song_id,
-                             STATE_LABELS[item.state], size))
-            U.print_table(["#", "歌曲", "状态", "大小"], rows)
-            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(items)} 个任务；底栏自动刷新，回车刷新列表。")
-            if self.queue.history_error:
-                U.print_warning(self.queue.history_error)
-            raw = U.ask("序号 操作 · p 暂停全部 · r 恢复全部 · c 取消全部 · f 重试失败 · l 登录 · e 批次结果 · n/b 翻页 · 0 返回").lower()
+            start = page * 8
+            page_items = items[start:start + 8]
+            raw = U.live_ask(
+                lambda: self._render_task_screen(page, grouped),
+                "序号 操作 · P 暂停全部 · R 恢复全部 · c 取消全部 · f 重试失败 · l 登录 · e 批次结果 · n/p 翻页 · 0 返回",
+            )
             if raw in {"0", "q"}:
                 return
-            if raw == "p":
+            if raw == "P":
                 self.queue.pause_all()
-            elif raw == "r":
+            elif raw == "R":
                 self.queue.resume_all()
             elif raw == "c":
                 if U.confirm("取消所有未完成任务？", default=False):
@@ -825,9 +843,9 @@ class TuiApp:
                 self._export_queue_batch()
             elif raw == "n":
                 page += 1
-            elif raw == "b":
-                page -= 1
-            elif raw.isdigit() and page * 8 < int(raw) <= page * 8 + len(page_items):
+            elif raw == "p":
+                page = max(0, page - 1)
+            elif raw.isdigit() and start < int(raw) <= start + len(page_items):
                 self._task_actions(items[int(raw) - 1])
             elif raw:
                 U.print_warning("请输入当前页序号或提示中的操作键。")

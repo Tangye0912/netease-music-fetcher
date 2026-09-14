@@ -126,16 +126,39 @@ def test_task_page_accessible_when_logged_out(app, tmp_path):
 def test_task_page_paging_pause_resume_cancel(app, tmp_path):
     for i in range(1, 11):
         app.queue.enqueue(DownloadRequest(str(i), "song", tmp_path / f"{i}.mp3"))
-    with mock.patch("music_fetch.tui.U.ask", side_effect=["p", "r", "n", "9", "c", "0"]), mock.patch(
-        "music_fetch.tui.U.print_table"
-    ) as table, mock.patch.object(app, "_task_actions") as actions, mock.patch(
+    rendered = []
+    inputs = iter(["P", "R", "n", "9", "c", "0"])
+
+    def fake_live_ask(render, prompt_text=""):
+        rendered.append(render())  # evaluate now, like the real 0.5s refresh
+        return next(inputs)
+
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=fake_live_ask), mock.patch(
+        "music_fetch.tui.U.print_warning"
+    ), mock.patch.object(app, "_task_actions") as actions, mock.patch(
         "music_fetch.tui.U.confirm", return_value=True
     ):
         app._screen_tasks()
-    assert len(table.call_args_list[0].args[1]) == 8
-    assert len(table.call_args_list[3].args[1]) == 2
+    # First render, before any key: page 1 of 2 with 8 pending rows.
+    assert "第 1/2 页" in rendered[0]
+    assert rendered[0].count("等待中") == 8
+    # After n: page 2 with the remaining 2 rows.
+    assert "第 2/2 页" in rendered[3]
+    assert rendered[3].count("等待中") == 2
     assert actions.call_args.args[0].request.song_id == "9"
     assert {i.state for i in app.queue.snapshot()} == {"canceled"}
+
+
+def test_task_page_screen_renders_live_snapshot(app, tmp_path):
+    app.queue.enqueue(DownloadRequest("1", "歌一", tmp_path / "1.mp3"))
+    text = app._render_task_screen(0, False)
+    assert "歌一" in text
+    assert "等待中" in text
+    assert "第 1/1 页" in text
+    # Empty queue renders the placeholder instead of a table.
+    app.queue.cancel_all()
+    text = app._render_task_screen(0, False)
+    assert "已取消" in text
 
 
 @pytest.mark.parametrize("error", [EOFError, KeyboardInterrupt])
@@ -218,7 +241,7 @@ def test_task_page_retry_failed_requires_confirmation(app, tmp_path):
     for i, state in enumerate(("failed", "failed", "canceled", "success")):
         app.queue.enqueue(DownloadRequest(str(i), "song", tmp_path / f"{i}.mp3"))
         app.queue._items[-1].state = state  # white-box: skip real job runs
-    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=["f", "0"]), mock.patch(
         "music_fetch.tui.U.confirm", return_value=False
     ) as confirm_mock, mock.patch.object(app, "_retry_task") as retry_mock:
         app._screen_tasks()
@@ -227,7 +250,7 @@ def test_task_page_retry_failed_requires_confirmation(app, tmp_path):
     assert "2 个失败任务" in confirm_mock.call_args.args[0]
     assert retry_mock.call_count == 0
 
-    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=["f", "0"]), mock.patch(
         "music_fetch.tui.U.confirm", return_value=True
     ), mock.patch.object(app, "_retry_task") as retry_mock:
         app._screen_tasks()
@@ -238,7 +261,7 @@ def test_task_page_retry_failed_requires_confirmation(app, tmp_path):
 
 def test_task_page_retry_failed_without_failures_warns(app, tmp_path):
     app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
-    with mock.patch("music_fetch.tui.U.ask", side_effect=["f", "0"]), mock.patch(
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=["f", "0"]), mock.patch(
         "music_fetch.tui.U.print_warning"
     ) as warning_mock, mock.patch.object(app, "_retry_task") as retry_mock:
         app._screen_tasks()

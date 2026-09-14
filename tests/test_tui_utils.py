@@ -37,12 +37,18 @@ class PrintTableTests(unittest.TestCase):
                 [["1", "明天过后", "03:57"], ["2", "天下", "03:41"]],
                 max_width=80,
             )
-        self.assertEqual(len(captured), 6)  # top + header + separator + 2 rows + bottom
-        self.assertTrue(_plain(captured[0]).startswith("┌"))
-        self.assertTrue(_plain(captured[-1]).startswith("└"))
+        lines = captured[0].splitlines()
+        self.assertEqual(len(lines), 6)  # top + header + separator + 2 rows + bottom
+        self.assertTrue(_plain(lines[0]).startswith("┌"))
+        self.assertTrue(_plain(lines[-1]).startswith("└"))
         # Every bordered row must occupy the same display width.
-        widths = {tui_utils._display_width(_plain(line)) for line in captured}
+        widths = {tui_utils._display_width(_plain(line)) for line in lines}
         self.assertEqual(len(widths), 1)
+
+    def test_format_table_returns_lines_without_printing(self) -> None:
+        table = tui_utils.format_table(["#", "歌"], [["1", "天下"]], max_width=80)
+        self.assertEqual(len(table.splitlines()), 5)
+        self.assertIn("天下", _plain(table))
 
 
 class ThemeRenderingTests(unittest.TestCase):
