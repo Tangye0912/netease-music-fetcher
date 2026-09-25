@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download task state model shared by GUI flow."""
+"""Download task state model shared by the download runner and the TUI."""
 
 from __future__ import annotations
 

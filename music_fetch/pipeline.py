@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Download pipeline — pure-logic download orchestration shared by GUI and CLI.
+Download pipeline — pure-logic download orchestration used by the background
+download queue (music_fetch.download_queue, driven by download_runner).
 
 Encapsulates the retry loop, candidate fallback, format conversion, and
-cancel/pause checkers.  No Qt dependency.
+cancel/pause checkers.  No UI dependency.
 """
 
 from __future__ import annotations

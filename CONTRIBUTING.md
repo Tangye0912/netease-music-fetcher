@@ -19,8 +19,8 @@
 ```text
 feat: 优化登录与启动体验
 
-- main.py: 登录窗口改为扫码优先，并在退出时清理内嵌网页登录态
-- ui_texts.py: 更新登录与输入区提示文案
+- music_fetch/tui.py: 登录页改为扫码优先，并在退出时清理内嵌网页登录态
+- music_fetch/ui_texts.py: 更新登录与输入区提示文案
 - start_mac.command: 新增 macOS 双击启动入口
 - start_windows.bat: 新增 Windows 双击启动入口
 - README.md: 更新启动方式、默认格式与流程说明
@@ -34,11 +34,12 @@ feat: 优化登录与启动体验
 python3 -m pip install -e ".[dev]"
 ```
 
-提交前至少执行：
+提交前至少执行（与 CI 门槛一致）：
 
 ```bash
-python3 -m pytest tests/ -q
-python3 -m compileall -q music_fetch
+python3 -m pytest tests/ -q --cov=music_fetch --cov-report=term
+python3 -m mypy music_fetch/ --strict
+python3 -m ruff check music_fetch/ tests/
 git diff --check
 ```
 

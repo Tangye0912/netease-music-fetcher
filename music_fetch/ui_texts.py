@@ -32,8 +32,6 @@ BATCH_STATUS_DOWNLOAD_FAILED = "下载失败"
 BATCH_STATUS_DOWNLOAD_CANCELED = "下载已取消"
 BATCH_STATUS_DOWNLOAD_PAUSED = "下载已暂停"
 
-BATCH_DOWNLOAD_SUMMARY = "批量下载完成：成功 {success}，失败 {failed}，取消 {canceled}。"
-BATCH_DOWNLOAD_STOPPED = "批量下载已停止：已完成 {processed}/{total}，成功 {success}，失败 {failed}，取消 {canceled}，未开始 {pending}。"
 BATCH_FAILURE_REASON_SUMMARY = "失败原因：{reasons}"
 
 
@@ -73,8 +71,6 @@ def batch_detect_status_text(status: str) -> str:
 
 
 __all__ = [
-    "BATCH_DOWNLOAD_STOPPED",
-    "BATCH_DOWNLOAD_SUMMARY",
     "BATCH_FAILURE_REASON_SUMMARY",
     "BATCH_SOURCE_PLAYLIST",
     "BATCH_SOURCE_SONG",

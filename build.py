@@ -51,7 +51,7 @@ def build() -> int:
     exe_name = "music-fetch.exe" if sys.platform == "win32" else "music-fetch"
     exe_path = DIST_DIR / exe_name
     if exe_path.exists():
-        print(f"\nBuild successful!")
+        print("\nBuild successful!")
         print(f"Executable: {exe_path}")
     else:
         print(f"\nBuild failed: executable not found at {exe_path}")
