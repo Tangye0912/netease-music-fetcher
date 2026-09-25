@@ -2,7 +2,7 @@
 """
 Version check helper — GitHub API polling for latest release/tag.
 
-Extracted from main.py to reduce module size.
+Split out of the application entry point to keep it small.
 """
 
 from __future__ import annotations

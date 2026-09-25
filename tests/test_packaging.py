@@ -21,6 +21,18 @@ class PackagingConfigTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertIn(f"'{module}'", spec)
 
+    def test_spec_does_not_reference_removed_modules(self):
+        """Guard against the frozen build re-importing deleted modules."""
+        spec = pathlib.Path("music-fetch.spec").read_text(encoding="utf-8")
+        for removed in ("batch_download", "music_fetch.cli", "weapi", "qrcode"):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, spec)
+
+    def test_spec_collects_cjk_width_dependency(self):
+        """wcwidth is imported directly by tui_utils, so the freeze needs it."""
+        spec = pathlib.Path("music-fetch.spec").read_text(encoding="utf-8")
+        self.assertIn("'wcwidth'", spec)
+
 
 if __name__ == "__main__":
     unittest.main()

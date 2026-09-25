@@ -13,6 +13,9 @@ dependencies = [
     "pycryptodome>=3.20",
     "requests[socks]>=2.31,<3.0",
     "websocket-client>=1.0",
+    # Imported directly by tui_utils for CJK-safe column alignment; previously
+    # satisfied only transitively through prompt-toolkit.
+    "wcwidth>=0.2",
 ]
 
 [project.optional-dependencies]

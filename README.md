@@ -9,7 +9,7 @@
 1. 打开本仓库 [Releases](../../releases) 页，下载最新版：
    - Windows：`music-fetch.exe`；
    - macOS：`music-fetch`（首次使用先执行 `chmod +x music-fetch`）。
-2. 双击运行，首次启动会自动打开浏览器登录页 → 用**网易云 App** 扫码 → 登录完成即可下载。
+2. 双击运行，首次启动进入登录引导：选择「登录」后自动打开浏览器扫码页 → 用**网易云 App** 扫码 → 登录完成即可下载。
 
 ### 方式二：Python 安装（开发者 / 有 Python 环境的用户）
 
@@ -94,7 +94,7 @@ music-fetch    # 交互界面（TUI），唯一入口
 - 诊断：API/CDN 连通性检测、脱敏日志、诊断报告导出；主菜单可检查新版本
 - 格式：mp3/m4a/wav/flac/aac；未安装 ffmpeg 时自动回退保存源格式
 
-### 后台下载
+### 1.9 后台下载
 
 单曲、搜索、歌单、专辑和历史重试统一进入后台队列。提交后可继续搜索、试听或选择下一首；所有下载共用设置中的并发上限。普通交互终端等待输入期间，底栏每 0.5 秒更新状态、传输量和速度，任务列表同样每 0.5 秒自动刷新，无需手动回车。
 
@@ -206,7 +206,7 @@ git push origin v3.0.0
 | `music_fetch/ui_texts.py` / `error_texts.py` | 共享文案与错误码到用户提示的映射。 |
 | `music-fetch` | macOS/Linux 包装脚本（进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
-| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`）。 |
+| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`、`wcwidth`）。 |
 | `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 
