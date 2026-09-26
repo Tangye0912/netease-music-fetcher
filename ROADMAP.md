@@ -19,6 +19,7 @@
 - [ ] `download_queue.poll()` 全程持锁做磁盘 I/O（写下载历史与 `queue.json`），历史接近 1000 条时会阻塞 UI 刷新。计划：把两次落盘移出锁。
 - [ ] TUI 分页逻辑在搜索、歌单、历史、任务四个页面各写一遍，且已存在的 `_pick_from_rows` 无人使用。计划：抽公共 `_paginated_pick`，预计净删 100–130 行。
 - [ ] 关键路径缺测试：`pipeline.py` 的取消检查与 ffmpeg 缺失回退、`audio.py` 的暂停等待循环与歌词写盘、`tui.py` 的代理配置失败与任务详情控制路径。
+- [ ] 无控制台环境（stdin 被管道或重定向）启动冻结包时，菜单能正常以纯文本渲染，但读取输入会抛出 `prompt_toolkit...NoConsoleScreenBufferError` 的原始 traceback 并以 1 退出（v3.6.1 Windows 构建本地实测）。计划：捕获该异常并给出中文提示。
 
 ### TUI Experience
 
@@ -26,7 +27,7 @@
 - [ ] 歌单搜索：按关键词搜索歌单并整单下载。
 - [ ] 大歌单曲目明细分页，避免一次渲染过长列表。
 - [ ] 分组视图的批次信息跨重启保留（当前 `_batches` 仅存在于本次运行）。
-- [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。
+- [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。冻结包启动与主菜单渲染已在 v3.6.1 的 Windows 构建上本地验证（无缺失导入、版本号正确），其余交互项仍待人工验证。
 
 ### v3.7 — Download Efficiency and API Evolution
 
