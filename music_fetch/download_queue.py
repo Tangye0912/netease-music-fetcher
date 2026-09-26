@@ -309,6 +309,8 @@ class DownloadQueue:
             return not any(item.job for item in self._items)
 
     def poll(self) -> None:
+        pending_history: list[tuple[QueueItem, DownloadRecord]] = []
+        pending_persist: tuple[object, list[dict[str, object]]] | None = None
         with self._lock:
             for item in self._items:
                 job = item.job
@@ -339,7 +341,7 @@ class DownloadQueue:
                 else:
                     item.state = "canceled" if item.state == "canceling" and result.state != "success" else result.state
                     item.message = user_error_message(result.error_code, result.error_message) if item.state == "failed" else ""
-                    self._record(item)
+                    self._queue_history(item, pending_history)
             active = sum(item.job is not None for item in self._items)
             for item in self._items:
                 if item.state == "pending" and not self._cookie:
@@ -364,30 +366,71 @@ class DownloadQueue:
                     item.state = "failed"
                     item.error_code = "DOWNLOAD_FAILED"
                     item.message = str(err)
-                    self._record(item)
+                    self._queue_history(item, pending_history)
             if self._history_error and time.monotonic() - self._last_history_retry >= 5:
                 self._last_history_retry = time.monotonic()
                 self._history_error = ""
                 for item in self._items:
                     if item.state in FINAL_STATES:
-                        self._record(item)
-            self._persist_if_changed()
+                        self._queue_history(item, pending_history)
+            pending_persist = self._pending_persist()
+        # Disk writes happen outside the queue lock: the TUI re-reads the queue
+        # every 0.5s and must never wait behind a history/queue file write.
+        self._flush_history(pending_history)
+        self._flush_persist(pending_persist)
+
+    def _queue_history(self, item: QueueItem, pending: list[tuple[QueueItem, DownloadRecord]]) -> None:
+        """Stage a history row for a finished item (caller holds the lock)."""
+        if item.recorded:
+            return
+        item.finished_at = item.finished_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pending.append((item, self._build_record(item)))
+
+    @staticmethod
+    def _build_record(item: QueueItem) -> DownloadRecord:
+        return DownloadRecord(
+            item.request.song_id, item.request.song_name or f"song-{item.request.song_id}",
+            str(item.output_path), item.size_bytes, item.finished_at,
+            status=item.state, error_code=item.error_code,
+        )
+
+    def _flush_history(self, pending: list[tuple[QueueItem, DownloadRecord]]) -> None:
+        """Write staged history rows; only a successful write marks them recorded."""
+        for item, record in pending:
+            try:
+                self._history_store.add(record)
+            except OSError as err:
+                with self._lock:
+                    self._history_error = f"下载历史保存失败：{err}"
+                continue
+            with self._lock:
+                item.recorded = True
 
     # ── cross-restart persistence ─────────────────────────────────
 
-    def _persist_if_changed(self) -> None:
-        """Save unfinished tasks when the pending set changed since last write."""
+    def _pending_persist(self) -> tuple[object, list[dict[str, object]]] | None:
+        """Signature plus entries for the next store write; None when unchanged.
+
+        Caller holds the lock: this only reads queue state, the write itself
+        happens in _flush_persist.
+        """
         if self._queue_store is None:
-            return
-        signature = tuple(sorted(
+            return None
+        signature: object = tuple(sorted(
             (item.task_id, item.state) for item in self._items if item.state not in FINAL_STATES
         ))
         if signature == self._persist_sig:
-            return
+            return None
         entries: list[dict[str, object]] = [
             {"request": _request_to_dict(item.request), "state": item.state}
             for item in self._items if item.state not in FINAL_STATES
         ]
+        return signature, entries
+
+    def _flush_persist(self, pending: tuple[object, list[dict[str, object]]] | None) -> None:
+        if pending is None or self._queue_store is None:
+            return
+        signature, entries = pending
         try:
             self._queue_store.save(entries)
         except OSError as err:
@@ -399,7 +442,12 @@ class DownloadQueue:
             self._persist_failed = True
             return
         self._persist_failed = False
-        self._persist_sig = signature
+        with self._lock:
+            self._persist_sig = signature
+
+    def _persist_if_changed(self) -> None:
+        """Save unfinished tasks when the pending set changed (startup path)."""
+        self._flush_persist(self._pending_persist())
 
     def restore_saved(self) -> tuple[int, int]:
         """Re-enqueue tasks persisted by a previous run.
@@ -445,11 +493,7 @@ class DownloadQueue:
             return
         item.finished_at = item.finished_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
-            self._history_store.add(DownloadRecord(
-                item.request.song_id, item.request.song_name or f"song-{item.request.song_id}",
-                str(item.output_path), item.size_bytes, item.finished_at,
-                status=item.state, error_code=item.error_code,
-            ))
+            self._history_store.add(self._build_record(item))
             item.recorded = True
         except OSError as err:
             self._history_error = f"下载历史保存失败：{err}"

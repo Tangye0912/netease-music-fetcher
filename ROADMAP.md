@@ -15,8 +15,6 @@
 
 ### Known Issues（v3.6.1 代码审查遗留，尚未修复）
 
-- [ ] `download_queue.poll()` 全程持锁做磁盘 I/O（写下载历史与 `queue.json`），历史接近 1000 条时会阻塞 UI 刷新。计划：把两次落盘移出锁。
-- [ ] TUI 分页逻辑在搜索、歌单、历史、任务四个页面各写一遍，且已存在的 `_pick_from_rows` 无人使用。计划：抽公共 `_paginated_pick`，预计净删 100–130 行。
 - [ ] 关键路径缺测试：`pipeline.py` 的取消检查与 ffmpeg 缺失回退、`audio.py` 的暂停等待循环与歌词写盘、`tui.py` 的代理配置失败与任务详情控制路径。
 - [ ] 无控制台环境（stdin 被管道或重定向）启动冻结包时，菜单能正常以纯文本渲染，但读取输入会抛出 `prompt_toolkit...NoConsoleScreenBufferError` 的原始 traceback 并以 1 退出（v3.6.1 Windows 构建本地实测）。计划：捕获该异常并给出中文提示。
 

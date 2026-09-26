@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 import music_fetch.tui
-from music_fetch.api import MusicFetchError, UserPlaylist
+from music_fetch.api import MusicFetchError, SearchResult, UserPlaylist
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.download_queue import DownloadRequest
@@ -377,6 +377,45 @@ class TuiAppHelperTests(unittest.TestCase):
 
         self.assertEqual(table_mock.call_count, 2)
         batch_mock.assert_called_once_with("https://music.163.com/playlist?id=11")
+
+    def test_search_screen_pages_and_redraws_after_pick(self):
+        results = [
+            SearchResult(str(index), f"歌 {index}", "歌手", "专辑", 60000)
+            for index in range(1, 12)
+        ]
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.search_songs", return_value=results), mock.patch(
+            "music_fetch.tui.U.spinner"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_table"
+        ) as table_mock, mock.patch("music_fetch.tui.U.print_info"), mock.patch(
+            "music_fetch.tui.U.ask", side_effect=["关键词", "n", "11", "0"]
+        ), mock.patch("music_fetch.tui.U.menu", return_value=1), mock.patch.object(
+            self.app, "_download_song"
+        ) as download_mock:
+            self.app._screen_search()
+
+        # page 1 → page 2 → redraw page 2 after the pick, then 0 leaves.
+        self.assertEqual(table_mock.call_count, 3)
+        download_mock.assert_called_once()
+        self.assertEqual(download_mock.call_args.kwargs["song_id"], "11")
+
+    def test_search_screen_warns_on_page_edges_and_bad_index(self):
+        results = [SearchResult(str(i), f"歌 {i}", "歌手", "专辑", 60000) for i in range(1, 4)]
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.search_songs", return_value=results), mock.patch(
+            "music_fetch.tui.U.spinner"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_table"
+        ), mock.patch("music_fetch.tui.U.print_info"), mock.patch(
+            "music_fetch.tui.U.ask", side_effect=["关键词", "n", "p", "9", "0"]
+        ), mock.patch("music_fetch.tui.U.print_warning") as warning_mock:
+            self.app._screen_search()
+
+        warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
+        self.assertIn("已经是最后一页。", warnings)
+        self.assertIn("已经是第一页。", warnings)
+        self.assertIn("请输入 1-3 的序号，0 返回，n/p 翻页。", warnings)
 
 class TuiMainTests(unittest.TestCase):
     @mock.patch("music_fetch.tui.setup_logging")

@@ -18,11 +18,13 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence, TypeVar
 
 from music_fetch.api import (
     MusicFetchError,
     SUPPORTED_AUDIO_FORMATS,
+    SearchResult,
+    UserPlaylist,
     detect_song,
     fetch_account_profile,
     fetch_user_playlists,
@@ -98,6 +100,9 @@ def _quality_label(level: str, encode_type: str = "") -> str:
     if encode_type:
         return f"{label}（{encode_type}）"
     return label
+
+
+_T = TypeVar("_T")
 
 
 class TuiApp:
@@ -546,27 +551,77 @@ class TuiApp:
         if not results:
             U.print_warning("未找到相关歌曲。")
             return
-        # Paginate so one screen always fits in the terminal window.
-        page_size = 10
-        total_pages = (len(results) + page_size - 1) // page_size
+
+        def render_row(index: int, result: SearchResult) -> tuple[str, ...]:
+            return (
+                str(index),
+                result.song_name,
+                result.artist or "-",
+                result.album or "-",
+                format_duration(result.duration_ms),
+            )
+
+        def on_pick(result: SearchResult) -> bool:
+            while True:
+                action = U.menu(
+                    f"《{result.song_name}》",
+                    ["直接下载", "试听（标准音质临时文件播放）", "返回列表"],
+                    shortcuts={"d": 1, "p": 2},
+                )
+                if action == 3:
+                    break
+                if action == 2:
+                    self._preview_song(result.song_id, result.song_name)
+                    continue
+                self._download_song(
+                    song_id=result.song_id,
+                    song_name=result.song_name,
+                    artist=result.artist or None,
+                    album_name=result.album or None,
+                    duration_ms=result.duration_ms,
+                )
+                break
+            # Redraw the list so the user can pick the next song without
+            # searching again.
+            return True
+
+        self._paginated_pick(
+            results,
+            page_size=10,
+            headers=["#", "歌名", "歌手", "专辑", "时长"],
+            render_row=render_row,
+            count_label=f"共 {len(results)} 条",
+            prompt="输入序号下载（0 返回；n 下一页；p 上一页）",
+            on_pick=on_pick,
+        )
+
+    def _paginated_pick(
+        self,
+        items: Sequence[_T],
+        *,
+        page_size: int,
+        headers: Sequence[str],
+        render_row: Callable[[int, _T], tuple[str, ...]],
+        count_label: str,
+        prompt: str,
+        on_pick: Callable[[_T], bool],
+    ) -> None:
+        """Render a paged table and let the user pick a row.
+
+        ``on_pick`` returns True to redraw the current page (stay in the list)
+        or False to leave the screen.  Search and playlist screens share this so
+        their prompts and paging behaviour cannot drift apart.
+        """
+        total_pages = max(1, (len(items) + page_size - 1) // page_size)
         page = 0
         while True:
             start = page * page_size
-            page_results = results[start:start + page_size]
-            rows = [
-                (
-                    str(index),
-                    r.song_name,
-                    r.artist or "-",
-                    r.album or "-",
-                    format_duration(r.duration_ms),
-                )
-                for index, r in enumerate(page_results, start=start + 1)
-            ]
-            U.print_table(["#", "歌名", "歌手", "专辑", "时长"], rows)
-            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(results)} 条")
+            page_items = items[start:start + page_size]
+            rows = [render_row(index, item) for index, item in enumerate(page_items, start=start + 1)]
+            U.print_table(list(headers), rows)
+            U.print_info(f"第 {page + 1}/{total_pages} 页 · {count_label}")
             while True:
-                raw = U.ask("输入序号下载（0 返回；n 下一页；p 上一页）").strip()
+                raw = U.ask(prompt).strip()
                 if not raw or raw == "0":
                     return
                 if raw.lower() == "n":
@@ -582,42 +637,14 @@ class TuiApp:
                     U.print_warning("已经是第一页。")
                     continue
                 if raw.isdigit():
-                    idx = int(raw) - 1  # 0-based index into results
-                    if start <= idx < start + len(page_results):
-                        picked = results[idx]
-                        while True:
-                            action = U.menu(
-                                f"《{picked.song_name}》",
-                                ["直接下载", "试听（标准音质临时文件播放）", "返回列表"],
-                                shortcuts={"d": 1, "p": 2},
-                            )
-                            if action == 3:
-                                break
-                            if action == 2:
-                                self._preview_song(picked.song_id, picked.song_name)
-                                continue
-                            self._download_song(
-                                song_id=picked.song_id,
-                                song_name=picked.song_name,
-                                artist=picked.artist or None,
-                                album_name=picked.album or None,
-                                duration_ms=picked.duration_ms,
-                            )
+                    index = int(raw) - 1
+                    if start <= index < start + len(page_items):
+                        if on_pick(items[index]):
                             break
-                        # Redraw the list so the user can pick the next song
-                        # without searching again.
-                        break
-                U.print_warning(f"请输入 {start + 1}-{start + len(page_results)} 的序号，0 返回，n/p 翻页。")
-
-    def _pick_from_rows(self, prompt: str, count: int) -> Optional[int]:
-        """Ask the user to pick a numbered row (1..count) or return (0 / empty)."""
-        while True:
-            raw = U.ask(f"{prompt}（0 返回）")
-            if not raw or raw == "0":
-                return None
-            if raw.isdigit() and 1 <= int(raw) <= count:
-                return int(raw)
-            U.print_warning(f"请输入 1-{count} 的序号，或 0 返回。")
+                        return
+                U.print_warning(
+                    f"请输入 {start + 1}-{start + len(page_items)} 的序号，0 返回，n/p 翻页。"
+                )
 
     # ── user playlists ────────────────────────────────────────────
 
@@ -636,48 +663,23 @@ class TuiApp:
         if not playlists:
             U.print_warning("暂无歌单。")
             return
-        page_size = 10
-        total_pages = (len(playlists) + page_size - 1) // page_size
-        page = 0
-        while True:
-            start = page * page_size
-            page_playlists = playlists[start:start + page_size]
-            rows = [
-                (
-                    str(index),
-                    pl.name,
-                    str(pl.song_count),
-                    pl.creator or "-",
-                )
-                for index, pl in enumerate(page_playlists, start=start + 1)
-            ]
-            U.print_table(["#", "歌单", "歌数", "创建者"], rows)
-            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(playlists)} 个歌单")
-            while True:
-                raw = U.ask("输入序号（0 返回；n 下一页；p 上一页）").strip()
-                if not raw or raw == "0":
-                    return
-                if raw.lower() == "n":
-                    if page + 1 < total_pages:
-                        page += 1
-                        break
-                    U.print_warning("已经是最后一页。")
-                    continue
-                if raw.lower() == "p":
-                    if page > 0:
-                        page -= 1
-                        break
-                    U.print_warning("已经是第一页。")
-                    continue
-                if raw.isdigit():
-                    index = int(raw) - 1
-                    if start <= index < start + len(page_playlists):
-                        picked = playlists[index]
-                        self._batch_flow(f"https://music.163.com/playlist?id={picked.playlist_id}")
-                        return
-                U.print_warning(
-                    f"请输入 {start + 1}-{start + len(page_playlists)} 的序号，0 返回，n/p 翻页。"
-                )
+
+        def render_row(index: int, playlist: UserPlaylist) -> tuple[str, ...]:
+            return (str(index), playlist.name, str(playlist.song_count), playlist.creator or "-")
+
+        def on_pick(playlist: UserPlaylist) -> bool:
+            self._batch_flow(f"https://music.163.com/playlist?id={playlist.playlist_id}")
+            return False
+
+        self._paginated_pick(
+            playlists,
+            page_size=10,
+            headers=["#", "歌单", "歌数", "创建者"],
+            render_row=render_row,
+            count_label=f"共 {len(playlists)} 个歌单",
+            prompt="输入序号（0 返回；n 下一页；p 上一页）",
+            on_pick=on_pick,
+        )
 
     # ── batch ─────────────────────────────────────────────────────
 

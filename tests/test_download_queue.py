@@ -466,6 +466,81 @@ def test_restore_reenqueues_empty_target_file(tmp_path):
     assert [item.request.song_id for item in queue.snapshot()] == ["1"]
 
 
+def _assert_ui_reads_do_not_block(queue, message):
+    """The TUI re-reads the queue on a 0.5s timer; reads must never stall."""
+    done = threading.Event()
+
+    def read():
+        queue.snapshot()
+        queue.active_jobs
+        queue.auth_required
+        done.set()
+
+    threading.Thread(target=read, daemon=True).start()
+    assert done.wait(2), message
+
+
+def test_poll_does_not_hold_the_lock_during_history_write(setup_queue, tmp_path):
+    queue, jobs, history = setup_queue
+    queue.enqueue(request(tmp_path, "1"))
+    queue.poll()          # dispatch the worker
+    jobs[0].finish()      # worker completed, result is waiting to be collected
+    real_add = history.add
+    writing, release = threading.Event(), threading.Event()
+
+    def slow_add(record):
+        writing.set()
+        assert release.wait(5)
+        return real_add(record)
+
+    with mock.patch.object(history, "add", side_effect=slow_add):
+        poller = threading.Thread(target=queue.poll)
+        poller.start()
+        assert writing.wait(5), "history write never started"
+        _assert_ui_reads_do_not_block(queue, "snapshot() blocked behind the history write")
+        release.set()
+        poller.join(5)
+    assert not poller.is_alive()
+    assert [record.song_id for record in history.load()] == ["1"]
+
+
+def test_poll_does_not_hold_the_lock_during_queue_persist(tmp_path):
+    store_path = tmp_path / "queue.json"
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue.enqueue(request(tmp_path, "1"))  # changes the pending set → persist needed
+    real_save = QueueStore.save
+    writing, release = threading.Event(), threading.Event()
+
+    def slow_save(store_self, entries):
+        writing.set()
+        assert release.wait(5)
+        return real_save(store_self, entries)
+
+    with mock.patch.object(QueueStore, "save", slow_save):
+        poller = threading.Thread(target=queue.poll)
+        poller.start()
+        assert writing.wait(5), "queue persist never started"
+        _assert_ui_reads_do_not_block(queue, "snapshot() blocked behind the queue write")
+        release.set()
+        poller.join(5)
+    assert not poller.is_alive()
+    assert [entry["request"]["song_id"] for entry in QueueStore(store_path).load()] == ["1"]
+
+
+def test_history_write_failure_is_retried_on_a_later_poll(setup_queue, tmp_path):
+    """A failed history write must leave the item eligible for a retry."""
+    queue, jobs, history = setup_queue
+    queue.enqueue(request(tmp_path, "1"))
+    queue.poll()
+    jobs[0].finish()
+    with mock.patch.object(history, "add", side_effect=OSError("disk full")):
+        queue.poll()
+    assert queue.history_error
+    queue.poll()  # the retry branch re-stages every finished-but-unrecorded item
+    assert [record.song_id for record in history.load()] == ["1"]
+
+
 def test_active_jobs_counts_live_workers(setup_queue, tmp_path):
     queue, jobs, _history = setup_queue
     assert queue.active_jobs == 0
