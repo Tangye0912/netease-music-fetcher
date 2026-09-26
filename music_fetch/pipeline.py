@@ -29,6 +29,7 @@ from music_fetch.audio import (
     download_song_with_fallback,
     infer_audio_format_from_url,
     is_ffmpeg_available,
+    is_path_too_long_error,
 )
 from music_fetch.network import open_url
 from music_fetch.app_logging import get_logger
@@ -87,6 +88,10 @@ def run_download_pipeline(
         output_path.parent.mkdir(parents=True, exist_ok=True)
     except PermissionError as err:
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, f"Cannot write to output directory: {output_path.parent}") from err
+    except OSError as err:
+        if is_path_too_long_error(err):
+            raise MusicFetchError(ErrorCode.PATH_TOO_LONG, f"Output path is too long: {output_path}") from err
+        raise
 
     temp_source_path = output_path.with_name(f"{output_path.name}.source")
     if temp_source_path.exists():

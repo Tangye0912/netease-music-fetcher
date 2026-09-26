@@ -332,6 +332,17 @@ def test_task_page_batch_column_and_grouped_view(app, tmp_path):
     assert "第 1/1 页" in rendered[2]
 
 
+def test_run_gives_up_after_bounded_shutdown_wait(app):
+    """A stuck worker must not trap the user in a program they cannot quit."""
+    with mock.patch.object(app.queue, "wait", return_value=False), mock.patch(
+        "music_fetch.tui.SHUTDOWN_WAIT_SEC", 0
+    ), mock.patch.object(app, "_run_menu", return_value=0), mock.patch(
+        "music_fetch.tui.U.print_info"
+    ), mock.patch("music_fetch.tui.U.print_warning") as warning_mock:
+        assert app.run() == 0
+    assert any("未在 0 秒内结束" in str(call) for call in warning_mock.call_args_list)
+
+
 def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
     """Regression: grouped rows are numbered per section, so a typed index must
     resolve against the grouped order — not the flat queue order."""

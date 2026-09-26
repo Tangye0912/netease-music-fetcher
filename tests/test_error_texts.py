@@ -23,6 +23,10 @@ class ErrorTextTests(unittest.TestCase):
         )
         self.assertIn("证书校验失败", text)
 
+    def test_path_too_long_mapping(self):
+        text = user_error_message("PATH_TOO_LONG", "raw")
+        self.assertIn("路径过长", text)
+
 
 if __name__ == "__main__":
     unittest.main()

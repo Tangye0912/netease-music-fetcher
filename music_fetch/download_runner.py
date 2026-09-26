@@ -14,13 +14,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from music_fetch.api import DownloadCanceled, MusicFetchError
+from music_fetch.api import DownloadCanceled, ErrorCode, MusicFetchError
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_TARGET_FORMAT,
     clamp_download_settings,
 )
+from music_fetch.audio import is_path_too_long_error
 from music_fetch.error_texts import UNKNOWN_ERROR
 from music_fetch.pipeline import run_download_pipeline
 
@@ -219,6 +220,20 @@ class DownloadJob:
             logger.warning(
                 "DownloadJob failed. task_id=%s code=%s message=%s",
                 self.task_id, err.code, err.message,
+            )
+        except OSError as err:
+            # A path/filename over the OS limit must not surface as "unknown".
+            error_code = ErrorCode.PATH_TOO_LONG.value if is_path_too_long_error(err) else UNKNOWN_ERROR
+            self._finish(
+                DownloadJobResult(
+                    state=JOB_STATE_FAILED,
+                    output_path=self.output_path,
+                    error_code=error_code,
+                    error_message=str(err),
+                )
+            )
+            logger.warning(
+                "DownloadJob OS error. task_id=%s code=%s message=%s", self.task_id, error_code, err,
             )
         except Exception as err:  # pragma: no cover - defensive
             self._finish(

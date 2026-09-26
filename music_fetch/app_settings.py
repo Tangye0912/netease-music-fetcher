@@ -36,6 +36,10 @@ MIN_DOWNLOAD_CONCURRENCY = 1
 MAX_DOWNLOAD_CONCURRENCY = 3
 # TUI settings allow a higher concurrency ceiling than the persisted clamp.
 MAX_UI_CONCURRENCY = 8
+# How long the TUI waits for in-flight downloads to stop before exiting anyway.
+# A stuck job (ffmpeg transcode does not observe cancellation) must never trap
+# the user in a process they cannot quit.
+SHUTDOWN_WAIT_SEC = 10
 # History rows shown per page: small enough that the table plus the prompt
 # stay inside the 40-row terminal preset (start_mac.command / start_windows.bat).
 DOWNLOAD_HISTORY_PAGE_SIZE = 15

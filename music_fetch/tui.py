@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ from music_fetch.app_settings import (
     PROJECT_GITHUB_URL,
     QUEUE_FILE,
     SESSION_FILE,
+    SHUTDOWN_WAIT_SEC,
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
 from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
@@ -242,12 +244,21 @@ class TuiApp:
             self.queue.close()
             if not self.queue.wait(0):
                 U.print_info("正在取消下载并清理临时文件，请稍候...")
+                deadline = time.monotonic() + SHUTDOWN_WAIT_SEC
                 while True:
                     try:
                         if self.queue.wait(0.1):
                             break
                     except KeyboardInterrupt:
                         U.print_info("仍在等待下载线程安全结束...")
+                    if time.monotonic() >= deadline:
+                        # A worker stuck in a non-cancellable step (ffmpeg) must
+                        # not leave the user unable to quit the program.
+                        U.print_warning(
+                            f"仍有 {self.queue.active_jobs} 个下载线程未在 {SHUTDOWN_WAIT_SEC:g} 秒内结束，直接退出；"
+                            "未完成的任务已保存在队列文件中，下次启动会恢复。"
+                        )
+                        break
             if self.queue.history_error:
                 U.print_warning(self.queue.history_error)
 

@@ -14,6 +14,36 @@ from music_fetch.download_runner import (
 from music_fetch.pipeline import DownloadPipelineResult
 
 
+class DownloadJobOsErrorTests(unittest.TestCase):
+    def _run_with_oserror(self, err: OSError):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        output_path = Path(tmp.name) / "song.mp3"
+        job = DownloadJob(
+            task_id="task-os", song_id="42", output_path=output_path,
+            cookie="MUSIC_U=abc", target_format="mp3", timeout=3, retry_count=0,
+        )
+        with mock.patch("music_fetch.download_runner.run_download_pipeline", side_effect=err):
+            job.start()
+            self.assertTrue(job.wait(timeout=5))
+        return job
+
+    def test_path_too_long_oserror_maps_to_dedicated_code(self):
+        import errno
+        job = self._run_with_oserror(OSError(errno.ENAMETOOLONG, "File name too long"))
+        job_result = job.result()
+        assert job_result is not None
+        self.assertEqual(job.state(), JOB_STATE_FAILED)
+        self.assertEqual(job_result.error_code, "PATH_TOO_LONG")
+
+    def test_other_oserror_still_reports_unknown(self):
+        import errno
+        job = self._run_with_oserror(OSError(errno.EIO, "io error"))
+        job_result = job.result()
+        assert job_result is not None
+        self.assertEqual(job_result.error_code, "UNKNOWN_ERROR")
+
+
 class DownloadJobSuccessTests(unittest.TestCase):
     def test_pipeline_success_produces_success_result(self):
         with tempfile.TemporaryDirectory() as tmp:

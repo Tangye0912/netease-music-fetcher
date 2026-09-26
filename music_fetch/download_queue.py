@@ -128,7 +128,9 @@ class DownloadQueue:
     def start(self) -> None:
         with self._lock:
             if self._thread is None and not self._closing:
-                self._thread = threading.Thread(target=self._run, name="download-queue")
+                # Daemon so a stuck worker can never keep the interpreter alive
+                # after the TUI's bounded shutdown wait gives up.
+                self._thread = threading.Thread(target=self._run, name="download-queue", daemon=True)
                 self._thread.start()
 
     def _run(self) -> None:
@@ -166,6 +168,12 @@ class DownloadQueue:
     def history_error(self) -> str:
         with self._lock:
             return self._history_error
+
+    @property
+    def active_jobs(self) -> int:
+        """Number of tasks currently owning a live worker thread."""
+        with self._lock:
+            return sum(item.job is not None for item in self._items)
 
     def set_concurrency(self, value: int) -> None:
         with self._lock:

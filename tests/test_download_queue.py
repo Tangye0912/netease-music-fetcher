@@ -466,6 +466,17 @@ def test_restore_reenqueues_empty_target_file(tmp_path):
     assert [item.request.song_id for item in queue.snapshot()] == ["1"]
 
 
+def test_active_jobs_counts_live_workers(setup_queue, tmp_path):
+    queue, jobs, _history = setup_queue
+    assert queue.active_jobs == 0
+    queue.enqueue(request(tmp_path, "1"))
+    queue.poll()
+    assert queue.active_jobs == 1
+    jobs[0].finish()
+    queue.poll()
+    assert queue.active_jobs == 0
+
+
 def test_scheduler_survives_a_poll_exception(tmp_path):
     """An unexpected poll error must not silently kill the scheduler thread."""
     history = DownloadHistoryStore(tmp_path / "history.json")

@@ -30,6 +30,29 @@ class PathHelperTests(unittest.TestCase):
             self.assertTrue(second.name.startswith("a_"))
             self.assertEqual(second.suffix, ".mp4")
 
+    def test_long_song_name_fits_windows_path_budget(self):
+        """A long CJK title must not overflow the legacy Windows path limit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            with mock.patch("music_fetch.audio.os.name", "nt"):
+                path = music_fetch.resolve_output_path(
+                    out_dir, song_id="12345", song_name="很长" * 100, out_format="mp3"
+                )
+            self.assertLessEqual(len(str(path)), 250)
+            self.assertIn("12345", path.name)  # the song id survives truncation
+            self.assertEqual(path.suffix, ".mp3")
+            path.write_bytes(b"x")  # and the file can actually be created
+
+    def test_long_rename_is_truncated_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            with mock.patch("music_fetch.audio.os.name", "nt"):
+                path = music_fetch.resolve_output_path(
+                    out_dir, song_id="1", rename="x" * 500, out_format="flac"
+                )
+            self.assertLessEqual(len(str(path)), 250)
+            self.assertEqual(path.suffix, ".flac")
+
 
 class DownloadFallbackTests(unittest.TestCase):
     @mock.patch("music_fetch.audio._download_audio_stream")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 __all__ = [
     "sanitize_filename", "dedupe_path", "resolve_output_path",
+    "is_path_too_long_error",
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
     "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
@@ -17,6 +18,8 @@ __all__ = [
     "SUPPORTED_AUDIO_FORMATS",
 ]
 
+import errno
+import os
 import re
 import shutil
 import subprocess
@@ -60,13 +63,44 @@ _HTTP_403_MARKER = "HTTP 403"
 
 # ── Filename helpers ─────────────────────────────────────────────
 
-def sanitize_filename(name: str) -> str:
+# Filesystem budgets: ext4 caps a name at 255 bytes, NTFS at 255 UTF-16 units,
+# and Windows without long-path support caps the whole path at ~260 characters.
+MAX_FILENAME_CHARS = 120
+MAX_FILENAME_BYTES = 200
+MAX_PATH_CHARS = 250
+
+
+def _fit_length(name: str, max_chars: int, max_bytes: int) -> str:
+    """Trim a name to both a character budget and a UTF-8 byte budget."""
+    kept: list[str] = []
+    used = 0
+    for char in name:
+        size = len(char.encode("utf-8"))
+        if len(kept) >= max_chars or used + size > max_bytes:
+            break
+        kept.append(char)
+        used += size
+    return "".join(kept).rstrip()
+
+
+def is_path_too_long_error(err: OSError) -> bool:
+    """True for the OS errors raised when a path or filename exceeds the limit."""
+    return getattr(err, "winerror", None) == 206 or err.errno == errno.ENAMETOOLONG
+
+
+def _clean_filename(name: str) -> str:
     cleaned = INVALID_FILENAME_CHARS.sub("_", name)
     cleaned = CONTROL_CHARS.sub("", cleaned).strip().strip(".")
     cleaned = re.sub(r"\s+", " ", cleaned)
     if cleaned.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
         cleaned = f"_{cleaned}"
     return cleaned or "song"
+
+
+def sanitize_filename(name: str) -> str:
+    # Long titles — and CJK titles, which cost 3 bytes per character — would
+    # otherwise fail with a cryptic OS error when the file is created.
+    return _fit_length(_clean_filename(name), MAX_FILENAME_CHARS, MAX_FILENAME_BYTES) or "song"
 
 
 def dedupe_path(path: Path) -> Path:
@@ -84,8 +118,23 @@ def dedupe_path(path: Path) -> Path:
 
 def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = None, rename: Optional[str] = None, out_format: str = "mp3") -> Path:
     raw_name = rename if rename else (f"{song_name}-{song_id}" if song_name else f"song-{song_id}")
-    final_name = sanitize_filename(raw_name)
-    return dedupe_path(out_dir / f"{final_name}.{out_format}")
+    final_name = _clean_filename(raw_name)
+    suffix = f".{out_format}"
+    if os.name == "nt":
+        # A deep output directory can still overflow the legacy path limit, so
+        # budget the name against the directory we are actually writing to.
+        budget = MAX_PATH_CHARS - len(str(out_dir)) - len(suffix)
+        if budget < len(final_name):
+            tail = f"-{song_id}"
+            if final_name.endswith(tail):
+                # Keep the song id so truncated files stay identifiable.
+                head = final_name[: len(final_name) - len(tail)]
+                head = _fit_length(head, budget - len(tail), MAX_FILENAME_BYTES - len(tail.encode("utf-8")))
+                final_name = f"{head}{tail}" if head else (song_id or "song")
+            else:
+                final_name = _fit_length(final_name, budget, MAX_FILENAME_BYTES) or "song"
+    final_name = _fit_length(final_name, MAX_FILENAME_CHARS, MAX_FILENAME_BYTES) or "song"
+    return dedupe_path(out_dir / f"{final_name}{suffix}")
 
 
 # ── Format detection / conversion ────────────────────────────────

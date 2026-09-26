@@ -86,6 +86,27 @@ class DownloadAudioStreamTests(unittest.TestCase):
     def tearDown(self):
         self.tmpdir.cleanup()
 
+    def test_long_ascii_name_is_truncated(self):
+        name = sanitize_filename("a" * 400)
+        self.assertLessEqual(len(name), 120)
+        self.assertTrue(name)
+
+    def test_long_cjk_name_stays_within_byte_budget(self):
+        # CJK costs 3 UTF-8 bytes per character, so ext4's 255-byte cap bites early.
+        name = sanitize_filename("歌" * 200)
+        self.assertLessEqual(len(name.encode("utf-8")), 200)
+        self.assertTrue(name)
+
+    def test_path_too_long_detection(self):
+        import errno
+
+        class WinPathError(OSError):
+            winerror = 206
+
+        self.assertTrue(music_fetch.audio.is_path_too_long_error(WinPathError("too long")))
+        self.assertTrue(music_fetch.audio.is_path_too_long_error(OSError(errno.ENAMETOOLONG, "too long")))
+        self.assertFalse(music_fetch.audio.is_path_too_long_error(OSError(errno.ENOENT, "missing")))
+
     def test_build_attempt_headers_without_cookie(self):
         attempts = music_fetch.audio._build_download_attempt_headers("")
         self.assertEqual(len(attempts), 3)
