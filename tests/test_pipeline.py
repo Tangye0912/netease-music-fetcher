@@ -548,3 +548,141 @@ class CoverArtTests(unittest.TestCase):
         target = Path(self.tmp.name) / "song.wav"
         target.write_bytes(b"not really audio")
         self.assertFalse(_embed_cover(target, self.JPEG, "image/jpeg"))
+
+    def test_download_cover_reads_bytes_and_sniffs_mime(self):
+        from music_fetch.pipeline import _download_cover
+
+        response = mock.MagicMock()
+        response.read.return_value = self.PNG
+        response.__enter__.return_value = response
+        with mock.patch("music_fetch.pipeline.open_url", return_value=response) as url_mock:
+            data, mime = _download_cover("https://example.com/cover.png")
+        self.assertEqual(data, self.PNG)
+        self.assertEqual(mime, "image/png")
+        url_mock.assert_called_once()
+
+
+class PipelineFailurePathTests(unittest.TestCase):
+    """Cancel points, the missing-ffmpeg fallback and lyric failures."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out_dir = Path(self.tmp.name)
+        self.output_path = self.out_dir / "test.mp3"
+        self.source_path = self.out_dir / "test.mp3.source"
+
+    def _fallback(self, media_url: str = "https://example.com/song.mp3"):
+        def fake(**kwargs):
+            kwargs["output_path"].write_bytes(b"audio-bytes")
+            return PlayableCandidate(media_url=media_url, duration_ms=1, level="standard", encode_type="mp3")
+        return fake
+
+    def _run(self, **kwargs):
+        params = dict(
+            song_id="42", cookie="MUSIC_U=test", output_path=self.output_path,
+            target_format="mp3", timeout=5,
+        )
+        params.update(kwargs)
+        return run_download_pipeline(**params)
+
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_cancel_after_download_removes_partial_files(self, fallback_mock):
+        fallback_mock.side_effect = self._fallback()
+        with self.assertRaises(DownloadCanceled):
+            self._run(cancel_checker=lambda: True)
+        self.assertFalse(self.output_path.exists())
+        self.assertFalse(self.source_path.exists())
+
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_cancel_before_conversion_removes_partial_files(self, fallback_mock, _ffmpeg_mock):
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        checks: list[int] = []
+
+        def cancel() -> bool:
+            checks.append(1)
+            return len(checks) >= 2  # pass the post-download check, cancel before converting
+
+        with self.assertRaises(DownloadCanceled):
+            self._run(cancel_checker=cancel)
+        self.assertFalse(self.output_path.exists())
+        self.assertFalse(self.source_path.exists())
+
+    @mock.patch("music_fetch.pipeline.write_audio_tags")
+    @mock.patch("music_fetch.pipeline.convert_audio_file")
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_cancel_after_conversion_removes_output(self, fallback_mock, _ffmpeg_mock, convert_mock, _tags_mock):
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        convert_mock.side_effect = lambda source, target, fmt, timeout: target.write_bytes(b"converted")
+        checks: list[int] = []
+
+        def cancel() -> bool:
+            checks.append(1)
+            return len(checks) >= 3  # only the post-conversion check cancels
+
+        with self.assertRaises(DownloadCanceled):
+            self._run(cancel_checker=cancel)
+        self.assertFalse(self.output_path.exists())
+
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=False)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_missing_ffmpeg_saves_the_source_format(self, fallback_mock, _ffmpeg_mock):
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        result = self._run()
+        self.assertEqual(result.output_path.suffix, ".flac")
+        self.assertEqual(result.output_path.read_bytes(), b"audio-bytes")
+        self.assertEqual(result.file_size, len(b"audio-bytes"))
+
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=False)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_missing_ffmpeg_does_not_overwrite_an_existing_file(self, fallback_mock, _ffmpeg_mock):
+        (self.out_dir / "test.flac").write_bytes(b"older-download")
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        result = self._run()
+        self.assertEqual((self.out_dir / "test.flac").read_bytes(), b"older-download")
+        self.assertTrue(result.output_path.name.startswith("test_"))
+        self.assertEqual(result.output_path.suffix, ".flac")
+
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_output_directory_permission_error_is_reported(self, fallback_mock):
+        fallback_mock.side_effect = self._fallback()
+        with mock.patch.object(Path, "mkdir", side_effect=PermissionError("denied")):
+            with self.assertRaises(MusicFetchError) as ctx:
+                self._run()
+        self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_output_path_too_long_is_reported(self, fallback_mock):
+        import errno
+
+        fallback_mock.side_effect = self._fallback()
+        with mock.patch.object(Path, "mkdir", side_effect=OSError(errno.ENAMETOOLONG, "too long")):
+            with self.assertRaises(MusicFetchError) as ctx:
+                self._run()
+        self.assertEqual(ctx.exception.code, "PATH_TOO_LONG")
+
+    @mock.patch("music_fetch.pipeline.write_audio_tags")
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    @mock.patch("music_fetch.api.fetch_lyric")
+    def test_lyric_is_saved_and_embedded(self, lyric_mock, fallback_mock, _tags_mock):
+        from music_fetch.api import LyricResult
+
+        lyric_mock.return_value = LyricResult(lyric="[00:01.00]hi")
+        fallback_mock.side_effect = self._fallback()
+        with mock.patch("music_fetch.audio.save_lyric_file") as save_mock, mock.patch(
+            "music_fetch.audio.embed_lyric_tag"
+        ) as embed_mock:
+            self._run(download_lyric=True, lyric_mode="original")
+        save_mock.assert_called_once()
+        embed_mock.assert_called_once_with(self.output_path, "[00:01.00]hi")
+
+    @mock.patch("music_fetch.pipeline.write_audio_tags")
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    @mock.patch("music_fetch.api.fetch_lyric", side_effect=RuntimeError("lyric boom"))
+    def test_lyric_failure_does_not_fail_the_download(self, _lyric_mock, fallback_mock, _tags_mock):
+        fallback_mock.side_effect = self._fallback()
+        result = self._run(download_lyric=True)
+        self.assertTrue(result.output_path.exists())
+        self.assertEqual(result.file_size, len(b"audio-bytes"))

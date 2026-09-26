@@ -385,6 +385,48 @@ def test_settings_can_change_existing_file_policy(app):
     assert app.session.existing_file_policy == "overwrite"
 
 
+def test_task_detail_pause_then_resume(app, tmp_path):
+    item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
+
+    with mock.patch("music_fetch.tui.U.live_ask", return_value=""), mock.patch(
+        "music_fetch.tui.U.print_panel"
+    ), mock.patch("music_fetch.tui.U.menu", return_value=2):  # 暂停
+        app._task_actions(item)
+    assert app.queue.item(item.task_id).state == "paused"
+
+    with mock.patch("music_fetch.tui.U.live_ask", return_value=""), mock.patch(
+        "music_fetch.tui.U.print_panel"
+    ), mock.patch("music_fetch.tui.U.menu", return_value=2):  # 恢复
+        app._task_actions(app.queue.item(item.task_id))
+    assert app.queue.item(item.task_id).state == "pending"
+
+
+def test_task_detail_cancel_records_history(app, tmp_path):
+    item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
+    with mock.patch("music_fetch.tui.U.live_ask", return_value=""), mock.patch(
+        "music_fetch.tui.U.print_panel"
+    ), mock.patch("music_fetch.tui.U.menu", return_value=3):  # 取消任务
+        app._task_actions(item)
+
+    assert app.queue.item(item.task_id).state == "canceled"
+    assert [record.song_id for record in app.history_store.load()] == ["1"]
+
+
+def test_task_detail_retry_remaps_the_batch_mapping(app, tmp_path):
+    item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
+    app._batches = [([BatchDetectRow("1", song_id="1")], {0: item.task_id})]
+    app.queue.cancel(item.task_id)
+
+    with mock.patch("music_fetch.tui.U.print_panel"), mock.patch(
+        "music_fetch.tui.U.menu", return_value=2  # 打开所在文件夹 / 重试 / 返回
+    ):
+        app._task_actions(app.queue.item(item.task_id))
+
+    items = app.queue.snapshot()
+    assert len(items) == 2  # the canceled row plus the requeued one
+    assert app._batches[0][1][0] == items[-1].task_id
+
+
 def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
     """Regression: grouped rows are numbered per section, so a typed index must
     resolve against the grouped order — not the flat queue order."""

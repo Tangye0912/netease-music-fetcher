@@ -66,7 +66,7 @@ from music_fetch.history_results import (
     filter_download_history,
     paginate_download_history,
 )
-from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config, normalize_proxy_config
+from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config
 from music_fetch.version_check import check_for_updates_cached, version_key
 import music_fetch.tui_utils as U
 import music_fetch.ui_texts as T
@@ -1487,38 +1487,26 @@ class TuiApp:
         if choice == len(options):
             return
         if choice == 1:
-            self.session.proxy_type = ""
-            self.session.proxy_host = ""
-            self.session.proxy_port = 0
-            self.session.proxy_username = ""
-            self.session.proxy_password = ""
+            proxy_type, proxy_host, proxy_port, proxy_username, proxy_password = "", "", 0, "", ""
         else:
             proxy_type = "http" if choice == 2 else "socks5"
-            host = U.ask_required("代理主机（hostname 或 IP）")
-            port = U.ask_int("代理端口", 0, 1, 65535)
-            username = U.ask("用户名（可选）")
-            password = U.ask("密码（可选）")
-            try:
-                normalize_proxy_config(proxy_type, host, port, username, password)
-            except ProxyConfigError as err:
-                U.print_error(f"代理配置无效：{err}")
-                return
-            self.session.proxy_type = proxy_type
-            self.session.proxy_host = host
-            self.session.proxy_port = port
-            self.session.proxy_username = username
-            self.session.proxy_password = password
+            proxy_host = U.ask_required("代理主机（hostname 或 IP）")
+            proxy_port = U.ask_int("代理端口", 0, 1, 65535)
+            proxy_username = U.ask("用户名（可选）")
+            proxy_password = U.ask("密码（可选）")
         try:
-            configure_proxy(
-                self.session.proxy_type,
-                self.session.proxy_host,
-                self.session.proxy_port,
-                self.session.proxy_username,
-                self.session.proxy_password,
-            )
+            # configure_proxy validates too, so the session is only touched once
+            # the runtime has accepted the config — a rejected proxy must not be
+            # persisted by a later "保存设置".
+            configure_proxy(proxy_type, proxy_host, proxy_port, proxy_username, proxy_password)
         except ProxyConfigError as err:
             U.print_error(f"代理配置无效：{err}")
             return
+        self.session.proxy_type = proxy_type
+        self.session.proxy_host = proxy_host
+        self.session.proxy_port = proxy_port
+        self.session.proxy_username = proxy_username
+        self.session.proxy_password = proxy_password
         self._proxy_label = self._proxy_summary()
         U.print_success("代理已生效（保存设置后持久化）。")
 

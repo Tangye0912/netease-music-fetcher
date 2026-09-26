@@ -369,6 +369,59 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertEqual(self.output_path.read_bytes(), b"dddd")
 
 
+    def _ok_response(self, chunks):
+        response = mock.MagicMock()
+        response.status = 200
+        response.getcode.return_value = 200
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.headers = {}
+        response.read.side_effect = list(chunks) + [b""]
+        return response
+
+    def test_pause_blocks_the_read_until_resumed(self):
+        checks: list[int] = []
+
+        def pause_checker() -> bool:
+            checks.append(1)
+            return len(checks) <= 2  # pause for the first two checks, then resume
+
+        with mock.patch("urllib.request.urlopen", return_value=self._ok_response([b"paused-bytes"])):
+            music_fetch.audio._download_audio_stream(
+                "https://m801.music.126.net/abc.mp3",
+                self.output_path,
+                timeout=10,
+                progress_callback=None,
+                cancel_checker=None,
+                pause_checker=pause_checker,
+                cookie="",
+            )
+
+        self.assertEqual(self.output_path.read_bytes(), b"paused-bytes")
+        self.assertGreaterEqual(len(checks), 3)
+
+    def test_cancel_while_paused_aborts_the_download(self):
+        cancel_calls: list[int] = []
+
+        def cancel_checker() -> bool:
+            cancel_calls.append(1)
+            return len(cancel_calls) >= 2  # pass the pre-read check, cancel inside the pause
+
+        with mock.patch("urllib.request.urlopen", return_value=self._ok_response([b"never-written"])):
+            with self.assertRaises(music_fetch.DownloadCanceled):
+                music_fetch.audio._download_audio_stream(
+                    "https://m801.music.126.net/abc.mp3",
+                    self.output_path,
+                    timeout=10,
+                    progress_callback=None,
+                    cancel_checker=cancel_checker,
+                    pause_checker=lambda: True,
+                    cookie="",
+                )
+
+        self.assertFalse(self.output_path.exists())
+
+
 class DownloadStreamResumeTests(unittest.TestCase):
     """Test _download_audio_stream resume / partial download logic."""
 
@@ -607,3 +660,70 @@ class DownloadPreviewToTempTests(unittest.TestCase):
             with self.assertRaises(MusicFetchError) as raised:
                 music_fetch.audio.download_preview_to_temp("42", "天下", "MUSIC_U=x", timeout=5)
         self.assertEqual(raised.exception.code, "SONG_UNAVAILABLE")
+
+
+class LyricFileAndTagTests(unittest.TestCase):
+    """Lyric sidecar and embedding, checked against real containers."""
+
+    FIXTURES = Path(__file__).resolve().parent / "fixtures"
+    LYRICS = "[00:01.00]第一行\n[00:05.00]第二行"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _fixture_copy(self, name: str) -> Path:
+        target = Path(self.tmp.name) / name
+        target.write_bytes((self.FIXTURES / name).read_bytes())
+        return target
+
+    def test_save_lyric_file_writes_lrc_next_to_the_audio(self):
+        target = self._fixture_copy("silence.mp3")
+        music_fetch.audio.save_lyric_file(target, self.LYRICS)
+        lrc = Path(self.tmp.name) / "silence.lrc"
+        self.assertEqual(lrc.read_text(encoding="utf-8"), self.LYRICS)
+
+    def test_save_lyric_file_ignores_empty_lyrics(self):
+        target = self._fixture_copy("silence.mp3")
+        music_fetch.audio.save_lyric_file(target, "   \n")
+        self.assertFalse((Path(self.tmp.name) / "silence.lrc").exists())
+
+    def test_embed_lyric_in_mp3_uses_a_uslt_frame(self):
+        from mutagen.id3 import ID3
+
+        target = self._fixture_copy("silence.mp3")
+        music_fetch.audio.embed_lyric_tag(target, self.LYRICS)
+        frames = ID3(str(target)).getall("USLT")
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].text, self.LYRICS)
+
+    def test_embed_lyric_replaces_previous_mp3_lyrics(self):
+        from mutagen.id3 import ID3
+
+        target = self._fixture_copy("silence.mp3")
+        music_fetch.audio.embed_lyric_tag(target, self.LYRICS)
+        music_fetch.audio.embed_lyric_tag(target, "新歌词")
+        frames = ID3(str(target)).getall("USLT")
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].text, "新歌词")
+
+    def test_embed_lyric_in_m4a(self):
+        from mutagen.mp4 import MP4
+
+        target = self._fixture_copy("silence.m4a")
+        music_fetch.audio.embed_lyric_tag(target, self.LYRICS)
+        self.assertEqual(MP4(str(target)).tags["\xa9lyr"], [self.LYRICS])
+
+    def test_embed_lyric_in_flac(self):
+        from mutagen.flac import FLAC
+
+        target = self._fixture_copy("silence.flac")
+        music_fetch.audio.embed_lyric_tag(target, self.LYRICS)
+        self.assertEqual(FLAC(str(target))["lyrics"], [self.LYRICS])
+
+    def test_embed_lyric_ignores_empty_text_and_unknown_containers(self):
+        target = Path(self.tmp.name) / "song.wav"
+        target.write_bytes(b"not really audio")
+        music_fetch.audio.embed_lyric_tag(target, self.LYRICS)  # unsupported suffix
+        music_fetch.audio.embed_lyric_tag(target, "")           # nothing to embed
+        self.assertEqual(target.read_bytes(), b"not really audio")

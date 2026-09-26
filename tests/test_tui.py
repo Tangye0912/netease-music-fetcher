@@ -378,6 +378,52 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(table_mock.call_count, 2)
         batch_mock.assert_called_once_with("https://music.163.com/playlist?id=11")
 
+    def test_proxy_config_failure_leaves_the_session_untouched(self):
+        from music_fetch.network import ProxyConfigError
+
+        self.app.session.proxy_type = "socks5"
+        self.app.session.proxy_host = "old-host"
+        with mock.patch("music_fetch.tui.U.menu", return_value=3), mock.patch(
+            "music_fetch.tui.U.ask_required", return_value="bad host"
+        ), mock.patch("music_fetch.tui.U.ask_int", return_value=1080), mock.patch(
+            "music_fetch.tui.U.ask", return_value=""
+        ), mock.patch(
+            "music_fetch.tui.configure_proxy", side_effect=ProxyConfigError("bad host")
+        ), mock.patch("music_fetch.tui.U.print_error") as error_mock:
+            self.app._edit_proxy()
+
+        error_mock.assert_called_once()
+        # A rejected proxy must not end up in the session (it would be saved later).
+        self.assertEqual(self.app.session.proxy_type, "socks5")
+        self.assertEqual(self.app.session.proxy_host, "old-host")
+
+    def test_proxy_config_success_updates_session_and_label(self):
+        from music_fetch.network import configure_proxy as real_configure_proxy
+
+        with mock.patch("music_fetch.tui.U.menu", return_value=2), mock.patch(
+            "music_fetch.tui.U.ask_required", return_value="127.0.0.1"
+        ), mock.patch("music_fetch.tui.U.ask_int", return_value=8080), mock.patch(
+            "music_fetch.tui.U.ask", return_value=""
+        ), mock.patch(
+            # Run the real configurator so the summary label reflects it.
+            "music_fetch.tui.configure_proxy", side_effect=real_configure_proxy
+        ) as configure_mock, mock.patch("music_fetch.tui.U.print_success"):
+            self.app._edit_proxy()
+
+        configure_mock.assert_called_once_with("http", "127.0.0.1", 8080, "", "")
+        self.assertEqual(self.app.session.proxy_type, "http")
+        self.assertEqual(self.app.session.proxy_host, "127.0.0.1")
+        self.assertEqual(self.app.session.proxy_port, 8080)
+        self.assertEqual(self.app._proxy_label, "HTTP 127.0.0.1:8080")
+        real_configure_proxy()  # leave the process-wide proxy back on direct
+
+    def test_proxy_menu_back_changes_nothing(self):
+        with mock.patch("music_fetch.tui.U.menu", return_value=4), mock.patch(
+            "music_fetch.tui.configure_proxy"
+        ) as configure_mock:
+            self.app._edit_proxy()
+        configure_mock.assert_not_called()
+
     def test_search_screen_pages_and_redraws_after_pick(self):
         results = [
             SearchResult(str(index), f"歌 {index}", "歌手", "专辑", 60000)
