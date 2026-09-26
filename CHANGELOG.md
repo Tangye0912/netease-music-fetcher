@@ -38,7 +38,8 @@
 
 ### QA
 
-- 代码审查修复轮（对照 `CODE_REVIEW.md`，HEAD `0a15f8b`）：回归测试 584 → **754 通过 + 32 子测试**（新增 170 个用例），`mypy --strict` 与 `ruff` 干净，覆盖率 84.72% → **85.63%**（`download_queue.py` 97%、`app_stores.py` 96%、`pipeline.py` 94%、`network.py` 95%、`audio.py` 88%、`api.py` 89%）。新增的关键回归覆盖：真实 HTTP 服务的截断响应、候选 404 回退、残file恢复、覆盖策略、取消不删旧文件、撕裂历史文件隔离、gzip/SOCKS5 adapter、分享文案中的 CJK、非十进制数字输入、emoji 宽度、重复文案多选、批量扩展阶段的传输异常。
+- 代码审查修复轮（对照 `CODE_REVIEW.md`，HEAD `0a15f8b`）：回归测试 584 → **755 通过 + 32 子测试**（新增 171 个用例），`mypy --strict` 与 `ruff` 干净，覆盖率 84.72% → **85.63%**（`download_queue.py` 97%、`app_stores.py` 96%、`pipeline.py` 94%、`network.py` 95%、`audio.py` 88%、`api.py` 89%）。新增的关键回归覆盖：真实 HTTP 服务的截断响应、候选 404 回退、残file恢复、覆盖策略、取消不删旧文件、撕裂历史文件隔离、gzip/SOCKS5 adapter、分享文案中的 CJK、非十进制数字输入、emoji 宽度、重复文案多选、批量扩展阶段的传输异常。
+- 网络守卫加强：`tests/conftest.py` 在"拦截非回环连接"之外同时禁用 urllib 的代理发现（`getproxies` 置空）。带系统代理的机器上，漏 mock 的请求会连到回环代理而被放行，本轮 CI 正是因此才拦到本地一直"通过"的用例。`fetch_outer_media_url` 同时补上 `except OSError`：outer-url 是尽力而为的回退，传输异常应视为"没有回退地址"，不应盖掉真实的候选错误。
 - 回归测试：`python3 -m pytest tests/ -q`（582 通过 + 2 跳过；本轮新增 31 个测试，覆盖下载取消检查、ffmpeg 缺失回退、歌词落盘与嵌入、代理配置失败、任务详情控制等关键路径）。
 - 覆盖率：82.63% → 84.72%（`pipeline.py` 81% → 93%，`audio.py` 81% → 89%，`download_queue.py` 97%）。
 - 测试卫生：新增 `tests/conftest.py` 网络守卫（除回环地址外，任何真实连接直接报错），并给直接构造 `DownloadQueue` 的测试注入假 job factory。此前有个别测试真的发起了对网易服务器的请求，其后台线程会串扰 `test_network` 的假 socket 处理器，导致偶发失败。

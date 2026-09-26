@@ -696,6 +696,12 @@ class FetchOuterMediaUrlTests(unittest.TestCase):
             result = music_fetch.audio.fetch_outer_media_url("42")
         self.assertIsNone(result)
 
+    def test_unexpected_transport_error_means_no_outer_url(self):
+        # Best-effort fallback: a plain OSError (socket reset/TLS) must not escape
+        # and hide the real per-candidate error from the caller.
+        with mock.patch("music_fetch.audio.request.urlopen", side_effect=ConnectionResetError("reset")):
+            self.assertIsNone(music_fetch.audio.fetch_outer_media_url("42"))
+
 
 class DownloadPreviewToTempTests(unittest.TestCase):
     def _candidate(self, level: str, encode_type: str, url: str) -> mock.Mock:

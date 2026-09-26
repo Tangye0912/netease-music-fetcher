@@ -9,6 +9,7 @@ spin up local HTTP/SOCKS servers keep working.
 from __future__ import annotations
 
 import socket
+import urllib.request
 
 import pytest
 
@@ -28,4 +29,9 @@ def _guarded_connect(self: socket.socket, address: object) -> object:
 
 @pytest.fixture(autouse=True)
 def block_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Proxy discovery must be off as well: on a machine with a system proxy
+    # (urllib.getproxies() reads the macOS/Windows settings) a missing mock
+    # connects to the loopback proxy, which the guard below allows, so the real
+    # request slips through locally and only blows up in CI.
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)

@@ -182,8 +182,9 @@ class DownloadFallbackTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
     @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_outer_media_url", return_value=None)
     @mock.patch("music_fetch.audio.fetch_playable_candidates")
-    def test_last_candidate_error_is_reported_when_not_a_403(self, candidates_mock, download_mock):
+    def test_last_candidate_error_is_reported_when_not_a_403(self, candidates_mock, _outer_mock, download_mock):
         candidates_mock.return_value = [self._candidate("https://m704.music.126.net/a.mp3")]
         download_mock.side_effect = music_fetch.MusicFetchError(
             "DOWNLOAD_FAILED", "Media request failed: HTTP 410."

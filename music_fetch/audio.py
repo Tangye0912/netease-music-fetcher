@@ -411,6 +411,12 @@ def fetch_outer_media_url(song_id: str, timeout: int = 20) -> Optional[str]:
     except error.URLError as url_err:
         logger.warning("Outer-url network error. song_id=%s reason=%s", song_id, url_err.reason)
         return None
+    except OSError as os_err:
+        # The fallback is best-effort: a mid-response socket error (TLS, reset)
+        # must mean "no outer url", not an unhandled crash that hides the real
+        # candidate error from the caller.
+        logger.warning("Outer-url transport error. song_id=%s error=%s", song_id, os_err)
+        return None
 
 
 def _build_download_attempt_headers(cookie: str) -> list[dict[str, str]]:
