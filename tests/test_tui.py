@@ -504,7 +504,10 @@ class ConsistencyTests(TuiAppHelperTests):
             if title == "主菜单":
                 return next(menu_inputs)
             return 1
-        with mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
+        with mock.patch(
+            # run() kicks off the background login check; keep it offline.
+            "music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")
+        ), mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
             self.app, "_screen_single", side_effect=KeyboardInterrupt
         ), mock.patch("music_fetch.tui.U.clear_screen"), mock.patch(
             "music_fetch.tui.U.print_header"
@@ -519,7 +522,6 @@ class ConsistencyTests(TuiAppHelperTests):
         # The task page bypasses _dispatch_screen, so it needs the same Ctrl+C
         # protection or Ctrl+C there would exit the whole program.
         self.app.session.cookie = "MUSIC_U=x"
-        self.app.queue.enqueue(DownloadRequest("1", "歌一", Path(self._tmp.name) / "1.mp3"))
         picks = []
 
         def fake_menu(title, options, **kwargs):
@@ -530,7 +532,10 @@ class ConsistencyTests(TuiAppHelperTests):
                 return options.index(MENU_QUIT) + 1
             return 1
 
-        with mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
+        with mock.patch(
+            # run() kicks off the background login check; keep it offline.
+            "music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")
+        ), mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
             self.app, "_screen_tasks", side_effect=KeyboardInterrupt
         ), mock.patch("music_fetch.tui.U.clear_screen"), mock.patch(
             "music_fetch.tui.U.print_header"

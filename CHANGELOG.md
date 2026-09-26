@@ -21,7 +21,8 @@
 ### QA
 
 - 回归测试：`python3 -m pytest tests/ -q`（582 通过 + 2 跳过；本轮新增 31 个测试，覆盖下载取消检查、ffmpeg 缺失回退、歌词落盘与嵌入、代理配置失败、任务详情控制等关键路径）。
-- 覆盖率：82.63% → 84.85%（`pipeline.py` 81% → 93%，`audio.py` 81% → 89%，`download_queue.py` 97%）。
+- 覆盖率：82.63% → 84.72%（`pipeline.py` 81% → 93%，`audio.py` 81% → 89%，`download_queue.py` 97%）。
+- 测试卫生：新增 `tests/conftest.py` 网络守卫（除回环地址外，任何真实连接直接报错），并给直接构造 `DownloadQueue` 的测试注入假 job factory。此前有个别测试真的发起了对网易服务器的请求，其后台线程会串扰 `test_network` 的假 socket 处理器，导致偶发失败。
 
 ## v3.6.1 (2026-09-26)
 

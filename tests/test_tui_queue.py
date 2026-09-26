@@ -337,6 +337,9 @@ def test_run_gives_up_after_bounded_shutdown_wait(app):
     with mock.patch.object(app.queue, "wait", return_value=False), mock.patch(
         "music_fetch.tui.SHUTDOWN_WAIT_SEC", 0
     ), mock.patch.object(app, "_run_menu", return_value=0), mock.patch(
+        # run() kicks off the background login check; keep it offline.
+        "music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")
+    ), mock.patch(
         "music_fetch.tui.U.print_info"
     ), mock.patch("music_fetch.tui.U.print_warning") as warning_mock:
         assert app.run() == 0

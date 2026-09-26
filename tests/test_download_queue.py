@@ -62,6 +62,15 @@ def request(tmp_path, song="1", **kwargs):
     return DownloadRequest(song, f"Song {song}", tmp_path / f"{song}.mp3", **kwargs)
 
 
+def fake_factory(**kwargs):
+    """Job factory for tests that build a queue directly.
+
+    Without it DownloadQueue falls back to the real DownloadJob, which performs
+    live network requests in a background thread and can leak into other tests.
+    """
+    return FakeJob(**kwargs)
+
+
 def test_shared_limit_for_multiple_submissions_and_refill(setup_queue, tmp_path):
     queue, jobs, history = setup_queue
     for song in ("1", "2", "3", "4"):
@@ -397,7 +406,7 @@ def test_restore_reenqueues_missing_and_records_existing(tmp_path):
          "state": "pending"},
     ], ensure_ascii=False), encoding="utf-8")
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 2, persist_path=store_path)
+    queue = DownloadQueue(history, "MUSIC_U=x", 2, fake_factory, persist_path=store_path)
     restored, completed = queue.restore_saved()
     assert (restored, completed) == (1, 1)
     # The existing file was recorded as a completed download, not re-downloaded.
@@ -415,7 +424,7 @@ def test_restore_tolerates_malformed_store(tmp_path):
     store_path = tmp_path / "queue.json"
     store_path.write_text("not-json-at-all", encoding="utf-8")
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory, persist_path=store_path)
     assert queue.restore_saved() == (0, 0)
     assert queue.snapshot() == ()
 
@@ -429,7 +438,7 @@ def test_persist_retries_after_a_transient_write_failure(tmp_path):
     """One OSError must not permanently drop the pending state."""
     store_path = tmp_path / "queue.json"
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory, persist_path=store_path)
     queue.enqueue(request(tmp_path, "1"))
     with mock.patch.object(QueueStore, "save", side_effect=OSError("disk full")):
         queue.poll()
@@ -459,7 +468,7 @@ def test_restore_reenqueues_empty_target_file(tmp_path):
          "state": "pending"},
     ], ensure_ascii=False), encoding="utf-8")
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory, persist_path=store_path)
     restored, completed = queue.restore_saved()
     assert (restored, completed) == (1, 0)
     assert history.load() == []
@@ -507,7 +516,7 @@ def test_poll_does_not_hold_the_lock_during_history_write(setup_queue, tmp_path)
 def test_poll_does_not_hold_the_lock_during_queue_persist(tmp_path):
     store_path = tmp_path / "queue.json"
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory, persist_path=store_path)
     queue.enqueue(request(tmp_path, "1"))  # changes the pending set → persist needed
     real_save = QueueStore.save
     writing, release = threading.Event(), threading.Event()
@@ -555,7 +564,7 @@ def test_active_jobs_counts_live_workers(setup_queue, tmp_path):
 def test_scheduler_survives_a_poll_exception(tmp_path):
     """An unexpected poll error must not silently kill the scheduler thread."""
     history = DownloadHistoryStore(tmp_path / "history.json")
-    queue = DownloadQueue(history, "MUSIC_U=x", 1)
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory)
     calls = []
 
     def flaky_poll():
