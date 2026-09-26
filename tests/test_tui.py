@@ -350,7 +350,7 @@ class TuiAppHelperTests(unittest.TestCase):
         set_theme_mock.assert_called_once_with("light")
 
     def test_settings_theme_choice_is_applied_and_persisted(self):
-        with mock.patch("music_fetch.tui.U.menu", side_effect=[7, 2, 8]), mock.patch(
+        with mock.patch("music_fetch.tui.U.menu", side_effect=[7, 2, 9]), mock.patch(
             "music_fetch.tui.U.set_theme", return_value="light"
         ) as set_theme_mock, mock.patch("music_fetch.tui.U.print_header"), mock.patch(
             "music_fetch.tui.U.print_success"

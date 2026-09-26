@@ -106,6 +106,16 @@ class SessionStoreTests(unittest.TestCase):
             self.assertFalse(hasattr(loaded, "ui_font_size"))
             self.assertFalse(hasattr(loaded, "window_geometry"))
 
+    def test_existing_file_policy_round_trip_and_clamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            store = SessionStore(path)
+            self.assertEqual(store.load().existing_file_policy, "rename")  # default
+            store.save(AppSession(existing_file_policy="overwrite"))
+            self.assertEqual(store.load().existing_file_policy, "overwrite")
+            path.write_text('{"existing_file_policy": "bogus"}', encoding="utf-8")
+            self.assertEqual(store.load().existing_file_policy, "rename")
+
     def test_download_settings_are_clamped_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "session.json"

@@ -9,6 +9,13 @@ MSG_BATCH_DUPLICATE_SONG = "与前序条目重复（song_id={song_id}）"
 MSG_DOWNLOADS_EMPTY = "暂无下载记录"
 MSG_DOWNLOADS_FILTER_EMPTY = "当前筛选条件下暂无记录"
 
+# Shown in the settings screen; keys must match app_settings.EXISTING_FILE_POLICIES.
+EXISTING_FILE_POLICY_LABELS = {
+    "rename": "自动重命名",
+    "skip": "跳过",
+    "overwrite": "覆盖",
+}
+
 MANAGER_FILTER_ALL = "全部"
 MANAGER_FILTER_PENDING = "待处理"
 MANAGER_FILTER_DOWNLOADING = "下载中"
@@ -80,6 +87,7 @@ __all__ = [
     "BATCH_STATUS_FAILED",
     "BATCH_STATUS_READY",
     "BATCH_STATUS_UNAVAILABLE",
+    "EXISTING_FILE_POLICY_LABELS",
     "MANAGER_EXPORT_EMPTY",
     "MANAGER_FILTER_ALL",
     "MANAGER_FILTER_CANCELED",

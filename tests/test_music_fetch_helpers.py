@@ -30,6 +30,42 @@ class PathHelperTests(unittest.TestCase):
             self.assertTrue(second.name.startswith("a_"))
             self.assertEqual(second.suffix, ".mp4")
 
+    def test_rename_policy_allocates_a_new_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            first = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="rename"
+            )
+            first.write_bytes(b"x")
+            second = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="rename"
+            )
+            self.assertNotEqual(first, second)
+
+    def test_overwrite_policy_reuses_the_existing_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            first = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="overwrite"
+            )
+            first.write_bytes(b"x")
+            second = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="overwrite"
+            )
+            self.assertEqual(first, second)
+
+    def test_skip_policy_reuses_the_existing_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            first = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="skip"
+            )
+            first.write_bytes(b"x")
+            second = music_fetch.resolve_output_path(
+                out_dir, song_id="1", song_name="song", out_format="mp3", policy="skip"
+            )
+            self.assertEqual(first, second)
+
     def test_long_song_name_keeps_song_id(self):
         """The generic cap must keep the id too (this is the CI failure mode:
         on Linux the short /tmp path never triggers the Windows path budget)."""

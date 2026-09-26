@@ -19,6 +19,8 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
+    DEFAULT_EXISTING_FILE_POLICY,
+    EXISTING_FILE_POLICIES,
     MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_HISTORY_RECORDS,
@@ -69,6 +71,7 @@ class AppSession:
     download_timeout_sec: int = DEFAULT_DOWNLOAD_TIMEOUT_SEC
     download_retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT
     download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
+    existing_file_policy: str = DEFAULT_EXISTING_FILE_POLICY
     ui_theme: str = DEFAULT_UI_THEME
     proxy_type: str = ""  # "http", "socks5", or "" for direct
     proxy_host: str = ""
@@ -110,6 +113,7 @@ class SessionStore:
             download_timeout_sec=self._safe_download_timeout(raw.get("download_timeout_sec")),
             download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
+            existing_file_policy=self._safe_existing_file_policy(raw.get("existing_file_policy")),
             ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
             proxy_type=self._safe_proxy_type(raw.get("proxy_type")),
             proxy_host=str(raw.get("proxy_host") or "").strip(),
@@ -128,6 +132,7 @@ class SessionStore:
             "download_timeout_sec": self._safe_download_timeout(session.download_timeout_sec),
             "download_retry_count": self._safe_download_retry_count(session.download_retry_count),
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
+            "existing_file_policy": self._safe_existing_file_policy(session.existing_file_policy),
             "ui_theme": self._safe_ui_theme(session.ui_theme),
             "proxy_type": self._safe_proxy_type(session.proxy_type),
             "proxy_host": str(session.proxy_host or "").strip(),
@@ -137,6 +142,13 @@ class SessionStore:
         }
         _write_private_json(self.path, payload)
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
+
+    @staticmethod
+    def _safe_existing_file_policy(value: object) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in EXISTING_FILE_POLICIES:
+            return normalized
+        return DEFAULT_EXISTING_FILE_POLICY
 
     @staticmethod
     def _safe_detect_timeout(value: object) -> int:

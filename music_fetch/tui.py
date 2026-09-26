@@ -36,6 +36,7 @@ from music_fetch.app_settings import (
     APP_VERSION,
     CONFIG_DIR,
     DOWNLOAD_HISTORY_FILE,
+    EXISTING_FILE_POLICIES,
     MAX_UI_CONCURRENCY,
     MIN_DOWNLOAD_CONCURRENCY,
     PROJECT_GITHUB_URL,
@@ -44,7 +45,7 @@ from music_fetch.app_settings import (
     SHUTDOWN_WAIT_SEC,
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename
+from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename, should_skip_existing
 from music_fetch.batch_inspect import run_batch_detect
 from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration, format_speed, probe_media_size_bytes
 from music_fetch.batch_results import build_batch_results_csv, summarize_batch_rows
@@ -56,7 +57,7 @@ from music_fetch.diagnostics import (
 )
 from music_fetch.download_retry import retry_target_format
 from music_fetch.download_queue import DownloadQueue, DownloadRequest, QueueItem, FINAL_STATES, STATE_LABELS, STAGE_LABELS
-from music_fetch.download_tasks import TASK_STATE_FAILED
+from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS
 from music_fetch.error_texts import user_error_message
 from music_fetch.history_results import (
     build_download_history_csv,
@@ -773,11 +774,24 @@ class TuiApp:
             return
         download_lyric, lyric_mode = self._pick_lyric_mode()
         task_ids: dict[int, str] = {}
+        skipped = 0
         for index, row in enumerate(rows):
             if row not in chosen:
                 continue
             try:
-                output_path = resolve_output_path(out_dir, row.song_id, row.song_name, out_format=target_format)
+                output_path = resolve_output_path(
+                    out_dir, row.song_id, row.song_name, out_format=target_format,
+                    policy=self.session.existing_file_policy,
+                )
+                if should_skip_existing(output_path, self.session.existing_file_policy):
+                    size = output_path.stat().st_size
+                    self._add_record(
+                        row.song_id, row.song_name or f"song-{row.song_id}",
+                        str(output_path), size, TASK_STATE_SUCCESS,
+                    )
+                    row.status = "download_success"
+                    skipped += 1
+                    continue
                 item = self.queue.enqueue(DownloadRequest(
                     row.song_id, row.song_name, output_path, target_format,
                     download_lyric, lyric_mode,
@@ -790,8 +804,14 @@ class TuiApp:
         self._batches.append((rows, task_ids))
         self.session.last_download_dir = str(out_dir)
         self.session_store.save(self.session)
-        U.print_success(f"已提交 {len(set(task_ids.values()))} 首到后台，可继续搜索或添加下载。")
-        U.print_info("主菜单 → 下载任务：查看进度、重试失败项或导出批次结果。")
+        if skipped:
+            U.print_info(f"其中 {skipped} 首已存在，按当前策略跳过。")
+        submitted = len(set(task_ids.values()))
+        if submitted:
+            U.print_success(f"已提交 {submitted} 首到后台，可继续搜索或添加下载。")
+            U.print_info("主菜单 → 下载任务：查看进度、重试失败项或导出批次结果。")
+        else:
+            U.print_warning("没有需要下载的歌曲（已存在的都已跳过）。")
 
     @staticmethod
     def _detect_progress(current: int, total: int, state: list[int]) -> None:
@@ -1155,10 +1175,16 @@ class TuiApp:
                 song_name=song_name or None,
                 rename=rename,
                 out_format=target_format,
+                policy=self.session.existing_file_policy,
             )
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             return False
+        if should_skip_existing(output_path, self.session.existing_file_policy):
+            size = output_path.stat().st_size
+            self._add_record(song_id, song_name, str(output_path), size, TASK_STATE_SUCCESS)
+            U.print_info(f"文件已存在，按当前策略跳过：{output_path}")
+            return True
         try:
             item = self.queue.enqueue(DownloadRequest(
                 song_id, song_name, output_path, target_format, download_lyric, lyric_mode,
@@ -1412,6 +1438,7 @@ class TuiApp:
                 f"并发上限：{self.session.download_concurrency}",
                 f"代理：{proxy_type_label}",
                 f"界面主题：{theme_label}",
+                f"已存在文件：{self._policy_label()}",
                 "保存设置",
                 "返回（不保存）",
             ]
@@ -1435,12 +1462,22 @@ class TuiApp:
                     self.session.ui_theme = "dark" if theme_choice == 1 else "light"
                     U.set_theme(self.session.ui_theme)
             elif choice == 8:
+                policy_options = [T.EXISTING_FILE_POLICY_LABELS[name] for name in EXISTING_FILE_POLICIES] + ["返回"]
+                picked = U.menu("文件已存在时", policy_options)
+                if picked <= len(EXISTING_FILE_POLICIES):
+                    self.session.existing_file_policy = EXISTING_FILE_POLICIES[picked - 1]
+            elif choice == 9:
                 self.queue.set_concurrency(self.session.download_concurrency)
                 self.session_store.save(self.session)
                 U.print_success("设置已保存。")
                 return
             else:
                 return
+
+    def _policy_label(self) -> str:
+        return T.EXISTING_FILE_POLICY_LABELS.get(
+            self.session.existing_file_policy, self.session.existing_file_policy
+        )
 
     def _edit_proxy(self) -> None:
         options = ["直连（跟随系统网络）", "HTTP 代理", "SOCKS5 代理", "返回"]

@@ -343,6 +343,48 @@ def test_run_gives_up_after_bounded_shutdown_wait(app):
     assert any("未在 0 秒内结束" in str(call) for call in warning_mock.call_args_list)
 
 
+def test_single_skips_existing_file_under_skip_policy(app, tmp_path):
+    app.session.existing_file_policy = "skip"
+    (tmp_path / "song-1.mp3").write_bytes(b"already here")
+    with mock.patch.object(app, "_ask_with_cancel", side_effect=[str(tmp_path), "song-1"]), mock.patch.object(
+        app, "_pick_format", return_value="mp3"
+    ), mock.patch.object(app, "_pick_lyric_mode", return_value=(False, "original")), mock.patch(
+        "music_fetch.tui.U.print_info"
+    ):
+        assert app._download_song("1", "song")
+    assert app.queue.snapshot() == ()  # nothing queued
+    records = app.history_store.load()
+    assert [r.song_id for r in records] == ["1"]
+    assert records[0].status == "success"
+
+
+def test_batch_skips_existing_files_under_skip_policy(app, tmp_path):
+    app.session.existing_file_policy = "skip"
+    rows = [BatchDetectRow("1", song_id="1", song_name="A", status="ready", selected=True),
+            BatchDetectRow("2", song_id="2", song_name="B", status="ready", selected=True)]
+    (tmp_path / "A-1.mp3").write_bytes(b"already here")
+    with mock.patch("music_fetch.tui.run_batch_detect", return_value=rows), mock.patch(
+        "music_fetch.tui.U.menu", return_value=1
+    ), mock.patch("music_fetch.tui.U.multiselect", return_value=[0, 1]), mock.patch(
+        "music_fetch.tui.U.print_table"
+    ), mock.patch.object(app, "_ask_with_cancel", return_value=str(tmp_path)), mock.patch.object(
+        app, "_pick_format", return_value="mp3"
+    ), mock.patch.object(app, "_pick_lyric_mode", return_value=(False, "original")), mock.patch(
+        "music_fetch.tui.U.print_info"
+    ), mock.patch("music_fetch.tui.U.print_success"), mock.patch("music_fetch.tui.U.print_warning"):
+        app._batch_flow("https://music.163.com/song?id=1")
+    # Only the missing song was queued; the existing one was recorded instead.
+    assert [item.request.song_id for item in app.queue.snapshot()] == ["2"]
+    assert [record.song_id for record in app.history_store.load()] == ["1"]
+
+
+def test_settings_can_change_existing_file_policy(app):
+    picks = iter([8, 3, 10])  # 已存在文件 → 覆盖 → 返回（不保存）
+    with mock.patch("music_fetch.tui.U.menu", side_effect=lambda *args, **kwargs: next(picks)):
+        app._screen_settings()
+    assert app.session.existing_file_policy == "overwrite"
+
+
 def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
     """Regression: grouped rows are numbered per section, so a typed index must
     resolve against the grouped order — not the flat queue order."""

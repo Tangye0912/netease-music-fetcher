@@ -97,6 +97,17 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertLessEqual(len(name.encode("utf-8")), 200)
         self.assertTrue(name)
 
+    def test_should_skip_existing_only_for_skip_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "a.mp3"
+            self.assertFalse(music_fetch.audio.should_skip_existing(target, "skip"))  # missing
+            target.write_bytes(b"")
+            self.assertFalse(music_fetch.audio.should_skip_existing(target, "skip"))  # interrupted write
+            target.write_bytes(b"audio")
+            self.assertTrue(music_fetch.audio.should_skip_existing(target, "skip"))
+            self.assertFalse(music_fetch.audio.should_skip_existing(target, "rename"))
+            self.assertFalse(music_fetch.audio.should_skip_existing(target, "overwrite"))
+
     def test_path_too_long_detection(self):
         import errno
 

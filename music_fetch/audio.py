@@ -10,7 +10,7 @@ from __future__ import annotations
 
 __all__ = [
     "sanitize_filename", "dedupe_path", "resolve_output_path",
-    "is_path_too_long_error",
+    "is_path_too_long_error", "should_skip_existing",
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
     "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
@@ -44,6 +44,7 @@ from music_fetch.api import (
     logger,
     normalize_media_url,
 )
+from music_fetch.app_settings import DEFAULT_EXISTING_FILE_POLICY
 from music_fetch.network import open_url
 
 
@@ -130,7 +131,28 @@ def _fit_name_preserving_id(name: str, song_id: str, max_chars: int, max_bytes: 
     return _fit_length(name, max_chars, max_bytes) or "song"
 
 
-def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = None, rename: Optional[str] = None, out_format: str = "mp3") -> Path:
+def should_skip_existing(path: Path, policy: str) -> bool:
+    """True when the policy says an existing, non-empty target must be kept.
+
+    A zero-byte file is a leftover from an interrupted write, so it is still
+    worth downloading over.
+    """
+    if policy != "skip":
+        return False
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def resolve_output_path(
+    out_dir: Path,
+    song_id: str,
+    song_name: Optional[str] = None,
+    rename: Optional[str] = None,
+    out_format: str = "mp3",
+    policy: str = DEFAULT_EXISTING_FILE_POLICY,
+) -> Path:
     raw_name = rename if rename else (f"{song_name}-{song_id}" if song_name else f"song-{song_id}")
     cleaned = _clean_filename(raw_name)
     suffix = f".{out_format}"
@@ -143,7 +165,12 @@ def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = 
         max_chars = min(max_chars, budget)
         max_bytes = min(max_bytes, budget)
     final_name = _fit_name_preserving_id(cleaned, song_id, max_chars, max_bytes)
-    return dedupe_path(out_dir / f"{final_name}{suffix}")
+    target = out_dir / f"{final_name}{suffix}"
+    # "skip" and "overwrite" both need the canonical target so the caller can
+    # test it; only "rename" allocates a fresh name.
+    if policy == "rename":
+        return dedupe_path(target)
+    return target
 
 
 # ── Format detection / conversion ────────────────────────────────

@@ -20,6 +20,11 @@ DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads")
 
 DEFAULT_TARGET_FORMAT = "mp3"
 SUPPORTED_AUDIO_FORMATS = ("mp3", "m4a", "wav", "flac", "aac")
+# What to do when the target file already exists: allocate a new name, skip the
+# download, or replace the existing file.  "rename" preserves the pre-v3.7
+# behaviour and stays the default.
+EXISTING_FILE_POLICIES = ("rename", "skip", "overwrite")
+DEFAULT_EXISTING_FILE_POLICY = "rename"
 DEFAULT_UI_THEME = "dark"
 UI_THEME_OPTIONS = ("light", "dark")
 DEFAULT_DETECT_TIMEOUT_SEC = 5
