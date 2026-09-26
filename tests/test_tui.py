@@ -10,7 +10,7 @@ from music_fetch.api import MusicFetchError, UserPlaylist
 from music_fetch.app import main as app_main
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.download_queue import DownloadRequest
-from music_fetch.tui import TuiApp
+from music_fetch.tui import MENU_QUIT, MENU_TASKS, TuiApp
 
 
 class AppRoutingTests(unittest.TestCase):
@@ -428,6 +428,31 @@ class ConsistencyTests(TuiAppHelperTests):
         ) as info_mock:
             self.assertEqual(self.app.run(), 0)
         # The interrupt became a notice printed by the menu loop.
+        self.assertTrue(any("已返回主菜单" in str(call) for call in info_mock.call_args_list))
+
+    def test_task_page_ctrl_c_returns_to_menu_instead_of_exiting(self):
+        # The task page bypasses _dispatch_screen, so it needs the same Ctrl+C
+        # protection or Ctrl+C there would exit the whole program.
+        self.app.session.cookie = "MUSIC_U=x"
+        self.app.queue.enqueue(DownloadRequest("1", "歌一", Path(self._tmp.name) / "1.mp3"))
+        picks = []
+
+        def fake_menu(title, options, **kwargs):
+            if title == "主菜单":
+                picks.append(1)
+                if len(picks) == 1:
+                    return options.index(MENU_TASKS) + 1
+                return options.index(MENU_QUIT) + 1
+            return 1
+
+        with mock.patch("music_fetch.tui.U.menu", side_effect=fake_menu), mock.patch.object(
+            self.app, "_screen_tasks", side_effect=KeyboardInterrupt
+        ), mock.patch("music_fetch.tui.U.clear_screen"), mock.patch(
+            "music_fetch.tui.U.print_header"
+        ), mock.patch("music_fetch.tui.U.print_status"), mock.patch(
+            "music_fetch.tui.U.print_info"
+        ) as info_mock, mock.patch("music_fetch.tui.U.confirm", return_value=True):
+            self.assertEqual(self.app.run(), 0)
         self.assertTrue(any("已返回主菜单" in str(call) for call in info_mock.call_args_list))
 
     def test_notify_finished_tasks_reports_delta(self):

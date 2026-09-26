@@ -308,14 +308,17 @@ class TuiApp:
                 if unfinished and not U.confirm(f"还有 {unfinished} 个未完成任务，取消并退出？", default=False):
                     continue
                 return 0
-            if label == MENU_TASKS:
-                self._screen_tasks()
-                continue
-            if not self.session.cookie:
-                if label == MENU_LOGIN:
-                    self._screen_login()
-                continue
             try:
+                # The task page and the login gate are dispatched here rather
+                # than through _dispatch_screen, so they need the same Ctrl+C
+                # protection as every other sub-screen.
+                if label == MENU_TASKS:
+                    self._screen_tasks()
+                    continue
+                if not self.session.cookie:
+                    if label == MENU_LOGIN:
+                        self._screen_login()
+                    continue
                 self._dispatch_screen(label)
             except KeyboardInterrupt:
                 # Sub-screen Ctrl+C backs out to the main menu, as the footer
