@@ -11,7 +11,7 @@
 
 > v3.4 起移除脚本模式（CLI），所有后续工作聚焦 TUI 体验。
 > v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化，v3.6.1 为修复版本；
-> 增量下载策略（跳过/覆盖/重命名）已落地，见 CHANGELOG 的 Unreleased 段。
+> 增量下载策略（跳过/覆盖/重命名）与 M4A/FLAC 封面嵌入已落地，见 CHANGELOG 的 Unreleased 段。
 
 ### Known Issues（v3.6.1 代码审查遗留，尚未修复）
 
@@ -31,7 +31,6 @@
 ### v3.7 — Download Efficiency and API Evolution
 
 - [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径（CHANGELOG v3.3.0 起的既定方向）。
-- [ ] 为 M4A/FLAC 补齐封面嵌入，统一 MP3/M4A/FLAC 的元数据能力。
 
 ### v4.0 — Fullscreen Experiment（待定）
 

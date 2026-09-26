@@ -422,3 +422,129 @@ class StageCallbackTests(unittest.TestCase):
                     target_format="mp3",
                 )
         self.assertEqual(self.output_path.read_bytes(), b"already-here")
+
+
+class CoverArtTests(unittest.TestCase):
+    """Cover embedding against real containers (tiny fixtures in tests/fixtures).
+
+    MP3 and M4A/FLAC store artwork in completely different places, so these run
+    mutagen for real instead of mocking it.
+    """
+
+    FIXTURES = Path(__file__).resolve().parent / "fixtures"
+    JPEG = b"\xff\xd8\xff\xe0" + b"cover-bytes" * 8
+    PNG = b"\x89PNG\r\n\x1a\n" + b"png-bytes" * 8
+    WEBP = b"RIFF\x00\x00\x00\x00WEBP" + b"webp-bytes" * 8
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _fixture_copy(self, name: str) -> Path:
+        target = Path(self.tmp.name) / name
+        target.write_bytes((self.FIXTURES / name).read_bytes())
+        return target
+
+    def _tag_with_cover(self, target: Path, cover: bytes, mime: str) -> None:
+        with mock.patch("music_fetch.pipeline._download_cover", return_value=(cover, mime)):
+            write_audio_tags(target, title="标题", artist="艺人", album="专辑", cover_url="https://example.com/c")
+
+    def test_detect_image_mime(self):
+        from music_fetch.pipeline import _detect_image_mime
+
+        self.assertEqual(_detect_image_mime(self.JPEG), "image/jpeg")
+        self.assertEqual(_detect_image_mime(self.PNG), "image/png")
+        self.assertEqual(_detect_image_mime(self.WEBP), "image/webp")
+        self.assertEqual(_detect_image_mime(b"garbage"), "image/jpeg")
+
+    def test_mp3_cover_lands_in_an_apic_frame(self):
+        from mutagen.id3 import ID3
+
+        target = self._fixture_copy("silence.mp3")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+
+        frames = ID3(str(target)).getall("APIC")
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].mime, "image/jpeg")
+        self.assertEqual(bytes(frames[0].data), self.JPEG)
+
+    def test_mp3_cover_is_not_duplicated_on_retag(self):
+        from mutagen.id3 import ID3
+
+        target = self._fixture_copy("silence.mp3")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+        self._tag_with_cover(target, self.PNG, "image/png")
+
+        frames = ID3(str(target)).getall("APIC")
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].mime, "image/png")
+
+    def test_m4a_cover_lands_in_the_covr_atom(self):
+        from mutagen.mp4 import MP4, MP4Cover
+
+        target = self._fixture_copy("silence.m4a")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+
+        covers = MP4(str(target)).tags["covr"]
+        self.assertEqual(len(covers), 1)
+        self.assertEqual(covers[0].imageformat, MP4Cover.FORMAT_JPEG)
+        self.assertEqual(bytes(covers[0]), self.JPEG)
+
+    def test_m4a_accepts_png_covers(self):
+        from mutagen.mp4 import MP4, MP4Cover
+
+        target = self._fixture_copy("silence.m4a")
+        self._tag_with_cover(target, self.PNG, "image/png")
+
+        covers = MP4(str(target)).tags["covr"]
+        self.assertEqual(covers[0].imageformat, MP4Cover.FORMAT_PNG)
+
+    def test_m4a_skips_unsupported_cover_format(self):
+        from mutagen.mp4 import MP4
+
+        target = self._fixture_copy("silence.m4a")
+        self._tag_with_cover(target, self.WEBP, "image/webp")
+
+        # MP4Cover carries JPEG/PNG only; the file must stay valid and untouched.
+        self.assertNotIn("covr", MP4(str(target)).tags)
+
+    def test_flac_cover_lands_in_a_picture_block(self):
+        from mutagen.flac import FLAC
+
+        target = self._fixture_copy("silence.flac")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+
+        pictures = FLAC(str(target)).pictures
+        self.assertEqual(len(pictures), 1)
+        self.assertEqual(pictures[0].type, 3)
+        self.assertEqual(pictures[0].mime, "image/jpeg")
+        self.assertEqual(pictures[0].data, self.JPEG)
+
+    def test_flac_cover_is_replaced_not_stacked(self):
+        from mutagen.flac import FLAC
+
+        target = self._fixture_copy("silence.flac")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+        self._tag_with_cover(target, self.PNG, "image/png")
+
+        pictures = FLAC(str(target)).pictures
+        self.assertEqual(len(pictures), 1)
+        self.assertEqual(pictures[0].mime, "image/png")
+
+    def test_text_tags_survive_alongside_the_cover(self):
+        from mutagen.flac import FLAC
+
+        target = self._fixture_copy("silence.flac")
+        self._tag_with_cover(target, self.JPEG, "image/jpeg")
+
+        tags = FLAC(str(target))
+        self.assertEqual(tags["title"], ["标题"])
+        self.assertEqual(tags["artist"], ["艺人"])
+        self.assertEqual(tags["album"], ["专辑"])
+
+    def test_unsupported_container_is_ignored(self):
+        from music_fetch.pipeline import _embed_cover
+
+        target = Path(self.tmp.name) / "song.wav"
+        target.write_bytes(b"not really audio")
+        self.assertFalse(_embed_cover(target, self.JPEG, "image/jpeg"))

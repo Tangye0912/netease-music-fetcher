@@ -23,3 +23,7 @@ LICENSE text eol=lf
 *.ico binary
 *.icns binary
 *.exe binary
+# Test fixtures: real (tiny) audio containers.
+*.mp3 binary
+*.m4a binary
+*.flac binary

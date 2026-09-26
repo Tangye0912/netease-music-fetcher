@@ -228,6 +228,81 @@ def run_download_pipeline(
     )
 
 
+# Containers that can hold artwork; anything else skips the cover download.
+COVER_SUPPORTED_SUFFIXES = (".mp3", ".m4a", ".mp4", ".flac")
+
+
+def _detect_image_mime(data: bytes) -> str:
+    """Sniff the image container so players get a truthful MIME type."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _download_cover(cover_url: str, timeout: int = 10) -> tuple[bytes, str]:
+    from urllib import request
+
+    req = request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"})
+    with open_url(req, timeout=timeout) as resp:
+        data = resp.read()
+    return data, _detect_image_mime(data)
+
+
+def _embed_cover(output_path: Path, cover_data: bytes, mime: str) -> bool:
+    """Attach cover art to MP3/M4A/FLAC; False when the target cannot hold it."""
+    suffix = output_path.suffix.lower()
+    if suffix == ".mp3":
+        from mutagen.id3 import APIC, ID3
+        from mutagen.mp3 import MP3
+
+        mp3 = MP3(str(output_path), ID3=ID3)
+        if mp3.tags is None:  # pragma: no cover - ID3=ID3 always builds tags
+            mp3.add_tags()
+        for key in [key for key in mp3.tags.keys() if key.startswith("APIC")]:
+            del mp3.tags[key]  # never stack duplicates across retries
+        mp3.tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=cover_data))
+        mp3.save()
+        return True
+    if suffix in (".m4a", ".mp4"):
+        from mutagen.mp4 import MP4, MP4Cover
+
+        if mime == "image/png":
+            image_format = MP4Cover.FORMAT_PNG
+        elif mime == "image/jpeg":
+            image_format = MP4Cover.FORMAT_JPEG
+        else:
+            # MP4Cover carries JPEG or PNG only.
+            logger.debug("Unsupported cover MIME for MP4. mime=%s path=%s", mime, output_path)
+            return False
+        mp4 = MP4(str(output_path))
+        if mp4.tags is None:
+            mp4.add_tags()
+        mp4_tags = mp4.tags
+        if mp4_tags is None:  # pragma: no cover - add_tags always creates the dict
+            return False
+        mp4_tags["covr"] = [MP4Cover(cover_data, imageformat=image_format)]
+        mp4.save()
+        return True
+    if suffix == ".flac":
+        from mutagen.flac import FLAC, Picture
+
+        flac = FLAC(str(output_path))
+        picture = Picture()
+        picture.type = 3  # front cover
+        picture.mime = mime
+        picture.desc = "Cover"
+        picture.data = cover_data
+        flac.clear_pictures()  # a re-download must not stack duplicates
+        flac.add_picture(picture)
+        flac.save()
+        return True
+    return False
+
+
 def write_audio_tags(
     output_path: Path,
     title: str,
@@ -238,7 +313,7 @@ def write_audio_tags(
     """Write ID3/Vorbis tags to the downloaded audio file using mutagen."""
     try:
         from mutagen import File as MutagenFile
-        from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB
+        from mutagen.id3 import TIT2, TPE1, TALB
         from mutagen.mp3 import MP3
         from mutagen.mp4 import MP4
     except ImportError:
@@ -279,26 +354,15 @@ def write_audio_tags(
                     audio.tags['album'] = album
             audio.save()
 
-        # Embed cover art for MP3 files
-        if cover_url and output_path.suffix.lower() == '.mp3':
+        # Embed cover art where the container supports it.
+        if cover_url and output_path.suffix.lower() in COVER_SUPPORTED_SUFFIXES:
             try:
-                from urllib import request
-                req = request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"})
-                with open_url(req, timeout=10) as resp:
-                    cover_data = resp.read()
-                if cover_data:
-                    audio = MP3(str(output_path), ID3=ID3)
-                    audio.tags.add(
-                        APIC(
-                            encoding=3,
-                            mime='image/jpeg',
-                            type=3,  # front cover
-                            desc='Cover',
-                            data=cover_data,
-                        )
+                cover_data, mime = _download_cover(cover_url)
+                if cover_data and _embed_cover(output_path, cover_data, mime):
+                    logger.info(
+                        "Cover art embedded. output=%s mime=%s bytes=%s",
+                        output_path, mime, len(cover_data),
                     )
-                    audio.save()
-                    logger.info("Cover art embedded. output=%s", output_path)
             except Exception:
                 logger.debug("Failed to embed cover art. output=%s", output_path, exc_info=True)
 
