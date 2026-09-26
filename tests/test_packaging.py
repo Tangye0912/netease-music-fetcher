@@ -2,6 +2,8 @@ import pathlib
 import tomllib
 import unittest
 
+from music_fetch.app_settings import APP_VERSION
+
 # Resolve repo files from this file's location so the suite passes regardless of
 # the working directory pytest is invoked from.
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -13,6 +15,11 @@ class PackagingConfigTests(unittest.TestCase):
         self.assertEqual(data["build-system"]["build-backend"], "setuptools.build_meta")
         self.assertEqual(data["project"]["scripts"]["music-fetch"], "music_fetch.app:main")
         self.assertIn("music_fetch", data["tool"]["setuptools"]["packages"])
+
+    def test_app_version_matches_pyproject(self):
+        """A tag release must not ship a binary reporting the previous version."""
+        data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(data["project"]["version"], APP_VERSION)
 
     def test_spec_builds_console_app(self):
         spec = (REPO_ROOT / "music-fetch.spec").read_text(encoding="utf-8")

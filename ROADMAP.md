@@ -7,10 +7,18 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v3.6.0)
+## Current Backlog (after v3.6.1)
 
 > v3.4 起移除脚本模式（CLI），所有后续工作聚焦 TUI 体验。
-> v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化（详见 CHANGELOG）。
+> v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化，v3.6.1 为修复版本（均详见 CHANGELOG）。
+
+### Known Issues（v3.6.1 代码审查遗留，尚未修复）
+
+- [ ] 退出等待无超时：`TuiApp.run()` 的 finally 循环等待下载线程，若某个任务卡住（ffmpeg 转码不接受取消），Ctrl+C 只会提示"仍在等待"而无法退出。计划：总超时后提示并强制退出，队列线程改为 daemon。
+- [ ] 超长文件名/路径未处理：`sanitize_filename` 不截断长度，Windows 未开长路径时 >260 字符会落到"未知错误"。计划：按显示宽度截断并保留后缀。
+- [ ] `download_queue.poll()` 全程持锁做磁盘 I/O（写下载历史与 `queue.json`），历史接近 1000 条时会阻塞 UI 刷新。计划：把两次落盘移出锁。
+- [ ] TUI 分页逻辑在搜索、歌单、历史、任务四个页面各写一遍，且已存在的 `_pick_from_rows` 无人使用。计划：抽公共 `_paginated_pick`，预计净删 100–130 行。
+- [ ] 关键路径缺测试：`pipeline.py` 的取消检查与 ffmpeg 缺失回退、`audio.py` 的暂停等待循环与歌词写盘、`tui.py` 的代理配置失败与任务详情控制路径。
 
 ### TUI Experience
 

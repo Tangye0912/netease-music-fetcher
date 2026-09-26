@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.6.1 (2026-09-26)
 
 ### Added
 
@@ -32,6 +32,14 @@
 - **测试不再依赖工作目录**：`tests/test_entrypoints.py` 与 `tests/test_packaging.py` 改为按 `__file__` 定位仓库文件，从任意目录运行都通过（此前从非仓库根目录运行有 7 例失败）。
 - **依赖声明补全**：`wcwidth` 由 `tui_utils` 直接导入，现显式列入 `pyproject.toml`；此前只靠 `prompt-toolkit` 传递安装，源码安装与冻结包都不保证它存在。
 - **打包防回归**：`music-fetch.spec` 增加断言，禁止重新引用已删除模块（`batch_download`/`cli`/`weapi`/`qrcode`）并确保收集 `wcwidth`。
+
+### QA
+
+- 回归测试：`python3 -m pytest tests/ -q`（Windows 本地 512 通过 + 2 跳过；Linux CI 514 通过——两例跳过项为 POSIX 权限位与 shell wrapper，仅在 Windows 跳过）。
+- 覆盖率：80.82%，通过 75% 门槛。
+- 静态检查：`mypy --strict` 27 文件零错误、`ruff check .` 全部通过。
+- CI：本版所有提交均已在 GitHub Actions 的 `CI` 工作流上通过（含"从非仓库根目录运行测试"回归步骤）。
+- 真机冒烟：Windows/SSH 交互（任务页实时渲染、明暗主题、登录恢复）仍未人工验证，见 ROADMAP。
 
 ## v3.6.0 (2026-09-15)
 
