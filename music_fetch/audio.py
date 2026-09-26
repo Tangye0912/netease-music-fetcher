@@ -116,24 +116,33 @@ def dedupe_path(path: Path) -> Path:
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Could not allocate an output filename.")
 
 
+def _fit_name_preserving_id(name: str, song_id: str, max_chars: int, max_bytes: int) -> str:
+    """Trim a generated name while keeping its trailing ``-<song_id>`` tail.
+
+    Both the generic filename cap and the Windows path budget funnel through
+    here, so the song id survives no matter which limit triggers first.
+    """
+    tail = f"-{song_id}"
+    if song_id and name.endswith(tail) and len(tail) < max_chars:
+        head = name[: len(name) - len(tail)]
+        head = _fit_length(head, max_chars - len(tail), max_bytes - len(tail.encode("utf-8")))
+        return f"{head}{tail}" if head else song_id
+    return _fit_length(name, max_chars, max_bytes) or "song"
+
+
 def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = None, rename: Optional[str] = None, out_format: str = "mp3") -> Path:
     raw_name = rename if rename else (f"{song_name}-{song_id}" if song_name else f"song-{song_id}")
-    final_name = _clean_filename(raw_name)
+    cleaned = _clean_filename(raw_name)
     suffix = f".{out_format}"
+    max_chars = MAX_FILENAME_CHARS
+    max_bytes = MAX_FILENAME_BYTES
     if os.name == "nt":
         # A deep output directory can still overflow the legacy path limit, so
         # budget the name against the directory we are actually writing to.
-        budget = MAX_PATH_CHARS - len(str(out_dir)) - len(suffix)
-        if budget < len(final_name):
-            tail = f"-{song_id}"
-            if final_name.endswith(tail):
-                # Keep the song id so truncated files stay identifiable.
-                head = final_name[: len(final_name) - len(tail)]
-                head = _fit_length(head, budget - len(tail), MAX_FILENAME_BYTES - len(tail.encode("utf-8")))
-                final_name = f"{head}{tail}" if head else (song_id or "song")
-            else:
-                final_name = _fit_length(final_name, budget, MAX_FILENAME_BYTES) or "song"
-    final_name = _fit_length(final_name, MAX_FILENAME_CHARS, MAX_FILENAME_BYTES) or "song"
+        budget = MAX_PATH_CHARS - len(str(out_dir)) - len(suffix) - 1  # path separator
+        max_chars = min(max_chars, budget)
+        max_bytes = min(max_bytes, budget)
+    final_name = _fit_name_preserving_id(cleaned, song_id, max_chars, max_bytes)
     return dedupe_path(out_dir / f"{final_name}{suffix}")
 
 

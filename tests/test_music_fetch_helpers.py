@@ -30,27 +30,40 @@ class PathHelperTests(unittest.TestCase):
             self.assertTrue(second.name.startswith("a_"))
             self.assertEqual(second.suffix, ".mp4")
 
-    def test_long_song_name_fits_windows_path_budget(self):
-        """A long CJK title must not overflow the legacy Windows path limit."""
+    def test_long_song_name_keeps_song_id(self):
+        """The generic cap must keep the id too (this is the CI failure mode:
+        on Linux the short /tmp path never triggers the Windows path budget)."""
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
-            with mock.patch("music_fetch.audio.os.name", "nt"):
+            with mock.patch("music_fetch.audio.os.name", "posix"):
                 path = music_fetch.resolve_output_path(
                     out_dir, song_id="12345", song_name="很长" * 100, out_format="mp3"
                 )
-            self.assertLessEqual(len(str(path)), 250)
-            self.assertIn("12345", path.name)  # the song id survives truncation
-            self.assertEqual(path.suffix, ".mp3")
+            self.assertIn("12345", path.name)
+            self.assertLessEqual(len(path.name.encode("utf-8")), 200 + len(".mp3"))
             path.write_bytes(b"x")  # and the file can actually be created
 
-    def test_long_rename_is_truncated_too(self):
+    def test_deep_output_dir_fits_path_budget(self):
+        """A deep directory shrinks the name budget (simulated deterministically,
+        so the assertion does not depend on the platform's temp path length)."""
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
-            with mock.patch("music_fetch.audio.os.name", "nt"):
+            with mock.patch("music_fetch.audio.os.name", "nt"), mock.patch(
+                "music_fetch.audio.MAX_PATH_CHARS", 120
+            ):
                 path = music_fetch.resolve_output_path(
-                    out_dir, song_id="1", rename="x" * 500, out_format="flac"
+                    out_dir, song_id="12345", song_name="很长" * 100, out_format="mp3"
                 )
-            self.assertLessEqual(len(str(path)), 250)
+            self.assertLessEqual(len(str(path)), 120)
+            self.assertIn("12345", path.name)
+
+    def test_long_rename_is_truncated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            path = music_fetch.resolve_output_path(
+                out_dir, song_id="1", rename="x" * 500, out_format="flac"
+            )
+            self.assertLessEqual(len(path.name), 120 + len(".flac"))
             self.assertEqual(path.suffix, ".flac")
 
 
