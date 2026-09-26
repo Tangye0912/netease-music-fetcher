@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
+from music_fetch.app_settings import DEFAULT_TARGET_FORMAT
 from music_fetch.download_tasks import TASK_STATE_FAILED
-from music_fetch.api import SUPPORTED_GUI_AUDIO_FORMATS
+from music_fetch.api import SUPPORTED_AUDIO_FORMATS
 
 
 def can_retry_status(status: str) -> bool:
@@ -17,6 +17,6 @@ def can_retry_status(status: str) -> bool:
 
 def retry_target_format(output_path: Path) -> str:
     suffix = output_path.suffix.lower().lstrip(".")
-    if suffix in SUPPORTED_GUI_AUDIO_FORMATS:
+    if suffix in SUPPORTED_AUDIO_FORMATS:
         return suffix
-    return DEFAULT_GUI_TARGET_FORMAT
+    return DEFAULT_TARGET_FORMAT

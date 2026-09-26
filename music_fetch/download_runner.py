@@ -18,7 +18,7 @@ from music_fetch.api import DownloadCanceled, MusicFetchError
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_RETRY_COUNT,
-    DEFAULT_GUI_TARGET_FORMAT,
+    DEFAULT_TARGET_FORMAT,
     clamp_download_settings,
 )
 from music_fetch.error_texts import UNKNOWN_ERROR
@@ -64,7 +64,7 @@ class DownloadJob:
         song_id: str,
         output_path: Path,
         cookie: str,
-        target_format: str = DEFAULT_GUI_TARGET_FORMAT,
+        target_format: str = DEFAULT_TARGET_FORMAT,
         timeout: int = 30,
         retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT,
         tags: Optional[dict[str, Optional[str]]] = None,
@@ -75,7 +75,7 @@ class DownloadJob:
         self.song_id = song_id
         self.output_path = output_path
         self.cookie = cookie
-        self.target_format = (target_format or DEFAULT_GUI_TARGET_FORMAT).lower().strip()
+        self.target_format = (target_format or DEFAULT_TARGET_FORMAT).lower().strip()
         # Keep timeout/retry bounded and predictable, like the old worker did.
         _, self.timeout, self.retry_count, _ = clamp_download_settings(0, timeout, retry_count, 0)
         self._tags = tags

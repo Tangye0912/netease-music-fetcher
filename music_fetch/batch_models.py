@@ -15,7 +15,7 @@ from music_fetch.app_logging import get_logger
 from music_fetch.network import open_url
 import music_fetch.ui_texts as T
 
-logger = get_logger("music_fetch.gui")
+logger = get_logger("music_fetch.batch")
 
 
 

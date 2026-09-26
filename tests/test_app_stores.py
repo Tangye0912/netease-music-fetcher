@@ -11,17 +11,14 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
-    DEFAULT_UI_FONT_SIZE,
     MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
-    MAX_UI_FONT_SIZE,
     MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
-    MIN_UI_FONT_SIZE,
 )
 from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS
 
@@ -35,7 +32,6 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(session.cookie, "")
             self.assertTrue(session.remember_login)
             self.assertTrue(session.last_download_dir)
-            self.assertEqual(session.ui_font_size, DEFAULT_UI_FONT_SIZE)
             self.assertEqual(session.detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC)
             self.assertEqual(session.download_timeout_sec, DEFAULT_DOWNLOAD_TIMEOUT_SEC)
             self.assertEqual(session.download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT)
@@ -50,7 +46,6 @@ class SessionStoreTests(unittest.TestCase):
                 cookie="MUSIC_U=abc",
                 remember_login=True,
                 last_download_dir="/tmp/out",
-                ui_font_size=18,
                 detect_timeout_sec=3,
                 download_timeout_sec=10,
                 download_retry_count=2,
@@ -66,7 +61,6 @@ class SessionStoreTests(unittest.TestCase):
             loaded = store.load()
             self.assertEqual(loaded.cookie, "MUSIC_U=abc")
             self.assertEqual(loaded.last_download_dir, "/tmp/out")
-            self.assertEqual(loaded.ui_font_size, 18)
             self.assertEqual(loaded.detect_timeout_sec, 3)
             self.assertEqual(loaded.download_timeout_sec, 10)
             self.assertEqual(loaded.download_retry_count, 2)
@@ -101,17 +95,16 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), '{"cookie":"MUSIC_U=old"}')
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
-    def test_font_size_is_clamped_on_load(self):
+    def test_legacy_font_and_geometry_keys_are_ignored(self):
+        """Qt-era session keys must not break loading after their removal."""
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "session.json"
-            path.write_text('{"ui_font_size": 999}', encoding="utf-8")
+            path.write_text('{"ui_font_size": 999, "window_geometry": "10,10,800,600"}', encoding="utf-8")
             store = SessionStore(path)
             loaded = store.load()
-            self.assertEqual(loaded.ui_font_size, MAX_UI_FONT_SIZE)
-
-            path.write_text('{"ui_font_size": 1}', encoding="utf-8")
-            loaded = store.load()
-            self.assertEqual(loaded.ui_font_size, MIN_UI_FONT_SIZE)
+            self.assertEqual(loaded.ui_theme, "dark")
+            self.assertFalse(hasattr(loaded, "ui_font_size"))
+            self.assertFalse(hasattr(loaded, "window_geometry"))
 
     def test_download_settings_are_clamped_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,7 +7,7 @@ from music_fetch.app_settings import (
     TRAILING_URL_PUNCTUATION,
     SHORT_LINK_HOSTS,
     SUPPORTED_AUDIO_FORMATS,
-    DEFAULT_GUI_TARGET_FORMAT,
+    DEFAULT_TARGET_FORMAT,
 )
 
 
@@ -46,7 +46,7 @@ class AppSettingsTests(unittest.TestCase):
     def test_supported_audio_formats(self):
         self.assertIn("mp3", SUPPORTED_AUDIO_FORMATS)
         self.assertIn("flac", SUPPORTED_AUDIO_FORMATS)
-        self.assertEqual(DEFAULT_GUI_TARGET_FORMAT, "mp3")
+        self.assertEqual(DEFAULT_TARGET_FORMAT, "mp3")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ __all__ = [
     "detect_song", "normalize_media_url",
     "search_songs", "SearchResult",
     "fetch_user_playlists", "UserPlaylist",
-    "SUPPORTED_GUI_AUDIO_FORMATS",
+    "SUPPORTED_AUDIO_FORMATS",
     "USER_AGENT", "OUTER_MEDIA_URL_API",
     "PLAYABLE_REQUEST_PROFILES",
     "SHORT_LINK_HOSTS",
@@ -60,7 +60,6 @@ PLAYABLE_REQUEST_PROFILES: list[tuple[str, str]] = [
     ("hires", "flac"),
 ]
 logger = get_logger("music_fetch.api")
-SUPPORTED_GUI_AUDIO_FORMATS = SUPPORTED_AUDIO_FORMATS
 
 
 class MusicFetchError(Exception):

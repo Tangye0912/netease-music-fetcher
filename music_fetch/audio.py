@@ -11,10 +11,10 @@ from __future__ import annotations
 __all__ = [
     "sanitize_filename", "dedupe_path", "resolve_output_path",
     "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
-    "download_audio_with_progress", "download_song_with_fallback",
+    "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
     "merge_bilingual_lyric",
-    "SUPPORTED_GUI_AUDIO_FORMATS",
+    "SUPPORTED_AUDIO_FORMATS",
 ]
 
 import re
@@ -36,7 +36,7 @@ from music_fetch.api import (
     PauseChecker,
     PlayableCandidate,
     ProgressCallback,
-    SUPPORTED_GUI_AUDIO_FORMATS,
+    SUPPORTED_AUDIO_FORMATS,
     fetch_playable_candidates,
     logger,
     normalize_media_url,
@@ -92,7 +92,7 @@ def resolve_output_path(out_dir: Path, song_id: str, song_name: Optional[str] = 
 
 def infer_audio_format_from_url(media_url: str) -> Optional[str]:
     suffix = Path(parse.urlparse(media_url).path).suffix.lower().lstrip(".")
-    if suffix in SUPPORTED_GUI_AUDIO_FORMATS:
+    if suffix in SUPPORTED_AUDIO_FORMATS:
         return suffix
     if suffix == "mp4":
         return "m4a"
@@ -107,7 +107,7 @@ def is_ffmpeg_available() -> bool:
 
 def convert_audio_file(input_path: Path, output_path: Path, target_format: str, timeout: int = 240) -> None:
     fmt = target_format.lower().strip()
-    if fmt not in SUPPORTED_GUI_AUDIO_FORMATS:
+    if fmt not in SUPPORTED_AUDIO_FORMATS:
         raise MusicFetchError(ErrorCode.UNSUPPORTED_FORMAT, f"Unsupported output format: {fmt}")
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
@@ -143,10 +143,6 @@ def convert_audio_file(input_path: Path, output_path: Path, target_format: str, 
 
 
 # ── Download ─────────────────────────────────────────────────────
-
-def download_audio_with_progress(media_url: str, output_path: Path, timeout: int, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, pause_checker: Optional[PauseChecker] = None, cookie: str = "") -> None:
-    _download_audio_stream(media_url, output_path, timeout, progress_callback=progress_callback, cancel_checker=cancel_checker, pause_checker=pause_checker, cookie=cookie)
-
 
 def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, timeout: int, prefer_format: Optional[str] = None, progress_callback: Optional[ProgressCallback] = None, cancel_checker: Optional[CancelChecker] = None, pause_checker: Optional[PauseChecker] = None) -> PlayableCandidate:
     candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)

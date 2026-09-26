@@ -21,7 +21,7 @@ from typing import Optional, Sequence
 
 from music_fetch.api import (
     MusicFetchError,
-    SUPPORTED_GUI_AUDIO_FORMATS,
+    SUPPORTED_AUDIO_FORMATS,
     detect_song,
     fetch_account_profile,
     fetch_user_playlists,
@@ -1091,7 +1091,7 @@ class TuiApp:
             U.print_warning("输入不能为空（输入 0 取消）。")
 
     def _pick_format(self) -> Optional[str]:
-        formats = list(SUPPORTED_GUI_AUDIO_FORMATS)
+        formats = list(SUPPORTED_AUDIO_FORMATS)
         labels = formats[:] + ["取消"]
         if not is_ffmpeg_available():
             U.print_warning("未安装 ffmpeg：其他格式会自动回退保存为源格式（仅 mp3 一定可用）。")

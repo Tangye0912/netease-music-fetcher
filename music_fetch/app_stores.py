@@ -19,18 +19,15 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_DIR,
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
-    DEFAULT_UI_FONT_SIZE,
     MAX_DETECT_TIMEOUT_SEC,
     MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_HISTORY_RECORDS,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
-    MAX_UI_FONT_SIZE,
     MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
     MIN_DOWNLOAD_TIMEOUT_SEC,
-    MIN_UI_FONT_SIZE,
     UNKNOWN_SONG_NAME,
     clamp,
 )
@@ -67,14 +64,12 @@ class AppSession:
     cookie: str = ""
     remember_login: bool = True
     last_download_dir: str = DEFAULT_DOWNLOAD_DIR
-    ui_font_size: int = DEFAULT_UI_FONT_SIZE
     # v0.4.0: configurable detect/download parameters persisted in session store.
     detect_timeout_sec: int = DEFAULT_DETECT_TIMEOUT_SEC
     download_timeout_sec: int = DEFAULT_DOWNLOAD_TIMEOUT_SEC
     download_retry_count: int = DEFAULT_DOWNLOAD_RETRY_COUNT
     download_concurrency: int = DEFAULT_DOWNLOAD_CONCURRENCY
     ui_theme: str = DEFAULT_UI_THEME
-    window_geometry: str = ""  # "x,y,w,h" serialized
     proxy_type: str = ""  # "http", "socks5", or "" for direct
     proxy_host: str = ""
     proxy_port: int = 0
@@ -111,13 +106,11 @@ class SessionStore:
             cookie=str(raw.get("cookie") or ""),
             remember_login=bool(raw.get("remember_login", True)),
             last_download_dir=str(raw.get("last_download_dir") or DEFAULT_DOWNLOAD_DIR),
-            ui_font_size=self._safe_ui_font_size(raw.get("ui_font_size")),
             detect_timeout_sec=self._safe_detect_timeout(raw.get("detect_timeout_sec")),
             download_timeout_sec=self._safe_download_timeout(raw.get("download_timeout_sec")),
             download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
             download_concurrency=self._safe_download_concurrency(raw.get("download_concurrency")),
             ui_theme=self._safe_ui_theme(raw.get("ui_theme")),
-            window_geometry=str(raw.get("window_geometry") or ""),
             proxy_type=self._safe_proxy_type(raw.get("proxy_type")),
             proxy_host=str(raw.get("proxy_host") or "").strip(),
             proxy_port=self._safe_proxy_port(raw.get("proxy_port")),
@@ -131,13 +124,11 @@ class SessionStore:
             "cookie": session.cookie if session.remember_login else "",
             "remember_login": session.remember_login,
             "last_download_dir": session.last_download_dir,
-            "ui_font_size": self._safe_ui_font_size(session.ui_font_size),
             "detect_timeout_sec": self._safe_detect_timeout(session.detect_timeout_sec),
             "download_timeout_sec": self._safe_download_timeout(session.download_timeout_sec),
             "download_retry_count": self._safe_download_retry_count(session.download_retry_count),
             "download_concurrency": self._safe_download_concurrency(session.download_concurrency),
             "ui_theme": self._safe_ui_theme(session.ui_theme),
-            "window_geometry": session.window_geometry,
             "proxy_type": self._safe_proxy_type(session.proxy_type),
             "proxy_host": str(session.proxy_host or "").strip(),
             "proxy_port": self._safe_proxy_port(session.proxy_port),
@@ -146,10 +137,6 @@ class SessionStore:
         }
         _write_private_json(self.path, payload)
         logger.info("Session saved. path=%s remember_login=%s", self.path, session.remember_login)
-
-    @staticmethod
-    def _safe_ui_font_size(value: object) -> int:
-        return clamp(value, DEFAULT_UI_FONT_SIZE, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
 
     @staticmethod
     def _safe_detect_timeout(value: object) -> int:

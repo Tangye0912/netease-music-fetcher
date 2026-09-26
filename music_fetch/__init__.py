@@ -46,7 +46,7 @@ from music_fetch.api import (
     fetch_lyric,
     LyricResult,
     # Constants
-    SUPPORTED_GUI_AUDIO_FORMATS,
+    SUPPORTED_AUDIO_FORMATS,
     SHORT_LINK_HOSTS,
 )
 
@@ -57,7 +57,6 @@ from music_fetch.audio import (
     infer_audio_format_from_url,
     is_ffmpeg_available,
     convert_audio_file,
-    download_audio_with_progress,
     download_song_with_fallback,
     prioritize_candidates_by_format,
     fetch_outer_media_url,
@@ -138,7 +137,6 @@ __all__ = [
     "infer_audio_format_from_url",
     "is_ffmpeg_available",
     "convert_audio_file",
-    "download_audio_with_progress",
     "download_song_with_fallback",
     "prioritize_candidates_by_format",
     "fetch_outer_media_url",
@@ -149,6 +147,6 @@ __all__ = [
     "normalize_proxy_config",
     "open_url",
     # Constants
-    "SUPPORTED_GUI_AUDIO_FORMATS",
+    "SUPPORTED_AUDIO_FORMATS",
     "SHORT_LINK_HOSTS",
 ]

@@ -24,7 +24,7 @@ from music_fetch.api import (
     ProgressCallback,
 )
 from music_fetch.audio import (
-    SUPPORTED_GUI_AUDIO_FORMATS,
+    SUPPORTED_AUDIO_FORMATS,
     convert_audio_file,
     download_song_with_fallback,
     infer_audio_format_from_url,
@@ -32,7 +32,7 @@ from music_fetch.audio import (
 )
 from music_fetch.network import open_url
 from music_fetch.app_logging import get_logger
-from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
+from music_fetch.app_settings import DEFAULT_TARGET_FORMAT
 
 logger = get_logger("music_fetch.pipeline")
 
@@ -51,7 +51,7 @@ def run_download_pipeline(
     song_id: str,
     cookie: str,
     output_path: Path,
-    target_format: str = DEFAULT_GUI_TARGET_FORMAT,
+    target_format: str = DEFAULT_TARGET_FORMAT,
     timeout: int = 30,
     retry_count: int = 1,
     progress_callback: Optional[ProgressCallback] = None,
@@ -143,7 +143,7 @@ def run_download_pipeline(
             _cleanup_paths(output_path)
             raise DownloadCanceled()
     else:
-        if not is_ffmpeg_available() and source_format in SUPPORTED_GUI_AUDIO_FORMATS:
+        if not is_ffmpeg_available() and source_format in SUPPORTED_AUDIO_FORMATS:
             fallback_output = output_path.with_suffix(f".{source_format}")
             if fallback_output.exists():
                 fallback_output = fallback_output.with_name(

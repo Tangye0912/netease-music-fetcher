@@ -11,6 +11,11 @@
 
 - **文档与仓库一致性**：README（后台下载持久化、任务页 `P`/`R`/`n`/`p`/`g` 按键、项目结构表、依赖列表）、CHANGELOG（v3.6.0 日期与 QA 数字、v3.5.0 分组）、CONTRIBUTING（检查命令对齐 CI）、ROADMAP（测试文件名）对齐 v3.6.0 代码现状。
 - **仓库卫生**：新增 `.gitattributes` 固定行尾——`*.bat` 保持 CRLF，`*.command`/`music-fetch`/`*.sh` 保持 LF，避免跨平台 checkout 破坏 shell 脚本。
+- **移除 GUI 时代命名**：`SUPPORTED_GUI_AUDIO_FORMATS` → `SUPPORTED_AUDIO_FORMATS`（统一由 `app_settings` 定义、`api` 再导出）、`DEFAULT_GUI_TARGET_FORMAT` → `DEFAULT_TARGET_FORMAT`、`batch_models` 的日志通道 `music_fetch.gui` → `music_fetch.batch`。
+
+### Removed
+
+- **死代码清理**：`download_tasks.FINAL_TASK_STATES`/`normalize_task_state`/`build_task_id`（生产代码零调用，task_id 现由队列 uuid4 生成）、`ui_texts.MSG_DOWNLOAD_CANCELED`/`BATCH_FAILURE_REASON_SUMMARY`、`audio.download_audio_with_progress`（只是 `_download_audio_stream` 的薄封装）、`batch_results` 的空 `TYPE_CHECKING` 块，以及会话中永不生效的 `ui_font_size`/`window_geometry` 字段与对应常量（旧会话文件中的这两个键会被忽略，不影响加载）；`browser_login` 两处引用未启用规则族的无效 `# noqa: BLE001` 改为普通注释。
 
 ### Fixed
 

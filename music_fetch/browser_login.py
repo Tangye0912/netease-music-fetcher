@@ -400,9 +400,9 @@ def diagnose(timeout: float = 20.0) -> list[str]:
             try:
                 cookies = _read_music_cookies(cdp_port, timeout=8)
                 lines.append(f"cookies_found={bool(cookies)}")
-            except Exception as err:  # noqa: BLE001 - diagnostic
+            except Exception as err:  # diagnostic: never fail the report
                 lines.append(f"read_cookies_error={err!r}")
-    except Exception as err:  # noqa: BLE001 - diagnostic
+    except Exception as err:  # diagnostic: never fail the report
         lines.append(f"launch_error={err!r}")
     finally:
         stopped = True

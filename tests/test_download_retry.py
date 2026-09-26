@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from music_fetch.app_settings import DEFAULT_GUI_TARGET_FORMAT
+from music_fetch.app_settings import DEFAULT_TARGET_FORMAT
 from music_fetch.download_retry import can_retry_status, retry_target_format
 
 
@@ -15,7 +15,7 @@ class DownloadRetryTests(unittest.TestCase):
         self.assertEqual(retry_target_format(Path("/tmp/demo.flac")), "flac")
 
     def test_retry_target_format_falls_back_to_default(self):
-        self.assertEqual(retry_target_format(Path("/tmp/demo.unknown")), DEFAULT_GUI_TARGET_FORMAT)
+        self.assertEqual(retry_target_format(Path("/tmp/demo.unknown")), DEFAULT_TARGET_FORMAT)
 
 
 if __name__ == "__main__":
