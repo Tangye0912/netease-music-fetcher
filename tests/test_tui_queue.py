@@ -330,3 +330,37 @@ def test_task_page_batch_column_and_grouped_view(app, tmp_path):
         app._screen_tasks()
     assert "批次 B1：共 2 首" in rendered[1]
     assert "第 1/1 页" in rendered[2]
+
+
+def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
+    """Regression: grouped rows are numbered per section, so a typed index must
+    resolve against the grouped order — not the flat queue order."""
+    from music_fetch.batch_models import BatchDetectRow
+
+    first = app.queue.enqueue(DownloadRequest("1", "甲", tmp_path / "1.mp3"))
+    second = app.queue.enqueue(DownloadRequest("2", "乙", tmp_path / "2.mp3"))
+    third = app.queue.enqueue(DownloadRequest("3", "丙", tmp_path / "3.mp3"))
+    # Batch B1 holds only the second enqueued task, so the grouped order is
+    # [second, first, third] while the flat order stays [first, second, third].
+    rows = [BatchDetectRow(raw_input="y", song_id="2", song_name="乙", status="ready", selected=True)]
+    app._batches.append((rows, {0: second.task_id}))
+
+    items = app.queue.snapshot()
+    assert [item.task_id for item in app._grouped_order(items)] == [
+        second.task_id, first.task_id, third.task_id,
+    ]
+
+    # "g" switches to the grouped view; "1" must then act on the first grouped row.
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=["g", "1", "0"]), mock.patch.object(
+        app, "_task_actions"
+    ) as actions:
+        app._screen_tasks()
+    actions.assert_called_once()
+    assert actions.call_args.args[0].task_id == second.task_id
+
+    # And the flat view still resolves indexes against the flat order.
+    with mock.patch("music_fetch.tui.U.live_ask", side_effect=["1", "0"]), mock.patch.object(
+        app, "_task_actions"
+    ) as flat_actions:
+        app._screen_tasks()
+    assert flat_actions.call_args.args[0].task_id == first.task_id

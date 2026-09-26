@@ -57,6 +57,21 @@ class BatchInspectTests(unittest.TestCase):
         self.assertEqual(rows[0].song_id, "310")
         self.assertTrue(rows[0].message)
 
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_raising_progress_callback_does_not_abort_detection(self, mock_detect, _mock_probe):
+        # A UI callback can raise on a non-UTF-8 console; detection must survive.
+        mock_detect.return_value = self._detect_result("400")
+
+        def boom(current, total, song_id):
+            raise UnicodeEncodeError("utf-8", "歌", 0, 1, "boom")
+
+        rows = run_batch_detect(
+            "https://music.163.com/song?id=400", "MUSIC_U=test", timeout=5, on_progress=boom
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].status, "ready")
+
     def test_empty_input_returns_empty(self):
         self.assertEqual(run_batch_detect("", "MUSIC_U=test", timeout=5), [])
 

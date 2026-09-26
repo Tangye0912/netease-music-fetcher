@@ -846,7 +846,7 @@ class TuiApp:
         labels = self._batch_label_map()
         parts = [U.format_header(MENU_TASKS), ""]
         if grouped:
-            parts.append(self._render_grouped_tasks(items, labels))
+            parts.append(self._render_grouped_tasks(items))
         else:
             total_pages = max(1, (len(items) + 7) // 8)
             page = max(0, min(page, total_pages - 1))
@@ -860,11 +860,28 @@ class TuiApp:
             parts.append(f" ! {self.queue.history_error}")
         return "\n".join(parts)
 
-    def _render_grouped_tasks(self, items: Sequence[QueueItem], labels: dict[str, str]) -> str:
+    def _grouped_order(self, items: Sequence[QueueItem]) -> list[QueueItem]:
+        """Task order shown by the grouped view: batches first, then singles.
+
+        The task page resolves a typed index against this order, so the row
+        numbers rendered by _render_grouped_tasks must match it exactly.
+        """
+        by_id = {item.task_id: item for item in items}
+        ordered: list[QueueItem] = []
+        grouped_ids: set[str] = set()
+        for _rows, mapping in self._batches:
+            members = [by_id[task_id] for task_id in mapping.values() if task_id in by_id]
+            ordered.extend(members)
+            grouped_ids.update(member.task_id for member in members)
+        ordered.extend(item for item in items if item.task_id not in grouped_ids)
+        return ordered
+
+    def _render_grouped_tasks(self, items: Sequence[QueueItem]) -> str:
         """Batch-section view: one table per batch plus a leftovers section."""
         by_id = {item.task_id: item for item in items}
         sections: list[str] = []
         grouped_ids: set[str] = set()
+        index = 1
         for batch_no, (_rows, mapping) in enumerate(self._batches, start=1):
             members = [by_id[task_id] for task_id in mapping.values() if task_id in by_id]
             if not members:
@@ -872,12 +889,18 @@ class TuiApp:
             grouped_ids.update(member.task_id for member in members)
             finished = sum(member.state in FINAL_STATES for member in members)
             ok = sum(member.state == "success" for member in members)
-            rows = [self._task_row(member, str(i), f"B{batch_no}") for i, member in enumerate(members, start=1)]
+            rows = []
+            for member in members:
+                rows.append(self._task_row(member, str(index), f"B{batch_no}"))
+                index += 1
             header = f" 批次 B{batch_no}：共 {len(members)} 首 · 完成 {finished}（成功 {ok}）"
             sections.append(header + "\n" + U.format_table(["#", "歌曲", "批次", "状态", "大小"], rows))
         singles = [item for item in items if item.task_id not in grouped_ids]
         if singles:
-            rows = [self._task_row(item, str(i), "单曲") for i, item in enumerate(singles, start=1)]
+            rows = []
+            for item in singles:
+                rows.append(self._task_row(item, str(index), "单曲"))
+                index += 1
             sections.append(f" 单曲（{len(singles)}）\n" + U.format_table(["#", "歌曲", "批次", "状态", "大小"], rows))
         if not sections:
             return " 暂无任务。"
@@ -927,8 +950,16 @@ class TuiApp:
                 page += 1
             elif raw == "p":
                 page = max(0, page - 1)
-            elif raw.isdigit() and start < int(raw) <= start + len(page_items):
-                self._task_actions(items[int(raw) - 1])
+            elif raw.isdigit():
+                # The grouped view renders every batch (no pagination) in
+                # _grouped_order; the flat view pages through items directly.
+                targets = self._grouped_order(items) if grouped else page_items
+                offset = 0 if grouped else start
+                number = int(raw)
+                if offset < number <= offset + len(targets):
+                    self._task_actions(targets[number - offset - 1])
+                else:
+                    U.print_warning("请输入当前页序号或提示中的操作键。")
             elif raw:
                 U.print_warning("请输入当前页序号或提示中的操作键。")
 

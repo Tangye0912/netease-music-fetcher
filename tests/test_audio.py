@@ -243,6 +243,60 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertTrue(self.output_path.exists())
         self.assertEqual(self.output_path.read_bytes(), b"cccc")
 
+    def test_socket_read_timeout_is_retried_as_network_error(self):
+        """A mid-body read timeout surfaces as OSError, not URLError."""
+        fake_timeout = mock.MagicMock()
+        fake_timeout.status = 200
+        fake_timeout.getcode.return_value = 200
+        fake_timeout.__enter__.return_value = fake_timeout
+        fake_timeout.__exit__.return_value = False
+        fake_timeout.headers = {}
+        fake_timeout.read.side_effect = TimeoutError("timed out")
+
+        fake_ok = mock.MagicMock()
+        fake_ok.status = 200
+        fake_ok.getcode.return_value = 200
+        fake_ok.__enter__.return_value = fake_ok
+        fake_ok.__exit__.return_value = False
+        fake_ok.headers = {}
+        fake_ok.read.side_effect = [b"dddd", b""]
+
+        with mock.patch("urllib.request.urlopen", side_effect=[fake_timeout, fake_ok]):
+            music_fetch.audio._download_audio_stream(
+                "https://m801.music.126.net/abc.mp3",
+                self.output_path,
+                timeout=10,
+                progress_callback=None,
+                cancel_checker=None,
+                cookie="",
+            )
+
+        self.assertTrue(self.output_path.exists())
+        self.assertEqual(self.output_path.read_bytes(), b"dddd")
+
+    def test_all_socket_timeouts_raise_network_error(self):
+        """Timeouts must not degrade into an unknown-error report."""
+        fake_timeout = mock.MagicMock()
+        fake_timeout.status = 200
+        fake_timeout.getcode.return_value = 200
+        fake_timeout.__enter__.return_value = fake_timeout
+        fake_timeout.__exit__.return_value = False
+        fake_timeout.headers = {}
+        fake_timeout.read.side_effect = TimeoutError("timed out")
+
+        with mock.patch("urllib.request.urlopen", return_value=fake_timeout):
+            with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+                music_fetch.audio._download_audio_stream(
+                    "https://m801.music.126.net/abc.mp3",
+                    self.output_path,
+                    timeout=10,
+                    progress_callback=None,
+                    cancel_checker=None,
+                    cookie="",
+                )
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+        self.assertFalse(self.output_path.exists())
+
     def test_url_for_log_masks_tokens(self):
         url = "https://m801.music.126.net/abc.mp3?token=secret123&expire=1000&authsecret=abc"
         safe = music_fetch.audio._url_for_log(url)

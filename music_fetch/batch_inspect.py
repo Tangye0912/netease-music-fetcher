@@ -208,7 +208,13 @@ def run_batch_detect(
                 results_by_index[idx] = row
                 completed_count += 1
                 if on_progress is not None:
-                    on_progress(completed_count, total_unique, unique_expanded[idx][2])
+                    # A progress callback must never abort detection: on a
+                    # non-UTF-8 console the UI callback can raise and would
+                    # otherwise kill the whole batch run.
+                    try:
+                        on_progress(completed_count, total_unique, unique_expanded[idx][2])
+                    except Exception:
+                        logger.warning("Progress callback raised; continuing detection.", exc_info=True)
             if cancel.is_set():
                 for future in pending:
                     future.cancel()

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
+from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, QueueStore, SessionStore
 from music_fetch.app_settings import (
     DEFAULT_DETECT_TIMEOUT_SEC,
     DEFAULT_DOWNLOAD_CONCURRENCY,
@@ -208,7 +208,8 @@ class DownloadHistoryStoreTests(unittest.TestCase):
             self.assertEqual(rows[0].status, TASK_STATE_FAILED)
             self.assertEqual(rows[0].error_code, "NETWORK_ERROR")
 
-    def test_invalid_status_fallback_to_success(self):
+    def test_invalid_status_falls_back_to_failed(self):
+        """An unknown status must never be reported as a successful download."""
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "downloads.json"
             path.write_text(
@@ -217,7 +218,22 @@ class DownloadHistoryStoreTests(unittest.TestCase):
             )
             store = DownloadHistoryStore(path)
             rows = store.load()
-            self.assertEqual(rows[0].status, TASK_STATE_SUCCESS)
+            self.assertEqual(rows[0].status, TASK_STATE_FAILED)
+
+    def test_legacy_status_strings_are_not_treated_as_success(self):
+        """Old writers used spellings we no longer emit (error/cancelled/...)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            path.write_text(
+                '[{"song_id":"1","song_name":"a","output_path":"/tmp/a.mp3","status":"error"},'
+                '{"song_id":"2","song_name":"b","output_path":"/tmp/b.mp3","status":"cancelled"},'
+                '{"song_id":"3","song_name":"c","output_path":"/tmp/c.mp3","status":"success"}]',
+                encoding="utf-8",
+            )
+            store = DownloadHistoryStore(path)
+            rows = store.load()
+            self.assertEqual([row.status for row in rows],
+                             [TASK_STATE_FAILED, TASK_STATE_FAILED, TASK_STATE_SUCCESS])
 
     def test_save_caps_cache_and_file_to_latest_thousand_records(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,6 +270,28 @@ class DownloadHistoryStoreTests(unittest.TestCase):
             self.assertEqual(len(store.load()), 1000)
             self.assertEqual(store.load()[0].song_id, "new")
             self.assertEqual(store.load()[-1].song_id, "998")
+
+
+class QueueStoreQuarantineTests(unittest.TestCase):
+    def test_corrupt_queue_file_is_moved_aside_not_discarded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "queue.json"
+            path.write_text("{not json", encoding="utf-8")
+            store = QueueStore(path)
+
+            self.assertEqual(store.load(), [])
+            backup = path.with_name("queue.json.corrupt")
+            self.assertTrue(backup.exists())
+            self.assertEqual(backup.read_text(encoding="utf-8"), "{not json")
+
+    def test_non_list_payload_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "queue.json"
+            path.write_text('{"unexpected": "schema"}', encoding="utf-8")
+            store = QueueStore(path)
+
+            self.assertEqual(store.load(), [])
+            self.assertTrue(path.with_name("queue.json.corrupt").exists())
 
 
 if __name__ == "__main__":

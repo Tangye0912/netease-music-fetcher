@@ -423,3 +423,62 @@ def test_restore_tolerates_malformed_store(tmp_path):
 def test_restore_without_store_is_noop(setup_queue):
     queue, _jobs, _history = setup_queue
     assert queue.restore_saved() == (0, 0)
+
+
+def test_persist_retries_after_a_transient_write_failure(tmp_path):
+    """One OSError must not permanently drop the pending state."""
+    store_path = tmp_path / "queue.json"
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    queue.enqueue(request(tmp_path, "1"))
+    with mock.patch.object(QueueStore, "save", side_effect=OSError("disk full")):
+        queue.poll()
+    assert not store_path.exists()
+    queue.poll()  # the next poll retries the write
+    assert [entry["request"]["song_id"] for entry in QueueStore(store_path).load()] == ["1"]
+
+
+def test_unknown_task_ids_are_ignored(setup_queue):
+    """Public task controls must not leak StopIteration for unknown ids."""
+    queue, _jobs, _history = setup_queue
+    queue.pause("missing")
+    queue.resume("missing")
+    queue.cancel("missing")
+    with pytest.raises(ValueError):
+        queue.retry("missing")
+
+
+def test_restore_reenqueues_empty_target_file(tmp_path):
+    """A zero-byte leftover is an interrupted write, not a finished download."""
+    import json
+    store_path = tmp_path / "queue.json"
+    target = tmp_path / "empty.mp3"
+    target.write_bytes(b"")
+    store_path.write_text(json.dumps([
+        {"request": {"song_id": "1", "song_name": "半截", "output_path": str(target)},
+         "state": "pending"},
+    ], ensure_ascii=False), encoding="utf-8")
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, persist_path=store_path)
+    restored, completed = queue.restore_saved()
+    assert (restored, completed) == (1, 0)
+    assert history.load() == []
+    assert [item.request.song_id for item in queue.snapshot()] == ["1"]
+
+
+def test_scheduler_survives_a_poll_exception(tmp_path):
+    """An unexpected poll error must not silently kill the scheduler thread."""
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1)
+    calls = []
+
+    def flaky_poll():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        queue._closing = True  # let the loop exit after the second poll
+
+    queue.poll = flaky_poll
+    queue.start()
+    assert queue.wait(2)
+    assert len(calls) >= 2

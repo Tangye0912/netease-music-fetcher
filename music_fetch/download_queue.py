@@ -123,6 +123,7 @@ class DownloadQueue:
         self._last_history_retry = 0.0
         self._queue_store = QueueStore(persist_path) if persist_path is not None else None
         self._persist_sig: object = None
+        self._persist_failed = False
 
     def start(self) -> None:
         with self._lock:
@@ -133,7 +134,12 @@ class DownloadQueue:
     def _run(self) -> None:
         while True:
             self._wake.clear()
-            self.poll()
+            try:
+                self.poll()
+            except Exception:
+                # The scheduler must outlive an unexpected per-poll failure;
+                # otherwise every download silently stops with no notice.
+                logger.exception("Download queue poll failed; scheduler continues.")
             with self._lock:
                 if self._closing and not any(item.job for item in self._items):
                     return
@@ -204,13 +210,17 @@ class DownloadQueue:
             self._wake.set()
             return replace(item, job=None)
 
-    def _get(self, task_id: str) -> QueueItem:
-        return next(item for item in self._items if item.task_id == task_id)
+    def _get(self, task_id: str) -> QueueItem | None:
+        """Look up a task by id; None when the id is unknown."""
+        for item in self._items:
+            if item.task_id == task_id:
+                return item
+        return None
 
     def pause(self, task_id: str) -> None:
         with self._lock:
             item = self._get(task_id)
-            if item.state in {"pending", "running", "waiting_login"}:
+            if item is not None and item.state in {"pending", "running", "waiting_login"}:
                 item.state = "paused"
                 if item.job:
                     item.job.request_pause()
@@ -218,7 +228,7 @@ class DownloadQueue:
     def resume(self, task_id: str) -> None:
         with self._lock:
             item = self._get(task_id)
-            if item.state == "paused":
+            if item is not None and item.state == "paused":
                 item.state = "running" if item.job else ("pending" if self._cookie else "waiting_login")
                 if item.job:
                     item.job.request_resume()
@@ -227,7 +237,7 @@ class DownloadQueue:
     def cancel(self, task_id: str) -> None:
         with self._lock:
             item = self._get(task_id)
-            if item.state in FINAL_STATES or item.state == "canceling":
+            if item is None or item.state in FINAL_STATES or item.state == "canceling":
                 return
             if item.job:
                 item.state = "canceling"
@@ -259,6 +269,8 @@ class DownloadQueue:
     def retry(self, task_id: str) -> QueueItem:
         with self._lock:
             item = self._get(task_id)
+            if item is None:
+                raise ValueError(f"Unknown task id: {task_id}")
             if item.state not in {"failed", "canceled"}:
                 return replace(item, job=None)
             return self.enqueue(item.request)
@@ -285,7 +297,8 @@ class DownloadQueue:
         if self._thread is not None:
             self._thread.join(timeout)
             return not self._thread.is_alive()
-        return not any(item.job for item in self._items)
+        with self._lock:
+            return not any(item.job for item in self._items)
 
     def poll(self) -> None:
         with self._lock:
@@ -307,11 +320,14 @@ class DownloadQueue:
                     # A late failure from an old login must not invalidate a new one.
                     if job.cookie == self._cookie:
                         self._cookie = ""
+                        item.message = "登录已失效，请从任务页重新登录后继续。"
+                    else:
+                        # The user already re-authenticated; drop the stale notice.
+                        item.message = ""
                     if item.state == "paused" or self._paused:
                         item.state = "paused"
                     else:
                         item.state = "pending" if self._cookie else "waiting_login"
-                    item.message = "登录已失效，请从任务页重新登录后继续。"
                 else:
                     item.state = "canceled" if item.state == "canceling" and result.state != "success" else result.state
                     item.message = user_error_message(result.error_code, result.error_message) if item.state == "failed" else ""
@@ -360,7 +376,6 @@ class DownloadQueue:
         ))
         if signature == self._persist_sig:
             return
-        self._persist_sig = signature
         entries: list[dict[str, object]] = [
             {"request": _request_to_dict(item.request), "state": item.state}
             for item in self._items if item.state not in FINAL_STATES
@@ -368,14 +383,23 @@ class DownloadQueue:
         try:
             self._queue_store.save(entries)
         except OSError as err:
-            logger.warning("Failed to persist queue. path=%s reason=%s",
-                           self._queue_store.path, err)
+            # Keep the signature stale so the next poll retries the write: a
+            # single transient error must not drop this state permanently.
+            if not self._persist_failed:
+                logger.warning("Failed to persist queue. path=%s reason=%s",
+                               self._queue_store.path, err)
+            self._persist_failed = True
+            return
+        self._persist_failed = False
+        self._persist_sig = signature
 
     def restore_saved(self) -> tuple[int, int]:
         """Re-enqueue tasks persisted by a previous run.
 
-        Tasks whose target file already exists are treated as completed and
-        recorded to history instead of being downloaded again.  Returns
+        Tasks whose target file already exists and is non-empty are treated as
+        completed and recorded to history instead of being downloaded again.
+        A zero-byte target is a leftover from an interrupted write, so it is
+        re-enqueued rather than reported as a finished download.  Returns
         (restored, completed_on_disk).
         """
         if self._queue_store is None:
@@ -392,10 +416,11 @@ class DownloadQueue:
             except (KeyError, TypeError, ValueError, OSError):
                 logger.warning("Skipping malformed persisted task. entry=%r", entry)
                 continue
-            if request.output_path.exists():
+            target = request.output_path
+            if target.exists() and target.stat().st_size > 0:
                 done = QueueItem(
-                    request=request, output_path=request.output_path, state="success",
-                    size_bytes=request.output_path.stat().st_size,
+                    request=request, output_path=target, state="success",
+                    size_bytes=target.stat().st_size,
                 )
                 self._record(done)
                 completed += 1

@@ -34,7 +34,7 @@ from music_fetch.app_settings import (
     UNKNOWN_SONG_NAME,
     clamp,
 )
-from music_fetch.download_tasks import TASK_STATE_SUCCESS, is_valid_task_state
+from music_fetch.download_tasks import TASK_STATE_FAILED, TASK_STATE_SUCCESS, is_valid_task_state
 
 logger = get_logger("music_fetch.stores")
 
@@ -286,9 +286,14 @@ class DownloadHistoryStore:
     @staticmethod
     def _safe_status(value: object) -> str:
         normalized = str(value or "").strip().lower()
+        if not normalized:
+            # Legacy records predate the status field; they were all successes.
+            return TASK_STATE_SUCCESS
         if is_valid_task_state(normalized):
             return normalized
-        return TASK_STATE_SUCCESS
+        # An unrecognised status (hand-edited file, or written by a newer
+        # version) must never be presented as a successful download.
+        return TASK_STATE_FAILED
 
 
 class QueueStore:
@@ -307,9 +312,25 @@ class QueueStore:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            logger.warning("Failed to parse queue file, ignoring. path=%s", self.path)
+            self._quarantine()
             return []
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            self._quarantine()
+            return []
+        return data
+
+    def _quarantine(self) -> None:
+        """Move an unreadable queue file aside instead of silently discarding it.
+
+        Callers treat an unreadable store as empty and then rewrite it, so the
+        original bytes are preserved here for manual recovery.
+        """
+        backup = self.path.with_name(self.path.name + ".corrupt")
+        try:
+            self.path.replace(backup)
+            logger.warning("Queue file unreadable; moved aside. src=%s backup=%s", self.path, backup)
+        except OSError as err:
+            logger.warning("Queue file unreadable and could not be moved aside. path=%s reason=%s", self.path, err)
 
     def save(self, entries: list[dict[str, object]]) -> None:
         _write_private_json(self.path, entries)

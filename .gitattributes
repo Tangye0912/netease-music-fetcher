@@ -11,6 +11,12 @@
 *.command text eol=lf
 music-fetch text eol=lf
 
+# Docs, CI config and the license stay LF so diffs are stable on every platform.
+*.md text eol=lf
+*.yml text eol=lf
+.gitattributes text eol=lf
+LICENSE text eol=lf
+
 # Binary-ish assets that must never be line-ending converted.
 *.png binary
 *.jpg binary

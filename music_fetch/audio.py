@@ -316,7 +316,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
     media_host = parse.urlparse(media_urls[0]).netloc
     logger.info("Starting media download. output=%s media_host=%s attempts=%s media_url=%s variants=%s resume_offset=%s", output_path, media_host, len(attempts), _url_for_log(media_urls[0]), len(media_urls), resume_offset)
     last_403_error: Optional[error.HTTPError] = None
-    last_network_error: Optional[error.URLError] = None
+    last_network_error: Optional[BaseException] = None
     total_attempts = len(attempts) * len(media_urls)
     attempt_no = 0
     for candidate_url in media_urls:
@@ -417,6 +417,17 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                     output_path.unlink(missing_ok=True)
                 logger.info("Media download canceled, partial file removed. output=%s", output_path)
                 raise
+            except OSError as os_err:
+                # A socket read timeout or reset mid-body surfaces as a plain
+                # OSError (TimeoutError), not URLError.  Treat it as a network
+                # error so the pipeline retry loop actually retries it instead
+                # of reporting an unknown error.
+                tmp_path.unlink(missing_ok=True)
+                sidecar_path.unlink(missing_ok=True)
+                resume_offset = 0
+                logger.warning("Download attempt socket error. attempt=%s/%s error=%s", attempt_no, total_attempts, os_err)
+                last_network_error = os_err
+                continue
     if last_403_error is not None:
         logger.error("All download attempts failed with 403. output=%s media_host=%s", output_path, media_host)
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media request failed: HTTP 403. Possible VIP/region/copyright restriction or anti-hotlink blocking.") from last_403_error
@@ -424,7 +435,8 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
         tmp_path.unlink(missing_ok=True)
         sidecar_path.unlink(missing_ok=True)
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
-        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {last_network_error.reason}") from last_network_error
+        reason = getattr(last_network_error, "reason", None) or last_network_error
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {reason}") from last_network_error
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")
 
 
