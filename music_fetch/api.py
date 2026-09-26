@@ -27,6 +27,7 @@ __all__ = [
     "logger",
 ]
 
+import http.client
 import json
 import re
 from enum import Enum
@@ -35,7 +36,12 @@ from typing import Callable, Optional, Tuple
 from urllib import error, parse, request
 
 from music_fetch.app_logging import get_logger
-from music_fetch.app_settings import SHORT_LINK_HOSTS, SUPPORTED_AUDIO_FORMATS, TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
+from music_fetch.app_settings import (
+    SHORT_LINK_HOSTS,
+    SUPPORTED_AUDIO_FORMATS,
+    URL_IN_TEXT_PATTERN,
+    clean_extracted_url,
+)
 from music_fetch.network import configure_proxy, open_url
 
 USER_AGENT = (
@@ -215,7 +221,7 @@ def extract_url_from_input(value: str) -> Optional[str]:
     match = URL_IN_TEXT_PATTERN.search(value)
     if not match:
         return None
-    candidate = match.group(0).rstrip(TRAILING_URL_PUNCTUATION)
+    candidate = clean_extracted_url(match.group(0))
     return candidate if candidate.startswith(("http://", "https://")) else None
 
 
@@ -225,6 +231,14 @@ def is_netease_music_host(host: str) -> bool:
 
 
 def resolve_short_url(url: str, timeout: int = 15) -> str:
+    if not url.isascii():
+        # A URL that still carries CJK share-copy text cannot be sent: urllib
+        # encodes the request line as ASCII and would raise UnicodeEncodeError.
+        logger.warning("Refusing to resolve a non-ASCII url. url=%r", url)
+        raise MusicFetchError(
+            ErrorCode.INVALID_URL,
+            "链接中包含无法解析的字符，请重新复制分享内容（只保留链接本身）。",
+        )
     req = request.Request(url, headers={"User-Agent": USER_AGENT}, method="GET")
     try:
         with open_url(req, timeout=timeout) as resp:
@@ -322,6 +336,12 @@ def _perform_request(req: request.Request, timeout: int) -> Tuple[int, bytes]:
     except error.URLError as url_err:
         logger.error("URL error. url=%s reason=%s", req.full_url, url_err.reason)
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {url_err.reason}") from url_err
+    except (OSError, http.client.HTTPException, UnicodeError) as err:
+        # A timeout or reset while READING the body is not a URLError: urllib
+        # only wraps connect-phase failures.  Anything that escapes here would
+        # bypass the callers' MusicFetchError handling (no retry, raw traceback).
+        logger.error("Body read failed. url=%s error=%s", req.full_url, err)
+        raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {err}") from err
 
 
 def _decode_json(body: bytes) -> dict[str, object]:
@@ -397,11 +417,12 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
         if code != 200:
             last_network_message = str(body.get("message") or f"Unexpected API code={code}")
             continue
-        data = body.get("data") or []
-        if not data:
+        raw_data = body.get("data")
+        data = raw_data if isinstance(raw_data, list) else []
+        media = data[0] if data and isinstance(data[0], dict) else None
+        if media is None:
             saw_song_unavailable = True
             continue
-        media = data[0]  # type: ignore[index]
         media_url = media.get("url")
         if not media_url:
             saw_song_unavailable = True
@@ -417,10 +438,12 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
 
     if candidates:
         return candidates
-    if saw_song_unavailable:
-        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Song is unavailable (copyright/region/VIP restriction).")
+    # A server-side failure on any profile must not be reported as "this song is
+    # unavailable": a 5xx is retriable, a copyright restriction is not.
     if last_network_message:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, last_network_message)
+    if saw_song_unavailable:
+        raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Song is unavailable (copyright/region/VIP restriction).")
     raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Could not resolve playable media url.")
 
 
@@ -473,11 +496,14 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
 def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) -> list[str]:
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     page_size = 1000
+    # Hard cap: a misbehaving endpoint that keeps answering with fresh unique ids
+    # must not loop (and grow the list) forever.
+    max_pages = 200
     offset = 0
     all_ids: list[str] = []
     seen: set[str] = set()
     first_page_body: Optional[dict[str, object]] = None
-    while True:
+    for _page in range(max_pages):
         query = parse.urlencode({"id": playlist_id, "n": str(page_size), "s": str(offset)})
         url = f"{PLAYLIST_DETAIL_API}?{query}"
         try:
@@ -594,18 +620,22 @@ def fetch_album_songs(album_id: str, cookie: str, timeout: int = 20) -> AlbumDet
 _LEVEL_RANK = {"standard": 1, "higher": 2, "exhigh": 3, "lossless": 4, "hires": 5}
 
 
-def _pick_highest_level(candidates: list[PlayableCandidate]) -> tuple[str, str]:
-    """Return (level, encode_type) of the highest-quality candidate."""
-    best_level = ""
-    best_encode = ""
-    best_rank = 0
-    for candidate in candidates:
+def _pick_best_candidate(candidates: list[PlayableCandidate]) -> PlayableCandidate:
+    """The highest-quality candidate (falls back to the first one)."""
+    best = candidates[0]
+    best_rank = _LEVEL_RANK.get((best.level or "").strip().lower(), 0)
+    for candidate in candidates[1:]:
         rank = _LEVEL_RANK.get((candidate.level or "").strip().lower(), 0)
         if rank > best_rank:
+            best = candidate
             best_rank = rank
-            best_level = candidate.level
-            best_encode = candidate.encode_type
-    return best_level, best_encode
+    return best
+
+
+def _pick_highest_level(candidates: list[PlayableCandidate]) -> tuple[str, str]:
+    """Return (level, encode_type) of the highest-quality candidate."""
+    best = _pick_best_candidate(candidates)
+    return best.level, best.encode_type
 
 
 def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
@@ -618,10 +648,11 @@ def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionR
         if err.code != "SONG_UNAVAILABLE":
             raise
         return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=meta_duration, media_url=None, can_download=False, unavailable_reason=err.message, cover_url=cover_url, artist=artist, album_name=album_name)
-    first = candidates[0]
-    level, encode_type = _pick_highest_level(candidates)
-    duration = meta_duration if meta_duration is not None else first.duration_ms
-    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=first.media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name, level=level, encode_type=encode_type)
+    # The reported quality label, media url and probed size must all describe the
+    # same candidate, so the best one is used consistently.
+    best = _pick_best_candidate(candidates)
+    duration = meta_duration if meta_duration is not None else best.duration_ms
+    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=best.media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name, level=best.level, encode_type=best.encode_type)
 
 
 # ── Media URL utils ──────────────────────────────────────────────
@@ -650,6 +681,14 @@ class SearchResult:
     duration_ms: int
 
 
+def _safe_duration_ms(value: object) -> int:
+    """Coerce an API-supplied duration to int milliseconds (0 when unusable)."""
+    try:
+        return int(value)  # noqa: TRY004 - deliberate coercion of an untyped API field
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) -> list[SearchResult]:
     """Search songs by keyword on NetEase Cloud Music.
 
@@ -661,9 +700,15 @@ def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) 
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     payload = {"s": keyword, "type": "1", "limit": str(limit), "offset": "0"}
     status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
+    if status in (401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
     if status != 200 or body.get("code") != 200:
-        logger.warning("Search API returned non-200. status=%s code=%s", status, body.get("code"))
-        return []
+        # "no results" and "the request failed" must stay distinguishable for the
+        # caller (the empty-result case below returns [] legitimately).
+        raise MusicFetchError(
+            ErrorCode.NETWORK_ERROR,
+            str(body.get("message") or f"Search request failed: status={status}, code={body.get('code')}"),
+        )
     raw_result = body.get("result")
     raw_songs = raw_result.get("songs") or [] if isinstance(raw_result, dict) else []
     results: list[SearchResult] = []
@@ -690,7 +735,7 @@ def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) 
             song_name=name,
             artist=" / ".join(artist_names) if artist_names else "",
             album=str(album_name or ""),
-            duration_ms=int(duration) if duration else 0,
+            duration_ms=_safe_duration_ms(duration),
         ))
     logger.info("Search completed. keyword=%s results=%s", keyword, len(results))
     return results
@@ -717,6 +762,8 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
     # First get user ID from account status
     status, body = perform_json_get(ACCOUNT_STATUS_API, headers, timeout=timeout)
+    if status in (401, 403) or body.get("code") in (301, 302, 401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
     if status != 200 or body.get("code") != 200:
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Failed to fetch account info for playlists.")
     account_value = body.get("account")
@@ -733,10 +780,15 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
         query = parse.urlencode({"uid": str(user_id), "limit": str(page_size), "offset": str(offset)})
         url = f"{USER_PLAYLIST_API}?{query}"
         status, page_body = perform_json_get(url, headers, timeout=timeout)
+        if status in (401, 403) or page_body.get("code") in (301, 302, 401, 403):
+            raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
         if status != 200 or page_body.get("code") != 200:
             logger.warning("User playlist API returned non-200. status=%s offset=%s", status, offset)
             if offset == 0:
-                return []
+                raise MusicFetchError(
+                    ErrorCode.NETWORK_ERROR,
+                    str(page_body.get("message") or f"Failed to fetch playlists: status={status}, code={page_body.get('code')}"),
+                )
             break
 
         raw_value = page_body.get("playlist")

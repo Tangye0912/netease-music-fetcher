@@ -26,9 +26,18 @@ from typing import Any, Callable, Optional
 from urllib import request
 
 from music_fetch.api import MusicFetchError, normalize_cookie
+from music_fetch.app_logging import get_logger
+
+logger = get_logger("music_fetch.browser_login")
 
 LOGIN_URL = "https://music.163.com/#/login"
 _DIRECT_OPENER = request.build_opener(request.ProxyHandler({}))
+
+
+def _is_netease_domain(domain: str) -> bool:
+    """True only for 163.com and its real subdomains (not "evil163.com")."""
+    normalized = domain.strip().lstrip(".").lower()
+    return normalized == "163.com" or normalized.endswith(".163.com")
 
 # Common install locations for Edge and Chrome (in preference order).
 _BROWSER_CANDIDATES = [
@@ -254,10 +263,17 @@ def _read_music_cookies(port: int, timeout: float = 10.0) -> str:
         while time.time() < deadline and len(parts) < 2:
             try:
                 raw = ws.recv()
-            except Exception:
-                raw = ""
-            if not raw:
+            except websocket.WebSocketTimeoutException:
+                # Nothing arrived yet; recv() already blocked for the full
+                # socket timeout, so just poll again.
                 continue
+            except Exception:
+                # A closed/reset socket raises immediately on every call: stop
+                # instead of burning a core until the deadline.
+                logger.warning("Login websocket closed before cookies arrived.")
+                break
+            if not raw:
+                break
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -268,7 +284,7 @@ def _read_music_cookies(port: int, timeout: float = 10.0) -> str:
                 parts["eval"] = str(value)
             elif mid == cook_id:
                 cookies = (data.get("result") or {}).get("cookies") or []
-                music = [c for c in cookies if "163.com" in str(c.get("domain") or "")]
+                music = [c for c in cookies if _is_netease_domain(str(c.get("domain") or ""))]
                 parts["cookies"] = build_cookie_string(music)
         merged = []
         if parts.get("eval"):

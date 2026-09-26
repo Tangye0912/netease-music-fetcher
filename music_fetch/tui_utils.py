@@ -255,7 +255,9 @@ def ask_required(message: str, default: str = "") -> str:
 
 def input_multiline(message: str) -> str:
     """Prompt for multi-line text (paste-friendly); Esc+Enter submits."""
-    hint = "（粘贴多行内容，完成后按 Esc 再回车提交；留空直接回车返回）"
+    # A bare Enter inserts a newline in multiline mode, so the hint must not
+    # promise that pressing Enter returns.
+    hint = "（粘贴多行内容，完成后按 Esc 再回车提交/返回）"
     prompt_text = _ansi(_theme_color("title") + ANSI_BOLD, "› ") + _ansi(
         _theme_color("text") + ANSI_BOLD, message
     ) + _ansi(_theme_color("muted"), hint) + "\n"
@@ -303,6 +305,9 @@ def menu(
     keystrokes to 1-based choices (e.g. {"q": 10} for quit) and are shown in
     the footer.  Raises KeyboardInterrupt when the user presses Ctrl-C.
     """
+    if not options:
+        # An empty menu cannot be answered; failing loudly beats looping forever.
+        raise ValueError("menu() requires at least one option")
     terminal_width = min(shutil.get_terminal_size((80, 24)).columns, MAX_CONTENT_WIDTH)
     box_width = max(terminal_width, 12)
     inner_width = max(box_width - 2, 1)
@@ -329,18 +334,20 @@ def menu(
         )
         print_info(line)
     print_info(_ansi(_theme_color("title") + ANSI_BOLD, "└" + "─" * inner_width + "┘"))
+    valid_shortcuts = {
+        key: choice for key, choice in (shortcuts or {}).items() if 1 <= choice <= len(options)
+    }
     footer = f"  输入序号确认 · Ctrl+C {ctrl_c}"
-    if shortcuts:
-        footer += " · " + " · ".join(f"{key} {options[choice - 1]}" for key, choice in shortcuts.items())
+    if valid_shortcuts:
+        footer += " · " + " · ".join(f"{key} {options[choice - 1]}" for key, choice in valid_shortcuts.items())
     print_info(_ansi(_theme_color("muted"), footer))
     while True:
         raw = ask(f"{prompt_text} [1-{len(options)}]").strip()
-        if shortcuts and raw and raw.lower() in shortcuts:
-            return shortcuts[raw.lower()]
-        if raw.isdigit():
-            choice = int(raw)
-            if 1 <= choice <= len(options):
-                return choice
+        if raw and raw.lower() in valid_shortcuts:
+            return valid_shortcuts[raw.lower()]
+        choice = parse_index(raw)
+        if choice is not None and 1 <= choice <= len(options):
+            return choice
         print_warning(f"请输入 1-{len(options)} 之间的数字。")
 
 
@@ -360,13 +367,18 @@ def format_panel(
     ) + "┐"
     lines = [_ansi(_theme_color("title") + ANSI_BOLD, top)]
     for label, value in rows:
-        text = f"{label}：{value}"
-        if _display_width(text) > inner_width - 2:
-            text = _truncate_to_width(text, max(inner_width - 3, 1)) + "…"
+        # Truncate the value that is actually printed: the padding used to be
+        # computed for a shortened copy while the full value was rendered, so
+        # long paths/messages overflowed the border.
+        prefix = f"{label}："
+        available = max(inner_width - 2 - _display_width(prefix), 1)
+        shown_value = str(value)
+        if _display_width(shown_value) > available:
+            shown_value = _truncate_to_width(shown_value, max(available - 1, 1)) + "…"
         body = _ansi(_theme_color("metadata") + ANSI_BOLD, label) + _ansi(
-            _theme_color("text"), f"：{value}"
+            _theme_color("text"), f"：{shown_value}"
         )
-        padding = " " * max(inner_width - 2 - _display_width(text), 0)
+        padding = " " * max(inner_width - 2 - _display_width(prefix) - _display_width(shown_value), 0)
         lines.append(
             _ansi(_theme_color("muted"), "│ ")
             + body
@@ -435,18 +447,39 @@ def _bind_escape_to_cancel(dialog: Application[list[str] | None]) -> None:
         dialog.key_bindings = merge_key_bindings([dialog.key_bindings, bindings])
 
 
+def parse_index(raw: str) -> Optional[int]:
+    """Parse a typed list/menu index; None when it is not plain decimal digits.
+
+    ``str.isdigit()`` is true for '²' (and ``int()`` then raises ValueError), and
+    a few thousand digits exceed the interpreter's int-string limit — both used
+    to escape as an unhandled ValueError and kill the whole TUI.
+    """
+    text = (raw or "").strip()
+    if not text or not text.isascii() or not text.isdecimal():
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "") -> list[int]:
     """Open a checkbox multi-select dialog; return the selected indexes.
 
-    *entries* are (label, checked) pairs.  Space toggles a row, Enter
-    confirms, Esc cancels (returns []).
+    *entries* are (label, checked) pairs.  Space (or Enter) toggles the
+    highlighted row, Tab moves to 确定 and Enter confirms, Esc cancels
+    (returns []).
+
+    The dialog values are the row indexes, never the visible labels: two rows
+    can render an identical "name（size）" label, and matching on labels made
+    them inseparable (selecting one also selected the other).
     """
     if not entries:
         print_warning("没有可选项目。")
         return []
     labels = [label for label, _checked in entries]
-    values: list[tuple[str, str]] = [(label, label) for label in labels]
-    default_values = [label for label, checked in entries if checked]
+    values: list[tuple[str, str]] = [(str(index), label) for index, label in enumerate(labels)]
+    default_values = [str(index) for index, (_label, checked) in enumerate(entries) if checked]
     dialog = checkboxlist_dialog(
         title=title,
         text=text,
@@ -460,7 +493,12 @@ def multiselect(title: str, entries: Sequence[tuple[str, bool]], text: str = "")
     selected: list[str] | None = dialog.run()
     if selected is None:
         return []
-    return [index for index, label in enumerate(labels) if label in selected]
+    indexes: list[int] = []
+    for value in selected:
+        index = parse_index(str(value))
+        if index is not None and 0 <= index < len(labels) and index not in indexes:
+            indexes.append(index)
+    return sorted(indexes)
 
 
 def _display_width(text: str) -> int:
@@ -473,15 +511,19 @@ def _display_width(text: str) -> int:
 
 
 def _truncate_to_width(text: str, max_width: int) -> str:
-    """Truncate *text* so its display width fits within *max_width*."""
+    """Truncate *text* so its display width fits within *max_width*.
+
+    The candidate string is measured as a whole instead of summing per-character
+    widths: a VS16 emoji ("❤️") is one grapheme but two codepoints, so
+    per-character accumulation let the result grow to twice the budget and broke
+    every table/panel border.
+    """
     out = ""
-    used = 0
     for ch in text:
-        ch_width = _display_width(ch)
-        if used + ch_width > max_width:
+        candidate = out + ch
+        if _display_width(candidate) > max_width:
             break
-        out += ch
-        used += ch_width
+        out = candidate
     return out
 
 
@@ -573,6 +615,7 @@ __all__ = [
     "live_ask",
     "menu",
     "multiselect",
+    "parse_index",
     "print_error",
     "print_header",
     "print_info",

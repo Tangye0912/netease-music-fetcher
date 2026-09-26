@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import threading
 from dataclasses import dataclass
 from email.message import Message
@@ -75,6 +76,15 @@ def normalize_proxy_config(
         or any(token in normalized_host for token in ("://", "/", "?", "#", "@"))
     ):
         raise ProxyConfigError("Proxy host must be a hostname or IP address without a URL scheme or path.")
+    if ":" in normalized_host:
+        # Only an IPv6 literal may contain a colon; "host:port" would otherwise
+        # be bracketed into an unparseable proxy URL.
+        try:
+            ipaddress.IPv6Address(normalized_host)
+        except ValueError as err:
+            raise ProxyConfigError(
+                "Proxy host must not include a port; put the port in the port field."
+            ) from err
 
     try:
         normalized_port = int(port)
@@ -142,9 +152,13 @@ class _RequestsResponseAdapter:
         self.headers = response.headers
 
     def read(self, size: int = -1) -> bytes:
+        # requests streams with decode_content=False, so the raw stream still
+        # holds gzip/deflate bytes (NetEase answers gzip to a requests UA).
+        # Asking for decoded content keeps this adapter byte-compatible with
+        # urllib, whose direct transport sends "Accept-Encoding: identity".
         if size is None or size < 0:
-            return bytes(self._response.raw.read())
-        return bytes(self._response.raw.read(size))
+            return bytes(self._response.raw.read(decode_content=True))
+        return bytes(self._response.raw.read(size, decode_content=True))
 
     def geturl(self) -> str:
         return str(self._response.url)
@@ -189,15 +203,21 @@ def _open_with_socks(req: request.Request, timeout: int) -> _RequestsResponseAda
         raise error.URLError(str(err)) from err
 
     if response.status_code >= 400:
-        body = bytes(response.content)
         final_url = str(response.url)
         status_code = int(response.status_code)
         reason = str(response.reason or "HTTP error")
         headers = Message()
         for key, value in response.headers.items():
             headers[str(key)] = str(value)
-        response.close()
-        session.close()
+        try:
+            body = bytes(response.content)
+        except Exception as err:
+            # A failing body read must not turn into an untranslated requests
+            # error while leaking the session and its pooled socket.
+            raise error.URLError(f"Failed to read error response body: {err}") from err
+        finally:
+            response.close()
+            session.close()
         raise error.HTTPError(final_url, status_code, reason, headers, io.BytesIO(body))
     return _RequestsResponseAdapter(response, session)
 

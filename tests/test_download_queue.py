@@ -1,6 +1,7 @@
 """Queue regressions: deterministic worker control plus real scheduler threads."""
 import threading
 from dataclasses import replace
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from music_fetch.app_stores import DownloadHistoryStore, QueueStore
 from music_fetch.download_queue import DownloadQueue, DownloadRequest
 from music_fetch.download_runner import DownloadJob, DownloadJobResult, DownloadProgressSnapshot
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 class FakeJob:
@@ -113,6 +116,28 @@ def test_existing_file_is_preserved(setup_queue, tmp_path):
     assert item.output_path != req.output_path
     queue.cancel(item.task_id)
     assert req.output_path.read_bytes() == b"existing"
+
+
+def test_overwrite_request_targets_the_existing_path(setup_queue, tmp_path):
+    """The documented 覆盖 policy replaces the file instead of renaming it."""
+    queue, _, _ = setup_queue
+    req = request(tmp_path)
+    req.output_path.write_bytes(b"existing")
+    item = queue.enqueue(replace(req, overwrite_existing=True))
+    assert item.output_path == req.output_path
+    # Cancelling must still leave the pre-existing file alone.
+    queue.cancel(item.task_id)
+    assert req.output_path.read_bytes() == b"existing"
+
+
+def test_overwrite_still_avoids_colliding_with_another_queued_request(setup_queue, tmp_path):
+    queue, _, _ = setup_queue
+    first = queue.enqueue(replace(request(tmp_path), overwrite_existing=True))
+    # Same target path, different song: the queued write must not be clobbered
+    # even under the overwrite policy.
+    second = queue.enqueue(replace(request(tmp_path), song_id="2", overwrite_existing=True))
+    assert second.output_path != first.output_path
+    assert second.output_path.parent == tmp_path
 
 
 def test_pause_pending_and_active_resume_and_cancel(setup_queue, tmp_path):
@@ -398,7 +423,8 @@ def test_restore_reenqueues_missing_and_records_existing(tmp_path):
     import json
     store_path = tmp_path / "queue.json"
     existing_target = tmp_path / "done.mp3"
-    existing_target.write_bytes(b"finished")
+    # Only a parseable audio file counts as finished; "finished" was not audio.
+    existing_target.write_bytes((FIXTURES / "silence.mp3").read_bytes())
     store_path.write_text(json.dumps([
         {"request": {"song_id": "1", "song_name": "已有", "output_path": str(existing_target)},
          "state": "paused"},
@@ -412,12 +438,40 @@ def test_restore_reenqueues_missing_and_records_existing(tmp_path):
     # The existing file was recorded as a completed download, not re-downloaded.
     record = {r.song_id: r for r in history.load()}
     assert record["1"].status == "success"
-    assert record["1"].size_bytes == len(b"finished")
+    assert record["1"].size_bytes == existing_target.stat().st_size
     # The missing file was re-enqueued.
     assert [i.request.song_id for i in queue.snapshot()] == ["2"]
     # And the store no longer lists the completed one.
     entries = json.loads(store_path.read_text(encoding="utf-8"))
     assert [entry["request"]["song_id"] for entry in entries] == ["2"]
+
+
+def test_restore_redownloads_a_truncated_leftover(tmp_path):
+    """A killed worker can leave a non-empty but unparseable container.
+
+    That used to be recorded as a successful download (a false success); it must
+    be re-queued against the same path so the leftover is replaced.
+    """
+    import json
+    payload = (FIXTURES / "silence.m4a").read_bytes()
+    target = tmp_path / "half.m4a"
+    target.write_bytes(payload[: len(payload) // 2])
+    store_path = tmp_path / "queue.json"
+    store_path.write_text(json.dumps([
+        {"request": {"song_id": "3", "song_name": "半截", "output_path": str(target)},
+         "state": "canceling"},
+    ], ensure_ascii=False), encoding="utf-8")
+    history = DownloadHistoryStore(tmp_path / "history.json")
+    queue = DownloadQueue(history, "MUSIC_U=x", 1, fake_factory, persist_path=store_path)
+
+    restored, completed = queue.restore_saved()
+
+    assert (restored, completed) == (1, 0)
+    assert history.load() == []
+    items = queue.snapshot()
+    assert [i.request.song_id for i in items] == ["3"]
+    assert items[0].output_path == target
+    assert items[0].request.overwrite_existing is True
 
 
 def test_restore_tolerates_malformed_store(tmp_path):

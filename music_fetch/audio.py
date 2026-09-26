@@ -10,8 +10,9 @@ from __future__ import annotations
 
 __all__ = [
     "sanitize_filename", "dedupe_path", "resolve_output_path",
-    "is_path_too_long_error", "should_skip_existing",
-    "infer_audio_format_from_url", "is_ffmpeg_available", "convert_audio_file",
+    "is_path_too_long_error", "should_skip_existing", "should_replace_existing",
+    "is_plausible_complete_audio",
+    "infer_audio_format_from_url", "sniff_audio_format", "is_ffmpeg_available", "convert_audio_file",
     "download_song_with_fallback",
     "prioritize_candidates_by_format", "fetch_outer_media_url",
     "merge_bilingual_lyric",
@@ -60,6 +61,20 @@ WINDOWS_RESERVED_NAMES = frozenset(
 # Shared marker used both when a download attempt raises a 403 and when the
 # fallback logic decides whether a failure was a 403 (anti-hotlink / CDN block).
 _HTTP_403_MARKER = "HTTP 403"
+
+
+class _TruncatedBodyError(Exception):
+    """Internal: the response body ended before Content-Length was reached.
+
+    A dropped connection returns b"" from read() instead of raising, so a short
+    body has to be detected explicitly; otherwise a truncated file is published
+    as a finished download.
+    """
+
+    def __init__(self, downloaded: int, expected: int) -> None:
+        super().__init__(f"{downloaded} of {expected} bytes")
+        self.downloaded = downloaded
+        self.expected = expected
 
 
 # ── Filename helpers ─────────────────────────────────────────────
@@ -145,6 +160,43 @@ def should_skip_existing(path: Path, policy: str) -> bool:
         return False
 
 
+def should_replace_existing(path: Path, policy: str) -> bool:
+    """True when a queued request may target *path* even though a file is there.
+
+    "覆盖" always replaces.  Under "跳过"/"自动重命名" a non-empty file is never
+    touched, but a zero-byte stub is a leftover worth downloading over instead
+    of being kept next to a "_1" copy.
+    """
+    if policy == "overwrite":
+        return True
+    try:
+        return path.exists() and path.stat().st_size == 0
+    except OSError:
+        return False
+
+
+def is_plausible_complete_audio(path: Path) -> bool:
+    """Cheap completeness check for a file left behind by an interrupted run.
+
+    Downloads are published atomically, so a container that cannot even be
+    parsed was written only partially and has to be fetched again.  Without
+    mutagen this degrades to "exists and is non-empty".
+    """
+    try:
+        if path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:  # pragma: no cover - mutagen is a declared dependency
+        return True
+    try:
+        return MutagenFile(str(path)) is not None
+    except Exception:
+        return False
+
+
 def resolve_output_path(
     out_dir: Path,
     song_id: str,
@@ -181,6 +233,33 @@ def infer_audio_format_from_url(media_url: str) -> Optional[str]:
         return suffix
     if suffix == "mp4":
         return "m4a"
+    return None
+
+
+# Container magic bytes, for CDN urls that carry no usable extension.
+_MP3_MAGIC = (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xe3")
+_AAC_MAGIC = (b"\xff\xf1", b"\xff\xf9")
+
+
+def sniff_audio_format(path: Path) -> Optional[str]:
+    """Best-effort container detection from the file header (None when unknown)."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(16)
+    except OSError:
+        return None
+    if not head:
+        return None
+    if head.startswith(b"ID3") or head[:2] in _MP3_MAGIC:
+        return "mp3"
+    if head.startswith(b"fLaC"):
+        return "flac"
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return "m4a"
+    if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return "wav"
+    if head.startswith(b"ADIF") or head[:2] in _AAC_MAGIC:
+        return "aac"
     return None
 
 
@@ -235,6 +314,7 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         candidates = prioritize_candidates_by_format(candidates, prefer_format=prefer_format)
     last_403: Optional[MusicFetchError] = None
     outer_available = False
+    last_candidate_error: Optional[MusicFetchError] = None
     for idx, candidate in enumerate(candidates, start=1):
         logger.info("Trying candidate download. song_id=%s candidate=%s/%s level=%s encode=%s", song_id, idx, len(candidates), candidate.level, candidate.encode_type)
         try:
@@ -243,9 +323,20 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
         except DownloadCanceled:
             raise
         except MusicFetchError as err:
-            if err.code == "DOWNLOAD_FAILED" and _HTTP_403_MARKER in err.message:
-                last_403 = err
-                logger.warning("Candidate rejected by CDN with 403. song_id=%s level=%s encode=%s", song_id, candidate.level, candidate.encode_type)
+            if err.code == "DOWNLOAD_FAILED":
+                last_candidate_error = err
+                if _HTTP_403_MARKER in err.message:
+                    last_403 = err
+                    logger.warning("Candidate rejected by CDN with 403. song_id=%s level=%s encode=%s", song_id, candidate.level, candidate.encode_type)
+                else:
+                    # Each candidate is a separate CDN object (one per quality
+                    # level), so a dead/rotated object must not abort the song.
+                    logger.warning("Candidate download failed, trying the next one. song_id=%s code=%s message=%s", song_id, err.code, err.message)
+                continue
+            if err.code == "NETWORK_ERROR":
+                # A different candidate may live on a different CDN host.
+                last_candidate_error = err
+                logger.warning("Candidate hit a network error, trying the next one. song_id=%s message=%s", song_id, err.message)
                 continue
             raise
     logger.info("Trying outer-url fallback download. song_id=%s", song_id)
@@ -258,13 +349,18 @@ def download_song_with_fallback(song_id: str, cookie: str, output_path: Path, ti
             return PlayableCandidate(media_url=outer_url, duration_ms=None, level="outer", encode_type=(infer_audio_format_from_url(outer_url) or "unknown"))
         except MusicFetchError as err:
             logger.warning("Outer-url fallback failed. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-            last_403 = err
+            last_403 = err if _HTTP_403_MARKER in err.message else last_403
+            last_candidate_error = err
     else:
         logger.warning("Outer-url fallback is unavailable for song. song_id=%s", song_id)
-    if last_403:
+    if last_403 is not None and (last_candidate_error is None or last_candidate_error.code == "DOWNLOAD_FAILED"):
+        # Every candidate (and the outer fallback, when one existed) was blocked
+        # by the CDN; a bare 403 is not retriable, so report it as unavailable.
         if not outer_available:
             raise MusicFetchError(ErrorCode.SONG_UNAVAILABLE, "Playable resources are blocked by CDN, and outer-url fallback is unavailable.") from last_403
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "All playable candidates were rejected with HTTP 403 (including outer-url fallback).") from last_403
+    if last_candidate_error is not None:
+        raise last_candidate_error
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Failed to download all playable candidates.")
 
 
@@ -398,6 +494,7 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
     logger.info("Starting media download. output=%s media_host=%s attempts=%s media_url=%s variants=%s resume_offset=%s", output_path, media_host, len(attempts), _url_for_log(media_urls[0]), len(media_urls), resume_offset)
     last_403_error: Optional[error.HTTPError] = None
     last_network_error: Optional[BaseException] = None
+    last_truncation: Optional["_TruncatedBodyError"] = None
     total_attempts = len(attempts) * len(media_urls)
     attempt_no = 0
     for candidate_url in media_urls:
@@ -452,17 +549,36 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
                                         raise DownloadCanceled()
                             chunk = resp.read(64 * 1024)
                             if not chunk:
+                                # EOF. http.client does NOT raise IncompleteRead for
+                                # a short Content-Length body, so a dropped
+                                # connection looks exactly like a finished one.
                                 break
                             file_obj.write(chunk)
                             downloaded += len(chunk)
                             if progress_callback:
                                 progress_callback(downloaded, total_bytes)
+                        # Durability: the rename below must not expose a file whose
+                        # data blocks are still only in the page cache.
+                        file_obj.flush()
+                        os.fsync(file_obj.fileno())
+                if total_bytes is not None and downloaded < total_bytes:
+                    raise _TruncatedBodyError(downloaded, total_bytes)
                 tmp_path.replace(output_path)
                 sidecar_path.unlink(missing_ok=True)
                 if progress_callback:
                     progress_callback(downloaded, total_bytes)
                 logger.info("Media download finished. output=%s downloaded_bytes=%s total_bytes=%s attempt=%s", output_path, downloaded, total_bytes if total_bytes is not None else "unknown", attempt_no)
                 return
+            except _TruncatedBodyError as truncation:
+                # Keep .part + sidecar: the next attempt resumes from the bytes
+                # already on disk instead of throwing a good download away.
+                resume_offset = truncation.downloaded
+                last_truncation = truncation
+                logger.warning(
+                    "Download ended early, will resume. attempt=%s/%s received=%s expected=%s output=%s",
+                    attempt_no, total_attempts, truncation.downloaded, truncation.expected, output_path,
+                )
+                continue
             except error.HTTPError as http_err:
                 # Clean up .part on any HTTP error — a stale partial file
                 # with an outdated offset would corrupt the next download.
@@ -518,6 +634,14 @@ def _download_audio_stream(media_url: str, output_path: Path, timeout: int, prog
         logger.error("All download attempts failed with network errors. output=%s media_host=%s", output_path, media_host)
         reason = getattr(last_network_error, "reason", None) or last_network_error
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, f"Network error: {reason}") from last_network_error
+    if last_truncation is not None:
+        tmp_path.unlink(missing_ok=True)
+        sidecar_path.unlink(missing_ok=True)
+        logger.error("All download attempts ended early. output=%s media_host=%s", output_path, media_host)
+        raise MusicFetchError(
+            ErrorCode.NETWORK_ERROR,
+            f"Download ended early: received {last_truncation.downloaded} of {last_truncation.expected} bytes.",
+        ) from last_truncation
     raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Media download failed after retries.")
 
 
@@ -652,7 +776,9 @@ def download_preview_to_temp(
     preview_dir = Path(tempfile.gettempdir()) / PREVIEW_DIR_NAME
     preview_dir.mkdir(parents=True, exist_ok=True)
     safe_name = sanitize_filename(song_name or f"song-{song_id}")[:60]
-    extension = (candidate.encode_type or "mp3").lower()
+    # The encode type comes from the API response: keep it to plain characters so
+    # it cannot inject a path separator into the temp file name.
+    extension = re.sub(r"[^a-z0-9]", "", (candidate.encode_type or "").lower()) or "mp3"
     output_path = preview_dir / f"试听-{safe_name}.{extension}"
     _download_audio_stream(
         normalize_media_url(candidate.media_url),

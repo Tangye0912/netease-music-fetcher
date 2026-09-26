@@ -27,6 +27,12 @@ class SafeCsvTextTests(unittest.TestCase):
         self.assertEqual(safe_csv_text(123), "123")
         self.assertEqual(safe_csv_text(True), "True")
 
+    def test_zero_and_false_are_not_dropped(self):
+        # `value or ""` used to turn a legitimate 0 into an empty cell.
+        self.assertEqual(safe_csv_text(0), "0")
+        self.assertEqual(safe_csv_text(0.0), "0.0")
+        self.assertEqual(safe_csv_text(False), "False")
+
 
 if __name__ == "__main__":
     unittest.main()

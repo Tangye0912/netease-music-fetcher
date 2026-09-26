@@ -47,7 +47,13 @@ from music_fetch.app_settings import (
     SHUTDOWN_WAIT_SEC,
 )
 from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
-from music_fetch.audio import is_ffmpeg_available, resolve_output_path, sanitize_filename, should_skip_existing
+from music_fetch.audio import (
+    is_ffmpeg_available,
+    resolve_output_path,
+    sanitize_filename,
+    should_replace_existing,
+    should_skip_existing,
+)
 from music_fetch.batch_inspect import run_batch_detect
 from music_fetch.batch_models import BatchDetectRow, format_bytes, format_duration, format_speed, probe_media_size_bytes
 from music_fetch.batch_results import build_batch_results_csv, summarize_batch_rows
@@ -67,7 +73,7 @@ from music_fetch.history_results import (
     paginate_download_history,
 )
 from music_fetch.network import ProxyConfigError, configure_proxy, get_proxy_config
-from music_fetch.version_check import check_for_updates_cached, version_key
+from music_fetch.version_check import check_for_updates_cached, is_newer_version
 import music_fetch.tui_utils as U
 import music_fetch.ui_texts as T
 
@@ -205,16 +211,24 @@ class TuiApp:
 
         def worker() -> None:
             try:
-                profile = fetch_account_profile(cookie, timeout=6)
-            except MusicFetchError as err:
-                result, name = ("expired", "") if err.code == "AUTH_EXPIRED" else ("transient", "")
-            else:
-                result, name = "ok", profile.nickname
-            if generation != self._login_check_gen:
-                return  # superseded by a manual login/logout while checking
-            self._login_check_name = name
-            self._login_check_result = result
-            self._login_checking = False
+                try:
+                    profile = fetch_account_profile(cookie, timeout=6)
+                except MusicFetchError as err:
+                    result, name = ("expired", "") if err.code == "AUTH_EXPIRED" else ("transient", "")
+                except Exception:
+                    # Never let an unexpected error strand the "校验中…" state.
+                    logger.exception("Background login check failed unexpectedly.")
+                    result, name = "transient", ""
+                else:
+                    result, name = "ok", profile.nickname
+                if generation != self._login_check_gen:
+                    return  # superseded by a manual login/logout while checking
+                self._login_check_name = name
+                self._login_check_result = result
+            finally:
+                # Only clear the flag while this run is still the current check.
+                if generation == self._login_check_gen:
+                    self._login_checking = False
 
         self._login_thread = threading.Thread(target=worker, name="login-check", daemon=True)
         self._login_thread.start()
@@ -249,7 +263,10 @@ class TuiApp:
         finally:
             self.queue.close()
             if not self.queue.wait(0):
-                U.print_info("正在取消下载并清理临时文件，请稍候...")
+                # The scheduler thread always needs a moment to notice `close()`;
+                # only announce work when there is actually something to cancel.
+                if self.queue.active_jobs:
+                    U.print_info("正在取消下载并清理临时文件，请稍候...")
                 deadline = time.monotonic() + SHUTDOWN_WAIT_SEC
                 while True:
                     try:
@@ -424,7 +441,7 @@ class TuiApp:
             return
         self.session.cookie = cookie
         self.session.remember_login = True
-        self.session_store.save(self.session)
+        self._save_session()
         self._nickname = profile.nickname
         self.queue.set_cookie(cookie)
         self._invalidate_login_check()
@@ -442,7 +459,7 @@ class TuiApp:
         self.session.remember_login = False
         self._nickname = ""
         self._invalidate_login_check()
-        self.session_store.save(self.session)
+        self._save_session()
 
     def _handle_auth_expired(self) -> bool:
         """Discard an expired app credential before starting a fresh QR login."""
@@ -490,7 +507,12 @@ class TuiApp:
             ("时长", format_duration(result.duration_ms)),
         ]
         if result.can_download and result.media_url:
-            size_bytes = probe_media_size_bytes(result.media_url, timeout=min(8, self.session.detect_timeout_sec))
+            # The probe can block for up to 2x the timeout; never do it without
+            # a progress indicator.
+            with U.spinner("探测文件大小..."):
+                size_bytes = probe_media_size_bytes(
+                    result.media_url, timeout=min(8, self.session.detect_timeout_sec)
+                )
             if size_bytes:
                 rows.append(("大小", format_bytes(size_bytes)))
         U.print_panel("歌曲信息", rows)
@@ -636,8 +658,9 @@ class TuiApp:
                         break
                     U.print_warning("已经是第一页。")
                     continue
-                if raw.isdigit():
-                    index = int(raw) - 1
+                number = U.parse_index(raw)
+                if number is not None:
+                    index = number - 1
                     if start <= index < start + len(page_items):
                         if on_pick(items[index]):
                             break
@@ -746,8 +769,9 @@ class TuiApp:
                 pick = U.ask(f"输入要试听的序号（{'、'.join(ready_numbers)}；0 返回）").strip()
                 if not pick or pick == "0":
                     continue
-                if pick.isdigit() and 1 <= int(pick) <= len(rows):
-                    target = rows[int(pick) - 1]
+                picked = U.parse_index(pick)
+                if picked is not None and 1 <= picked <= len(rows):
+                    target = rows[picked - 1]
                     if target.status != "ready":
                         U.print_warning("该歌曲不可下载，无法试听。")
                         continue
@@ -760,7 +784,7 @@ class TuiApp:
             (f"{row.song_name or row.song_id}（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）", row.selected)
             for row in ready
         ]
-        selected = U.multiselect("选择要下载的歌曲（空格勾选，回车确定，Esc 取消）", entries)
+        selected = U.multiselect("选择要下载的歌曲（空格勾选，Tab 切到「确定」后回车提交，Esc 取消）", entries)
         if not selected:
             self._offer_batch_export(rows)
             return
@@ -798,6 +822,7 @@ class TuiApp:
                     row.song_id, row.song_name, output_path, target_format,
                     download_lyric, lyric_mode,
                     timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+                    overwrite_existing=should_replace_existing(output_path, self.session.existing_file_policy),
                 ))
                 task_ids[index] = item.task_id
             except (MusicFetchError, OSError, ValueError) as err:
@@ -805,7 +830,7 @@ class TuiApp:
                 row.message = str(err)
         self._batches.append((rows, task_ids))
         self.session.last_download_dir = str(out_dir)
-        self.session_store.save(self.session)
+        self._save_session()
         if skipped:
             U.print_info(f"其中 {skipped} 首已存在，按当前策略跳过。")
         submitted = len(set(task_ids.values()))
@@ -960,6 +985,7 @@ class TuiApp:
             )
             if raw in {"0", "q"}:
                 return
+            number = U.parse_index(raw)
             if raw == "P":
                 self.queue.pause_all()
             elif raw == "R":
@@ -986,12 +1012,11 @@ class TuiApp:
                 page += 1
             elif raw == "p":
                 page = max(0, page - 1)
-            elif raw.isdigit():
+            elif number is not None:
                 # The grouped view renders every batch (no pagination) in
                 # _grouped_order; the flat view pages through items directly.
                 targets = self._grouped_order(items) if grouped else page_items
                 offset = 0 if grouped else start
-                number = int(raw)
                 if offset < number <= offset + len(targets):
                     self._task_actions(targets[number - offset - 1])
                 else:
@@ -1026,7 +1051,9 @@ class TuiApp:
             options.append("暂停")
         elif item.state == "paused":
             options.append("恢复")
-        if item.state not in FINAL_STATES:
+        # "取消中" is already canceling: offering the action again is a silent
+        # no-op, so it is only shown while a cancel would still do something.
+        if item.state not in FINAL_STATES and item.state != "canceling":
             options.append("取消任务")
         elif item.state in {"failed", "canceled"}:
             options.append("重试")
@@ -1183,7 +1210,10 @@ class TuiApp:
             U.print_error(user_error_message(err.code, err.message))
             return False
         if should_skip_existing(output_path, self.session.existing_file_policy):
-            size = output_path.stat().st_size
+            try:
+                size = output_path.stat().st_size
+            except OSError:
+                size = 0  # removed between the check and the stat
             self._add_record(song_id, song_name, str(output_path), size, TASK_STATE_SUCCESS)
             U.print_info(f"文件已存在，按当前策略跳过：{output_path}")
             return True
@@ -1192,15 +1222,23 @@ class TuiApp:
                 song_id, song_name, output_path, target_format, download_lyric, lyric_mode,
                 artist=artist, album_name=album_name, cover_url=cover_url,
                 timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+                overwrite_existing=should_replace_existing(output_path, self.session.existing_file_policy),
             ))
         except (OSError, ValueError) as err:
             U.print_error(f"无法提交下载：{err}")
             return False
         self.session.last_download_dir = str(out_dir)
-        self.session_store.save(self.session)
+        self._save_session()
         U.print_success(f"已加入后台下载：{item.output_path}")
         U.print_info("可继续搜索或添加歌曲；主菜单 → 下载任务 查看进度。")
         return True
+
+    def _save_session(self) -> None:
+        """Persist the session; a full/read-only config dir must not crash the UI."""
+        try:
+            self.session_store.save(self.session)
+        except OSError as err:
+            U.print_warning(f"设置保存失败：{err}")
 
     def _add_record(
         self,
@@ -1211,17 +1249,21 @@ class TuiApp:
         status: str,
         error_code: str = "",
     ) -> None:
-        self.history_store.add(
-            DownloadRecord(
-                song_id=song_id,
-                song_name=song_name or f"song-{song_id}",
-                output_path=output_path,
-                size_bytes=size_bytes,
-                downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                status=status,
-                error_code=error_code,
+        try:
+            self.history_store.add(
+                DownloadRecord(
+                    song_id=song_id,
+                    song_name=song_name or f"song-{song_id}",
+                    output_path=output_path,
+                    size_bytes=size_bytes,
+                    downloaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    status=status,
+                    error_code=error_code,
+                )
             )
-        )
+        except OSError as err:
+            # The queue reports the same condition as a recoverable banner.
+            U.print_warning(f"下载历史保存失败：{err}")
 
     # ── history ───────────────────────────────────────────────────
 
@@ -1262,6 +1304,7 @@ class TuiApp:
                     f"输入序号操作第 1-{len(page_records)} 条 · n/p 翻页 · s 搜索 · f 筛选 · e 导出 · r 重试失败 · c 清空 · 0 返回"
                 ).strip()
             key = raw.lower()
+            number = U.parse_index(raw)
             if not raw or raw == "0":
                 return
             if key == "n":
@@ -1286,9 +1329,9 @@ class TuiApp:
                 self._retry_all_failed(filtered)
             elif key == "c":
                 self._clear_history(records)
-            elif raw.isdigit() and 1 <= int(raw) <= len(page_records):
-                self._history_record_actions(page_records[int(raw) - 1])
-            elif raw.isdigit():
+            elif number is not None and 1 <= number <= len(page_records):
+                self._history_record_actions(page_records[number - 1])
+            elif number is not None:
                 U.print_warning(f"请输入 1-{len(page_records)} 的序号。")
             else:
                 U.print_warning("无法识别的输入，请重试。")
@@ -1355,7 +1398,11 @@ class TuiApp:
                         path.unlink()
                 except OSError as err:
                     U.print_warning(f"删除文件失败：{err}")
-                self.history_store.remove_by_path(str(path))
+                try:
+                    self.history_store.remove_by_path(str(path))
+                except OSError as err:
+                    U.print_warning(f"移除记录失败：{err}")
+                    return
                 U.print_success("已删除。")
         elif action == "重试下载":
             self._retry_record(record)
@@ -1378,6 +1425,8 @@ class TuiApp:
             self.queue.enqueue(DownloadRequest(
                 record.song_id, record.song_name, output_path, retry_target_format(output_path),
                 timeout=self.session.download_timeout_sec, retry_count=self.session.download_retry_count,
+                # A retry replaces the failed attempt's leftover at the same path.
+                overwrite_existing=True,
             ))
         except (OSError, ValueError) as err:
             U.print_error(f"无法提交重试：{err}")
@@ -1406,7 +1455,11 @@ class TuiApp:
             return
         if not U.confirm(f"确定清空全部 {len(records)} 条下载历史？（仅删除记录，不删除文件）", default=False):
             return
-        self.history_store.save([])
+        try:
+            self.history_store.save([])
+        except OSError as err:
+            U.print_error(f"清空下载历史失败：{err}")
+            return
         U.print_success("下载历史已清空。")
 
     @staticmethod
@@ -1470,7 +1523,7 @@ class TuiApp:
                     self.session.existing_file_policy = EXISTING_FILE_POLICIES[picked - 1]
             elif choice == 9:
                 self.queue.set_concurrency(self.session.download_concurrency)
-                self.session_store.save(self.session)
+                self._save_session()
                 U.print_success("设置已保存。")
                 return
             else:
@@ -1576,7 +1629,7 @@ class TuiApp:
             except RuntimeError as err:
                 U.print_warning(f"无法检查更新：{err}")
                 return
-        if version_key(latest) > version_key(APP_VERSION):
+        if is_newer_version(latest, APP_VERSION):
             U.print_success(f"发现新版本：{latest}（当前 {APP_VERSION}）")
             U.print_info(f"下载地址：{url or PROJECT_GITHUB_URL}")
         else:
@@ -1586,8 +1639,8 @@ class TuiApp:
 def main() -> int:
     setup_logging(default_log_path(), level=logging.INFO)
     logger.info("TUI started. version=%s", APP_VERSION)
-    app = TuiApp()
     try:
+        app = TuiApp()
         return app.run()
     except KeyboardInterrupt:
         print()
@@ -1595,6 +1648,14 @@ def main() -> int:
         return 0
     except EOFError:
         return 0
+    except Exception as err:
+        # Last-resort guard: an unexpected error must leave the terminal usable
+        # and point at the log, not dump an interpreter traceback on the user.
+        logger.exception("Unhandled error in the TUI.")
+        print()
+        U.print_error(f"发生未预期的错误：{err}")
+        U.print_info(f"详细信息已写入日志：{default_log_path()}")
+        return 1
 
 
 __all__ = ["TuiApp", "main"]

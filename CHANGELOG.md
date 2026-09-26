@@ -13,6 +13,24 @@
 
 ### Fixed
 
+- **响应体截断不再被当成"下载成功"**：`http.client` 对 `Content-Length` 不足**不会**抛 `IncompleteRead`，连接中途断开时 `read()` 只返回空字节，于是被截断的文件被改名成正式文件、删除续传 sidecar、记入历史为成功。现在读完后校验 `downloaded == Content-Length`，不足则保留 `.part` + sidecar 并在本次下载内用 `Range` 续传；全部尝试结束后按 `NETWORK_ERROR` 上报并可重试。
+- **单个候选失败不再中断整首歌**：音质候选是各自独立的 CDN 对象，此前只有 403 会 `continue`，404/410/500 等直接 `raise`，既跳过其它候选也不走 outer-url 回退。现在 `DOWNLOAD_FAILED`/`NETWORK_ERROR` 都会继续尝试下一个候选并最终走回退，只有不可恢复的错误码才立即失败。
+- **恢复队列时不再把非空残file记为完成**：原先只看文件是否非空；现在只有"能被 mutagen 解析的音频文件"才算已完成，零字节或截断的残file按原路径重新入队（替换残file，而不是另存为 `_1`）。
+- **「覆盖」策略真正生效**：`replace` 策略下 `DownloadQueue.enqueue` 会给已存在的目标另起 `_1` 名字，导致文档承诺的"重新下载并替换原文件"退化成"自动重命名"。现在请求带 `overwrite_existing` 标记，覆盖策略与残file修复都锁定原路径；取消时仍然不会删除任务开始前就已存在的用户文件。
+- **下载历史不再因一次撕裂写而整体丢失**：`downloads.json` 原先用 `write_text` 原地覆盖（同模块的 session/queue 早已用临时文件 + `fsync` + `replace`）。现在改用同一个原子私有写，并在解析失败时把原文件移到 `downloads.json.corrupt` 而不是静默当成空历史。
+- **粘贴官方分享文案不再崩溃**：网易云分享文案固定以「（@网易云音乐）」结尾，而 URL 正则不会在中文处停下，短链因此带上 CJK 字符；urllib 用 ASCII 编码请求行，`putrequest` 在建连之前就抛 `UnicodeEncodeError`，单曲/批量流程都只捕获 `MusicFetchError`，于是整个 TUI 带着 traceback 退出。现在 URL 在首个非 ASCII 字符处截断，`resolve_short_url` 也会先把非法链接转成 `INVALID_URL`。
+- **API 读响应体的异常不再逃逸**：连接阶段超时会被 urllib 包成 `URLError`，但**读响应体**超时/重置抛的是裸 `TimeoutError`/`ConnectionResetError`。此前这类异常会绕过下载重试循环（`retry_count=2` 也只请求 1 次，最终报"未知错误"）、让登录校验崩溃、并让后台校验线程永久停在"校验中…"。现在统一转成 `MusicFetchError(NETWORK_ERROR)`，后台校验线程用 `try/finally` 复位状态，`main()` 也加了兜底。
+- **批量识别的"扩展阶段"异常不再拖垮整个程序**：歌单/专辑/短链扩展只捕获 `MusicFetchError`（逐曲阶段则捕获 `Exception`），一个 `ConnectionResetError` 就会让整个 TUI 退出并丢掉已粘贴的内容。现在扩展阶段同样按单条失败处理。
+- **SOCKS5 代理下所有接口恢复正常**：`requests` 在 `stream=True` 时按 `decode_content=False` 取流，adapter 直接用 `raw.read()` 拿到的是 gzip 压缩字节，JSON 解析必然失败（直连/HTTP 代理走 urllib，发的是 `Accept-Encoding: identity`，所以只有 SOCKS5 中招）。现在按 `decode_content=True` 读取。
+- **歌单接口不再把鉴权失败当网络错误/空列表**：账号信息与歌单分页的 401/403/301/302 现在映射为 `AUTH_EXPIRED`（触发重新登录），第一页非 200 报 `NETWORK_ERROR` 而不是返回 `[]` 让界面显示"暂无歌单"。
+- **搜索结果不再吞掉请求失败**：`search_songs` 的 4xx/5xx 与 `code != 200` 原先一律返回 `[]`，界面显示"未找到相关歌曲"；现在按 `AUTH_EXPIRED`/`NETWORK_ERROR` 上报，与 docstring 承诺一致。
+- **`restore_saved`、队列持久化与若干健壮性修复**：`1e999` 之类的 JSON 会被 `json.loads` 解析成 `inf`，`int(inf)` 抛 `OverflowError` 让会话/历史加载崩溃（`clamp`、两处 `_safe_int` 已覆盖）；会话文件是合法 JSON 但非对象（如 `[]`）时会在 `TuiApp.__init__` 抛 `AttributeError` 直接起不来；持久化签名现在包含目标路径；歌单拉取加了 200 页上限。
+- **并发设置不再被静默改回 3**：设置界面提供到 `MAX_UI_CONCURRENCY`(8)、队列也按 8 运行，但 `SessionStore` 用 CLI 时代的 `MAX_DOWNLOAD_CONCURRENCY`(3) 钳制，保存 4–8 后重启即失效。
+- **TUI 面板/表格宽度计算修正**：`format_panel` 的截断只用于算 padding、打印的仍是完整值（长路径/长错误信息会撑破边框，`…` 是死代码）；`_truncate_to_width` 按单字符累加宽度，VS16 emoji（`❤️`：1 个字素 2 个码点）会算出预算的两倍，表格/菜单/标题随之错位。现在按候选串整体宽度截断。
+- **多选对话框按序号而非文案回传**：两行显示同样的「歌名（未知大小）」时，按文案反查会让它们无法区分（勾一个等于勾两个），且正文提示"回车确定"是错的（Enter 是切换，需 Tab 到「确定」再回车）。现在用行序号作为对话框 value，提示文案也已改正。
+- **非十进制"数字"输入不再崩溃**：`'²'.isdigit()` 为真但 `int('²')` 抛 `ValueError`（超长数字串同理），菜单/任务页/历史页/批量试听全部会带着 traceback 退出。新增 `tui_utils.parse_index` 统一校验。
+- **取消不再删掉用户原有文件**：流水线在改名**之后**才检查取消，取消分支又会删除刚改名的路径，于是一个已经存在的同名文件会先被覆盖、再被删除（净数据丢失）。现在只删除本次运行创建的文件，并且转码先写到 `*.converting.<ext>` 临时名再原子替换。
+- **登录/诊断等长尾健壮性**：登录 CDP socket 断开后 `recv` 忙转（约 0.6M 次/秒、满核）改为立即退出循环；`163.com` 域名匹配不再接受 `evil163.com`；代理主机填成 `127.0.0.1:7890` 会生成无法解析的代理 URL，现在直接校验报错；封面下载加了 5MB 上限、未知图片格式不再硬编码成 JPEG；`.part` 改名前补了 `flush` + `fsync`；4xx 响应体读取失败时不再泄漏 session；版本比较对不等长元组（`3.6` vs `3.6.0`）会误报更新，改用 `is_newer_version`；前台历史/会话写入失败不再让 TUI 崩溃；"取消中"的任务不再显示无效果的"取消任务"；单曲大小探测被 spinner 覆盖；多行输入提示不再声称"直接回车返回"；批量输入里的 URL 在中文处截断（顺带修复两条链接相邻时被合并成一条、第二首被静默丢弃）。
 - **代理配置失败不再污染会话**：`_edit_proxy` 原先在校验通过后、`configure_proxy` 之前就把新代理写进会话；运行时不接受该代理（`ProxyConfigError`）时字段已被改动，用户再按"保存设置"就会把无效代理持久化。现在只在运行时接受后才写入会话，并删掉了重复的一次校验调用。
 - **队列轮询不再持锁写盘**：`poll()` 原先在持有队列锁时写下载历史与 `queue.json`，历史接近 1000 条时会让每 0.5 秒刷新一次的界面卡住。现在状态变更仍在锁内完成，两次磁盘写入移到锁外；历史写失败仍会保留重试机会（`recorded` 只在写成功后置位）。
 - **退出等待不再无限期卡住**：`TuiApp.run()` 的收尾等待原本没有上限——若某个任务卡在不可取消的步骤（ffmpeg 转码不响应取消），Ctrl+C 只会重复提示"仍在等待下载线程安全结束"而无法退出。现在最多等待 `SHUTDOWN_WAIT_SEC`（10 秒），超时后提示剩余线程数并直接退出；调度线程改为 daemon，未完成任务保留在队列文件中供下次启动恢复。
@@ -20,6 +38,7 @@
 
 ### QA
 
+- 代码审查修复轮（对照 `CODE_REVIEW.md`，HEAD `0a15f8b`）：回归测试 584 → **754 通过 + 32 子测试**（新增 170 个用例），`mypy --strict` 与 `ruff` 干净，覆盖率 84.72% → **85.63%**（`download_queue.py` 97%、`app_stores.py` 96%、`pipeline.py` 94%、`network.py` 95%、`audio.py` 88%、`api.py` 89%）。新增的关键回归覆盖：真实 HTTP 服务的截断响应、候选 404 回退、残file恢复、覆盖策略、取消不删旧文件、撕裂历史文件隔离、gzip/SOCKS5 adapter、分享文案中的 CJK、非十进制数字输入、emoji 宽度、重复文案多选、批量扩展阶段的传输异常。
 - 回归测试：`python3 -m pytest tests/ -q`（582 通过 + 2 跳过；本轮新增 31 个测试，覆盖下载取消检查、ffmpeg 缺失回退、歌词落盘与嵌入、代理配置失败、任务详情控制等关键路径）。
 - 覆盖率：82.63% → 84.72%（`pipeline.py` 81% → 93%，`audio.py` 81% → 89%，`download_queue.py` 97%）。
 - 测试卫生：新增 `tests/conftest.py` 网络守卫（除回环地址外，任何真实连接直接报错），并给直接构造 `DownloadQueue` 的测试注入假 job factory。此前有个别测试真的发起了对网易服务器的请求，其后台线程会串扰 `test_network` 的假 socket 处理器，导致偶发失败。

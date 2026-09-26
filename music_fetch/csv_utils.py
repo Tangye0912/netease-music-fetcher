@@ -15,7 +15,8 @@ def safe_csv_text(value: object) -> str:
     are prefixed with a single quote, so untrusted song metadata can never
     inject a spreadsheet formula through an exported CSV.
     """
-    text = str(value or "")
+    # Only None becomes an empty cell: `value or ""` would also swallow 0/False.
+    text = "" if value is None else str(value)
     candidate = text.lstrip(" \t\r\n")
     if candidate.startswith(_FORMULA_PREFIXES):
         return "'" + text

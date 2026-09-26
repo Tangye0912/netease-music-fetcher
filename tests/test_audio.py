@@ -1,5 +1,7 @@
 """Tests for music_fetch.audio.py download stream logic."""
+import socketserver
 import tempfile
+import threading
 import unittest
 from email.message import Message
 from pathlib import Path
@@ -152,13 +154,23 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertEqual(urls[1], "http://m801.music.126.net/abc.mp3")
         self.assertEqual(len(urls), 2)
 
+    def _response(self, headers, chunks, status=200):
+        response = mock.MagicMock()
+        response.status = status
+        response.getcode.return_value = status
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.headers = headers
+        response.read.side_effect = list(chunks)
+        return response
+
     def test_download_success_first_attempt(self):
         fake_resp = mock.MagicMock()
         fake_resp.status = 200
         fake_resp.getcode.return_value = 200
         fake_resp.__enter__.return_value = fake_resp
         fake_resp.__exit__.return_value = False
-        fake_resp.headers = {"Content-Length": "100"}
+        fake_resp.headers = {"Content-Length": "4"}
         fake_resp.read.side_effect = [b"aaaa", b""]
 
         with mock.patch("urllib.request.urlopen", return_value=fake_resp):
@@ -174,6 +186,61 @@ class DownloadAudioStreamTests(unittest.TestCase):
         self.assertTrue(self.output_path.exists())
         self.assertEqual(self.output_path.read_bytes(), b"aaaa")
         self.assertFalse(self.output_path.with_name(f"{self.output_path.name}.part").exists())
+
+    def test_truncated_body_resumes_instead_of_publishing_a_short_file(self):
+        # Content-Length says 100 but the connection drops after 4 bytes.
+        # http.client does not raise IncompleteRead for a short Content-Length
+        # body, so the stream must detect it and resume on the next attempt.
+        first = self._response({"Content-Length": "100"}, [b"aaaa", b""])
+        second = self._response({"Content-Length": "96"}, [b"b" * 96, b""], status=206)
+
+        with mock.patch("urllib.request.urlopen", side_effect=[first, second]) as urlopen:
+            music_fetch.audio._download_audio_stream(
+                "https://m801.music.126.net/abc.mp3",
+                self.output_path,
+                timeout=10,
+                progress_callback=None,
+                cancel_checker=None,
+                cookie="",
+            )
+
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(self.output_path.read_bytes(), b"aaaa" + b"b" * 96)
+        self.assertFalse(self.output_path.with_name(f"{self.output_path.name}.part").exists())
+
+    def test_all_truncated_attempts_raise_network_error_and_clean_up(self):
+        def always_short(*_args, **_kwargs):
+            return self._response({"Content-Length": "100"}, [b"aaaa", b""])
+
+        with mock.patch("urllib.request.urlopen", side_effect=always_short):
+            with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+                music_fetch.audio._download_audio_stream(
+                    "https://m801.music.126.net/abc.mp3",
+                    self.output_path,
+                    timeout=10,
+                    progress_callback=None,
+                    cancel_checker=None,
+                    cookie="",
+                )
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+        self.assertFalse(self.output_path.exists())
+        self.assertFalse(self.output_path.with_name(f"{self.output_path.name}.part").exists())
+
+    def test_fsync_runs_before_the_part_file_is_published(self):
+        fake_resp = self._response({"Content-Length": "4"}, [b"aaaa", b""])
+        with mock.patch("urllib.request.urlopen", return_value=fake_resp), mock.patch(
+            "music_fetch.audio.os.fsync"
+        ) as fsync_mock:
+            music_fetch.audio._download_audio_stream(
+                "https://m801.music.126.net/abc.mp3",
+                self.output_path,
+                timeout=10,
+                progress_callback=None,
+                cancel_checker=None,
+                cookie="",
+            )
+        self.assertTrue(self.output_path.exists())
+        fsync_mock.assert_called_once()
 
     def test_download_403_retries_with_next_header(self):
         import urllib.error
@@ -655,6 +722,18 @@ class DownloadPreviewToTempTests(unittest.TestCase):
         media_url = stream_mock.call_args.args[0]
         self.assertEqual(media_url, "https://cdn/x.mp3")
 
+    def test_api_encode_type_cannot_escape_the_preview_directory(self):
+        # encode_type comes from the API response; it must not add a path
+        # separator to the temp file name.
+        candidates = [self._candidate("standard", "../../evil", "https://cdn/x.mp3")]
+        with mock.patch("music_fetch.audio.fetch_playable_candidates", return_value=candidates), mock.patch(
+            "music_fetch.audio._download_audio_stream"
+        ), mock.patch("music_fetch.audio.tempfile.gettempdir", return_value="/tmp"):
+            path = music_fetch.audio.download_preview_to_temp("42", "天下", "MUSIC_U=x", timeout=5)
+        self.assertEqual(Path(path).parent, Path("/tmp") / "music-fetch-previews")
+        self.assertEqual(Path(path).suffix, ".evil")
+        self.assertNotIn("/", Path(path).name)
+
     def test_no_candidates_raises_unavailable(self):
         with mock.patch("music_fetch.audio.fetch_playable_candidates", return_value=[]):
             with self.assertRaises(MusicFetchError) as raised:
@@ -727,3 +806,113 @@ class LyricFileAndTagTests(unittest.TestCase):
         music_fetch.audio.embed_lyric_tag(target, self.LYRICS)  # unsupported suffix
         music_fetch.audio.embed_lyric_tag(target, "")           # nothing to embed
         self.assertEqual(target.read_bytes(), b"not really audio")
+
+
+class TruncatedResponseIntegrationTests(unittest.TestCase):
+    """End-to-end check against a real HTTP server that closes mid-body.
+
+    http.client deliberately does not raise IncompleteRead when a
+    Content-Length body ends early, so only an integration test proves the
+    downloader notices the short body.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.output_path = Path(self.tmp.name) / "song.m4a"
+
+    def test_short_body_is_never_published(self):
+        payload = b"\x00\x00\x00\x20ftypM4A " + b"A" * (847 - 12)
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.recv(4096)
+                head = (
+                    b"HTTP/1.1 200 OK\r\nContent-Type: audio/mp4\r\n"
+                    b"Content-Length: 847\r\nConnection: close\r\n\r\n"
+                )
+                self.request.sendall(head + payload[:512])
+                self.request.shutdown(1)
+                self.request.close()
+
+        with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with self.assertRaises(MusicFetchError) as ctx:
+                    music_fetch.audio._download_audio_stream(
+                        f"http://127.0.0.1:{server.server_address[1]}/x.m4a",
+                        self.output_path,
+                        timeout=5,
+                        progress_callback=None,
+                        cancel_checker=None,
+                        cookie="",
+                    )
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+        self.assertFalse(self.output_path.exists())
+
+
+class ExistingTargetDecisionTests(unittest.TestCase):
+    """Which pre-existing targets the queue may replace vs. must protect."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "song.mp3"
+
+    def test_overwrite_policy_always_replaces(self):
+        self.path.write_bytes(b"old")
+        self.assertTrue(music_fetch.audio.should_replace_existing(self.path, "overwrite"))
+        self.path.unlink()
+        self.assertTrue(music_fetch.audio.should_replace_existing(self.path, "overwrite"))
+
+    def test_skip_policy_protects_a_real_file(self):
+        self.path.write_bytes(b"old")
+        self.assertFalse(music_fetch.audio.should_replace_existing(self.path, "skip"))
+
+    def test_zero_byte_leftover_is_replaced_even_under_rename(self):
+        self.path.write_bytes(b"")
+        self.assertTrue(music_fetch.audio.should_replace_existing(self.path, "rename"))
+
+    def test_missing_target_is_not_a_replacement(self):
+        self.assertFalse(music_fetch.audio.should_replace_existing(self.path, "rename"))
+
+
+class PlausibleCompleteAudioTests(unittest.TestCase):
+    """Only a parseable container counts as a finished download."""
+
+    FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def _copy(self, name: str) -> Path:
+        target = self.dir / name
+        target.write_bytes((self.FIXTURES / name).read_bytes())
+        return target
+
+    def test_real_container_is_complete(self):
+        for name in ("silence.mp3", "silence.m4a", "silence.flac"):
+            with self.subTest(name=name):
+                self.assertTrue(music_fetch.audio.is_plausible_complete_audio(self._copy(name)))
+
+    def test_truncated_container_is_not_complete(self):
+        payload = (self.FIXTURES / "silence.m4a").read_bytes()
+        target = self.dir / "half.m4a"
+        target.write_bytes(payload[: len(payload) // 2])
+        self.assertFalse(music_fetch.audio.is_plausible_complete_audio(target))
+
+    def test_missing_empty_and_garbage_are_not_complete(self):
+        self.assertFalse(music_fetch.audio.is_plausible_complete_audio(self.dir / "missing.mp3"))
+        empty = self.dir / "empty.mp3"
+        empty.write_bytes(b"")
+        self.assertFalse(music_fetch.audio.is_plausible_complete_audio(empty))
+        garbage = self.dir / "garbage.mp3"
+        garbage.write_bytes(b"just some text")
+        self.assertFalse(music_fetch.audio.is_plausible_complete_audio(garbage))

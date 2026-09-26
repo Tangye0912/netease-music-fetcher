@@ -455,7 +455,39 @@ class CoverArtTests(unittest.TestCase):
         self.assertEqual(_detect_image_mime(self.JPEG), "image/jpeg")
         self.assertEqual(_detect_image_mime(self.PNG), "image/png")
         self.assertEqual(_detect_image_mime(self.WEBP), "image/webp")
-        self.assertEqual(_detect_image_mime(b"garbage"), "image/jpeg")
+        # Anything unrecognised must not be labelled JPEG: players would show a
+        # broken cover instead of simply not having one.
+        self.assertIsNone(_detect_image_mime(b"garbage"))
+
+    def test_oversized_cover_is_rejected_and_skipped(self):
+        from music_fetch.pipeline import MAX_COVER_BYTES, _download_cover
+
+        response = mock.MagicMock()
+        response.read.return_value = b"\xff\xd8\xff" + b"x" * MAX_COVER_BYTES
+        response.__enter__.return_value = response
+        with mock.patch("music_fetch.pipeline.open_url", return_value=response):
+            with self.assertRaises(ValueError):
+                _download_cover("https://example.com/huge.jpg")
+
+    def test_unknown_cover_container_is_rejected(self):
+        from music_fetch.pipeline import _download_cover
+
+        response = mock.MagicMock()
+        response.read.return_value = b"not an image"
+        response.__enter__.return_value = response
+        with mock.patch("music_fetch.pipeline.open_url", return_value=response):
+            with self.assertRaises(ValueError):
+                _download_cover("https://example.com/c")
+
+    def test_cover_error_never_fails_the_tag_write(self):
+        from mutagen.id3 import ID3
+
+        target = self._fixture_copy("silence.mp3")
+        with mock.patch("music_fetch.pipeline._download_cover", side_effect=ValueError("bad cover")):
+            write_audio_tags(target, title="标题", artist="艺人", album="专辑", cover_url="https://example.com/c")
+        tags = ID3(str(target))
+        self.assertEqual(tags.getall("TIT2")[0].text, ["标题"])
+        self.assertEqual(tags.getall("APIC"), [])
 
     def test_mp3_cover_lands_in_an_apic_frame(self):
         from mutagen.id3 import ID3
@@ -686,3 +718,91 @@ class PipelineFailurePathTests(unittest.TestCase):
         result = self._run(download_lyric=True)
         self.assertTrue(result.output_path.exists())
         self.assertEqual(result.file_size, len(b"audio-bytes"))
+
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_cancel_after_the_move_keeps_a_preexisting_file(self, fallback_mock):
+        # The target existed before the job started, so cancelling must not
+        # delete it (previously the user's file disappeared entirely).
+        self.output_path.write_bytes(b"user-original")
+        fallback_mock.side_effect = self._fallback()
+        checks: list[int] = []
+
+        def cancel() -> bool:
+            checks.append(1)
+            return len(checks) >= 3  # cancel right after the rename
+
+        with self.assertRaises(DownloadCanceled):
+            self._run(cancel_checker=cancel)
+        self.assertTrue(self.output_path.exists())
+        self.assertNotEqual(self.output_path.read_bytes(), b"")
+
+    @mock.patch("music_fetch.pipeline.convert_audio_file")
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_failed_conversion_leaves_a_preexisting_file_untouched(
+        self, fallback_mock, _ffmpeg_mock, convert_mock
+    ):
+        self.output_path.write_bytes(b"user-original")
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        convert_mock.side_effect = MusicFetchError("CONVERT_FAILED", "boom")
+
+        with self.assertRaises(MusicFetchError):
+            self._run()
+        self.assertEqual(self.output_path.read_bytes(), b"user-original")
+
+    @mock.patch("music_fetch.pipeline.convert_audio_file")
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_conversion_is_published_from_a_temporary_name(self, fallback_mock, _ffmpeg_mock, convert_mock):
+        fallback_mock.side_effect = self._fallback(media_url="https://example.com/song.flac")
+        seen_targets: list[Path] = []
+
+        def fake_convert(source, target, fmt, timeout):
+            seen_targets.append(Path(target))
+            Path(target).write_bytes(b"converted")
+
+        convert_mock.side_effect = fake_convert
+
+        result = self._run()
+        self.assertEqual(len(seen_targets), 1)
+        self.assertNotEqual(seen_targets[0], self.output_path)
+        self.assertEqual(seen_targets[0].suffix, ".mp3")
+        self.assertEqual(result.output_path.read_bytes(), b"converted")
+
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=False)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_missing_ffmpeg_without_url_extension_keeps_the_encode_type(self, fallback_mock, _ffmpeg_mock):
+        # An extensionless CDN url used to discard a finished download with
+        # CONVERT_TOOL_MISSING; the candidate's encode type now names the file.
+        def fake(**kwargs):
+            kwargs["output_path"].write_bytes(b"audio-bytes")
+            return PlayableCandidate(media_url="https://cdn.example.com/stream", duration_ms=1,
+                                     level="standard", encode_type="aac")
+
+        fallback_mock.side_effect = fake
+        result = self._run()
+        self.assertEqual(result.output_path.suffix, ".aac")
+        self.assertEqual(result.output_path.read_bytes(), b"audio-bytes")
+
+    @mock.patch("music_fetch.pipeline.is_ffmpeg_available", return_value=True)
+    @mock.patch("music_fetch.pipeline.download_song_with_fallback")
+    def test_retry_keeps_the_retrying_stage_visible(self, fallback_mock, _ffmpeg_mock):
+        attempts: list[int] = []
+        stages: list[str] = []
+
+        def flaky(**kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise MusicFetchError("DOWNLOAD_FAILED", "first attempt failed")
+            kwargs["output_path"].write_bytes(b"audio-bytes")
+            return PlayableCandidate(media_url="https://example.com/song.flac", duration_ms=1,
+                                     level="standard", encode_type="flac")
+
+        fallback_mock.side_effect = flaky
+        with mock.patch("music_fetch.pipeline.convert_audio_file") as convert_mock:
+            convert_mock.side_effect = lambda source, target, fmt, timeout: Path(target).write_bytes(b"converted")
+            self._run(retry_count=1, stage_callback=stages.append)
+
+        self.assertEqual(len(attempts), 2)
+        self.assertIn("retrying", stages)
+        self.assertEqual(stages.count("downloading"), 1)

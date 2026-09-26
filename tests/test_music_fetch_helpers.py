@@ -104,6 +104,98 @@ class PathHelperTests(unittest.TestCase):
 
 
 class DownloadFallbackTests(unittest.TestCase):
+    @staticmethod
+    def _candidate(url: str, level: str = "standard", encode_type: str = "mp3"):
+        return music_fetch.PlayableCandidate(
+            media_url=url, duration_ms=1000, level=level, encode_type=encode_type
+        )
+
+    @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_outer_media_url")
+    @mock.patch("music_fetch.audio.fetch_playable_candidates")
+    def test_dead_candidate_does_not_abort_the_others(self, candidates_mock, outer_mock, download_mock):
+        # Every quality level is a separate CDN object: a 404 on the first one
+        # must not stop the song (it used to abort candidates and the fallback).
+        candidates_mock.return_value = [
+            self._candidate("https://m704.music.126.net/a.mp3", "exhigh"),
+            self._candidate("https://m704.music.126.net/b.mp3"),
+        ]
+        outer_mock.return_value = None
+
+        def side_effect(media_url, *_args, **_kwargs):
+            if media_url.endswith("a.mp3"):
+                raise music_fetch.MusicFetchError("DOWNLOAD_FAILED", "Media request failed: HTTP 404.")
+
+        download_mock.side_effect = side_effect
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = music_fetch.download_song_with_fallback(
+                song_id="42", cookie="MUSIC_U=abc", output_path=Path(tmp) / "x.mp3", timeout=10,
+            )
+        self.assertTrue(result.media_url.endswith("b.mp3"))
+        self.assertEqual([call.args[0] for call in download_mock.call_args_list],
+                         ["https://m704.music.126.net/a.mp3", "https://m704.music.126.net/b.mp3"])
+
+    @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_outer_media_url")
+    @mock.patch("music_fetch.audio.fetch_playable_candidates")
+    def test_all_candidates_dead_still_tries_the_outer_url(self, candidates_mock, outer_mock, download_mock):
+        candidates_mock.return_value = [self._candidate("https://m704.music.126.net/a.mp3")]
+        outer_mock.return_value = "https://m801.music.126.net/outer.mp3"
+
+        def side_effect(media_url, *_args, **_kwargs):
+            if media_url.endswith("a.mp3"):
+                raise music_fetch.MusicFetchError("DOWNLOAD_FAILED", "Media request failed: HTTP 500.")
+
+        download_mock.side_effect = side_effect
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = music_fetch.download_song_with_fallback(
+                song_id="42", cookie="MUSIC_U=abc", output_path=Path(tmp) / "x.mp3", timeout=10,
+            )
+        self.assertEqual(result.level, "outer")
+        self.assertEqual(download_mock.call_count, 2)
+
+    @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_outer_media_url")
+    @mock.patch("music_fetch.audio.fetch_playable_candidates")
+    def test_network_error_on_candidate_still_tries_the_next_one(self, candidates_mock, outer_mock, download_mock):
+        candidates_mock.return_value = [
+            self._candidate("https://m704.music.126.net/a.mp3"),
+            self._candidate("https://m801.music.126.net/b.mp3"),
+        ]
+        outer_mock.return_value = None
+        calls = []
+
+        def side_effect(media_url, *_args, **_kwargs):
+            calls.append(media_url)
+            if media_url.endswith("a.mp3"):
+                raise music_fetch.MusicFetchError("NETWORK_ERROR", "Network error: timed out")
+
+        download_mock.side_effect = side_effect
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = music_fetch.download_song_with_fallback(
+                song_id="42", cookie="MUSIC_U=abc", output_path=Path(tmp) / "x.mp3", timeout=10,
+            )
+        self.assertTrue(result.media_url.endswith("b.mp3"))
+        self.assertEqual(len(calls), 2)
+
+    @mock.patch("music_fetch.audio._download_audio_stream")
+    @mock.patch("music_fetch.audio.fetch_playable_candidates")
+    def test_last_candidate_error_is_reported_when_not_a_403(self, candidates_mock, download_mock):
+        candidates_mock.return_value = [self._candidate("https://m704.music.126.net/a.mp3")]
+        download_mock.side_effect = music_fetch.MusicFetchError(
+            "DOWNLOAD_FAILED", "Media request failed: HTTP 410."
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(music_fetch.MusicFetchError) as ctx:
+                music_fetch.download_song_with_fallback(
+                    song_id="42", cookie="MUSIC_U=abc", output_path=Path(tmp) / "x.mp3", timeout=10,
+                )
+        self.assertIn("410", ctx.exception.message)
+
     @mock.patch("music_fetch.audio._download_audio_stream")
     @mock.patch("music_fetch.audio.fetch_outer_media_url")
     @mock.patch("music_fetch.audio.fetch_playable_candidates")

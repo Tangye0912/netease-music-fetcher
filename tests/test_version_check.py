@@ -13,6 +13,7 @@ from music_fetch.version_check import (
     check_for_updates_cached,
     fetch_latest_project_version,
     fetch_release_download_url,
+    is_newer_version,
     version_key,
 )
 
@@ -36,6 +37,24 @@ class VersionKeyTests(unittest.TestCase):
     def test_comparison(self):
         self.assertGreater(version_key("1.0.0"), version_key("0.9.9"))
         self.assertGreater(version_key("0.10.0"), version_key("0.9.0"))
+
+
+class IsNewerVersionTests(unittest.TestCase):
+    """Unequal-length version tuples must not produce a false update."""
+
+    def test_shorter_equivalent_is_not_newer(self):
+        self.assertFalse(is_newer_version("3.6", "3.6.0"))
+        self.assertFalse(is_newer_version("3.6.0", "3.6"))
+        self.assertFalse(is_newer_version("v3.6.0", "3.6.0"))
+
+    def test_real_upgrade_is_newer(self):
+        self.assertTrue(is_newer_version("3.6.1", "3.6.0"))
+        self.assertTrue(is_newer_version("3.7", "3.6.1"))
+        self.assertTrue(is_newer_version("v4.0.0", "3.6.1"))
+
+    def test_older_is_not_newer(self):
+        self.assertFalse(is_newer_version("3.5.9", "3.6.0"))
+        self.assertFalse(is_newer_version("", "3.6.0"))
 
 
 class FetchLatestVersionTests(unittest.TestCase):
@@ -221,6 +240,33 @@ class CheckForUpdatesCachedTests(unittest.TestCase):
             ):
                 latest, _url = check_for_updates_cached(timeout=3, cache_file=cache_file)
             self.assertEqual(latest, "v3.3.0")
+
+
+class NonUtf8ResponseTests(unittest.TestCase):
+    """A non-UTF-8 error page must not raise UnicodeDecodeError out of the TUI."""
+
+    def _response(self, body: bytes):
+        response = mock.MagicMock()
+        response.__enter__ = mock.MagicMock(return_value=response)
+        response.__exit__ = mock.MagicMock(return_value=None)
+        response.read.return_value = body
+        return response
+
+    def test_latest_version_reports_a_network_problem(self):
+        with mock.patch(
+            "music_fetch.version_check.open_url",
+            return_value=self._response(b"\xff\xfe not utf-8"),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                fetch_latest_project_version(timeout=3)
+        self.assertIn("网络", str(ctx.exception))
+
+    def test_release_download_url_returns_none(self):
+        with mock.patch(
+            "music_fetch.version_check.open_url",
+            return_value=self._response(b"\xff\xfe not utf-8"),
+        ):
+            self.assertIsNone(fetch_release_download_url(timeout=3))
 
 
 if __name__ == "__main__":

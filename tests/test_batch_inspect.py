@@ -146,8 +146,20 @@ class BatchInspectTests(unittest.TestCase):
         self.assertEqual(progress, [(1, 1, "100")])
 
 
-if __name__ == "__main__":
-    unittest.main()
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_expansion_transport_error_becomes_failed_row(self, mock_detect):
+        # The expansion phase performs network I/O (playlists/albums/short
+        # links); an unconverted transport error must fail this one input
+        # instead of escaping run_batch_detect and killing the whole TUI.
+        with mock.patch(
+            "music_fetch.batch_inspect.fetch_playlist_song_ids",
+            side_effect=ConnectionResetError("connection reset by peer"),
+        ):
+            rows = run_batch_detect("https://music.163.com/playlist?id=9", "MUSIC_U=test", timeout=5)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].status, "failed")
+        self.assertIn("reset", rows[0].message)
+        mock_detect.assert_not_called()
 
     @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.fetch_album_songs")
@@ -163,3 +175,7 @@ if __name__ == "__main__":
         self.assertEqual(len(duplicates), 1)
         self.assertTrue(all(r.source_label == "专辑-夜曲" for r in ready))
         self.assertTrue(all(r.source_type == "album" for r in ready))
+
+
+if __name__ == "__main__":
+    unittest.main()

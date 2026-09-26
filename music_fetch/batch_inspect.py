@@ -84,6 +84,20 @@ def run_batch_detect(
                     message=f"{err.code}: {user_error_message(err.code, err.message)}",
                 )
             )
+        except Exception as err:
+            # Expansion performs network I/O (playlists, albums, short links); an
+            # unexpected transport error must fail this one input instead of
+            # aborting the whole batch and taking the application down with it.
+            logger.exception("Batch expansion unexpected error. value=%s", value)
+            rows.append(
+                BatchDetectRow(
+                    raw_input=value,
+                    source_type="unknown",
+                    source_label=source_hint,
+                    status="failed",
+                    message=str(err) or err.__class__.__name__,
+                )
+            )
 
     seen_song_ids: set[str] = set()
     if not expanded:

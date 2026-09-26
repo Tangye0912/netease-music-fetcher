@@ -30,12 +30,31 @@ from music_fetch.audio import (
     infer_audio_format_from_url,
     is_ffmpeg_available,
     is_path_too_long_error,
+    sniff_audio_format,
 )
 from music_fetch.network import open_url
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import DEFAULT_TARGET_FORMAT
 
 logger = get_logger("music_fetch.pipeline")
+
+# Cover art is a small image; never buffer an unbounded amount of it.
+MAX_COVER_BYTES = 5 * 1024 * 1024
+
+
+def _source_format_to_keep(source_format: str, candidate: PlayableCandidate) -> str:
+    """Container to store the bytes under when ffmpeg cannot transcode.
+
+    Returns "" when nothing trustworthy is known about the container.
+    """
+    if source_format in SUPPORTED_AUDIO_FORMATS:
+        return source_format
+    hinted = (candidate.encode_type or "").strip().lower()
+    if hinted == "mp4":
+        return "m4a"
+    if hinted in SUPPORTED_AUDIO_FORMATS:
+        return hinted
+    return ""
 
 
 @dataclass
@@ -93,6 +112,11 @@ def run_download_pipeline(
             raise MusicFetchError(ErrorCode.PATH_TOO_LONG, f"Output path is too long: {output_path}") from err
         raise
 
+    # A file that was already there before this run must never be deleted by a
+    # cancellation: the user's own file would disappear together with the job.
+    output_preexisting = output_path.exists()
+    keep_preexisting = (output_path,) if output_preexisting else ()
+
     temp_source_path = output_path.with_name(f"{output_path.name}.source")
     if temp_source_path.exists():
         temp_source_path.unlink(missing_ok=True)
@@ -100,9 +124,14 @@ def run_download_pipeline(
     # ── Retry loop ──────────────────────────────────────────────
     selected: Optional[PlayableCandidate] = None
     for attempt in range(1, retry_count + 2):
-        emit_stage("resolving" if attempt == 1 else "retrying")
-        try:
+        if attempt == 1:
+            emit_stage("resolving")
             emit_stage("downloading")
+        else:
+            # Keep "retrying" visible for the whole attempt instead of
+            # overwriting it with "downloading" in the same tick.
+            emit_stage("retrying")
+        try:
             selected = download_song_with_fallback(
                 song_id=song_id,
                 cookie=cookie,
@@ -129,7 +158,12 @@ def run_download_pipeline(
     if selected is None:
         raise MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "Retry loop ended without a playable candidate.")
 
-    source_format = infer_audio_format_from_url(selected.media_url) or "unknown"
+    # Some CDN urls carry no usable extension; fall back to the file header.
+    source_format = (
+        infer_audio_format_from_url(selected.media_url)
+        or sniff_audio_format(temp_source_path)
+        or "unknown"
+    )
     logger.info(
         "Download source completed. song_id=%s source_format=%s target_format=%s",
         song_id, source_format, target_format,
@@ -137,29 +171,33 @@ def run_download_pipeline(
 
     # ── Cancel check after download ─────────────────────────────
     if cancel_checker and cancel_checker():
-        _cleanup_paths(temp_source_path, output_path)
+        _cleanup_paths(temp_source_path, output_path, keep=keep_preexisting)
         raise DownloadCanceled()
 
     # ── Format conversion / move ────────────────────────────────
     emit_stage("converting")
     if source_format == target_format:
+        if cancel_checker and cancel_checker():
+            _cleanup_paths(temp_source_path, keep=keep_preexisting)
+            raise DownloadCanceled()
         temp_source_path.replace(output_path)
         if cancel_checker and cancel_checker():
-            _cleanup_paths(output_path)
+            _cleanup_paths(output_path, keep=keep_preexisting)
             raise DownloadCanceled()
     else:
-        if not is_ffmpeg_available() and source_format in SUPPORTED_AUDIO_FORMATS:
-            fallback_output = output_path.with_suffix(f".{source_format}")
+        fallback_format = _source_format_to_keep(source_format, selected)
+        if not is_ffmpeg_available() and fallback_format:
+            fallback_output = output_path.with_suffix(f".{fallback_format}")
             if fallback_output.exists():
                 fallback_output = fallback_output.with_name(
                     f"{fallback_output.stem}_{int(time.time())}{fallback_output.suffix}"
                 )
             if cancel_checker and cancel_checker():
-                _cleanup_paths(temp_source_path, fallback_output)
+                _cleanup_paths(temp_source_path, fallback_output, keep=keep_preexisting)
                 raise DownloadCanceled()
             temp_source_path.replace(fallback_output)
             if cancel_checker and cancel_checker():
-                _cleanup_paths(fallback_output)
+                _cleanup_paths(fallback_output, keep=keep_preexisting)
                 raise DownloadCanceled()
             file_size = fallback_output.stat().st_size if fallback_output.exists() else 0
             logger.warning(
@@ -172,20 +210,25 @@ def run_download_pipeline(
             )
 
         if cancel_checker and cancel_checker():
-            _cleanup_paths(temp_source_path, output_path)
+            _cleanup_paths(temp_source_path, keep=keep_preexisting)
             raise DownloadCanceled()
+        # Transcode into a temporary name that still carries the target
+        # extension (ffmpeg picks its muxer from it) and publish atomically, so
+        # a failed/canceled conversion can never damage an existing file.
+        converted_path = output_path.with_name(f"{output_path.stem}.converting{output_path.suffix}")
         try:
             convert_audio_file(
-                temp_source_path, output_path, target_format,
+                temp_source_path, converted_path, target_format,
                 timeout=max(240, timeout * 8),
             )
         except Exception:
-            _cleanup_paths(temp_source_path, output_path)
+            _cleanup_paths(temp_source_path, converted_path, keep=keep_preexisting)
             raise
         temp_source_path.unlink(missing_ok=True)
         if cancel_checker and cancel_checker():
-            _cleanup_paths(output_path)
+            _cleanup_paths(converted_path, keep=keep_preexisting)
             raise DownloadCanceled()
+        converted_path.replace(output_path)
 
     emit_stage("tagging")
     if tags:
@@ -232,15 +275,19 @@ def run_download_pipeline(
 COVER_SUPPORTED_SUFFIXES = (".mp3", ".m4a", ".mp4", ".flac")
 
 
-def _detect_image_mime(data: bytes) -> str:
-    """Sniff the image container so players get a truthful MIME type."""
+def _detect_image_mime(data: bytes) -> Optional[str]:
+    """Sniff the image container so players get a truthful MIME type.
+
+    Returns None for anything unrecognised: labelling arbitrary bytes as JPEG
+    would make players show a broken image.
+    """
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
-    return "image/jpeg"
+    return None
 
 
 def _download_cover(cover_url: str, timeout: int = 10) -> tuple[bytes, str]:
@@ -248,8 +295,13 @@ def _download_cover(cover_url: str, timeout: int = 10) -> tuple[bytes, str]:
 
     req = request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"})
     with open_url(req, timeout=timeout) as resp:
-        data = resp.read()
-    return data, _detect_image_mime(data)
+        data = resp.read(MAX_COVER_BYTES + 1)
+    if len(data) > MAX_COVER_BYTES:
+        raise ValueError(f"cover art exceeds {MAX_COVER_BYTES} bytes")
+    mime = _detect_image_mime(data)
+    if not mime:
+        raise ValueError("unrecognised cover art container")
+    return data, mime
 
 
 def _embed_cover(output_path: Path, cover_data: bytes, mime: str) -> bool:
@@ -370,7 +422,15 @@ def write_audio_tags(
         logger.debug("Failed to write audio tags. output=%s", output_path, exc_info=True)
 
 
-def _cleanup_paths(*paths: Path) -> None:
+def _cleanup_paths(*paths: Path, keep: tuple[Path, ...] = ()) -> None:
+    """Delete files created by this run.
+
+    *keep* lists paths that existed before the download started: those belong to
+    the user, so a cancellation must not remove them.
+    """
     for path in paths:
+        if path in keep:
+            logger.info("Keeping a pre-existing file after cancellation. path=%s", path)
+            continue
         if path.exists():
             path.unlink(missing_ok=True)

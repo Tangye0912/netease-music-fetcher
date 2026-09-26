@@ -12,6 +12,7 @@ from uuid import uuid4
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import MAX_UI_CONCURRENCY
 from music_fetch.app_stores import DownloadHistoryStore, DownloadRecord, QueueStore
+from music_fetch.audio import is_plausible_complete_audio
 from music_fetch.download_runner import DownloadJob, DownloadProgressSnapshot
 from music_fetch.error_texts import user_error_message
 
@@ -42,11 +43,15 @@ class DownloadRequest:
     cover_url: str | None = None
     timeout: int = 10
     retry_count: int = 1
+    # "覆盖" policy (and re-downloading a stale partial): keep the canonical
+    # output path instead of allocating "_1", so the target is replaced.
+    overwrite_existing: bool = False
 
 
 _REQUEST_FIELDS = (
     "song_id", "song_name", "output_path", "target_format", "download_lyric",
     "lyric_mode", "artist", "album_name", "cover_url", "timeout", "retry_count",
+    "overwrite_existing",
 )
 
 
@@ -81,6 +86,7 @@ def _request_from_dict(data: dict[str, object]) -> DownloadRequest:
         cover_url=optional_text("cover_url"),
         timeout=int(data.get("timeout", 10) or 10),
         retry_count=int(data.get("retry_count", 1) or 1),
+        overwrite_existing=bool(data.get("overwrite_existing", False)),
     )
 
 
@@ -205,7 +211,12 @@ class DownloadQueue:
                         if item.state not in FINAL_STATES or item.job is not None}
             target = request.output_path
             index = 0
-            while str(target.with_suffix("")).casefold() in reserved or target.exists():
+            while (
+                str(target.with_suffix("")).casefold() in reserved
+                # The "覆盖" policy (and repairing a stale partial) explicitly
+                # targets the existing file, so it must not be renamed away.
+                or (target.exists() and not request.overwrite_existing)
+            ):
                 index += 1
                 target = request.output_path.with_name(
                     f"{request.output_path.stem}_{index}{request.output_path.suffix}")
@@ -417,7 +428,10 @@ class DownloadQueue:
         if self._queue_store is None:
             return None
         signature: object = tuple(sorted(
-            (item.task_id, item.state) for item in self._items if item.state not in FINAL_STATES
+            # The target path is part of the state: the ffmpeg-less fallback can
+            # publish a different suffix, which must reach the store too.
+            (item.task_id, item.state, str(item.output_path))
+            for item in self._items if item.state not in FINAL_STATES
         ))
         if signature == self._persist_sig:
             return None
@@ -452,11 +466,11 @@ class DownloadQueue:
     def restore_saved(self) -> tuple[int, int]:
         """Re-enqueue tasks persisted by a previous run.
 
-        Tasks whose target file already exists and is non-empty are treated as
-        completed and recorded to history instead of being downloaded again.
-        A zero-byte target is a leftover from an interrupted write, so it is
-        re-enqueued rather than reported as a finished download.  Returns
-        (restored, completed_on_disk).
+        A task is only treated as already completed when its target file exists,
+        is non-empty AND looks like a playable audio file.  Anything else — a
+        zero-byte stub, a container truncated by a killed worker — is re-queued
+        against the same path (replacing the leftover) instead of being recorded
+        as a success.  Returns (restored, completed_on_disk).
         """
         if self._queue_store is None:
             return (0, 0)
@@ -473,7 +487,7 @@ class DownloadQueue:
                 logger.warning("Skipping malformed persisted task. entry=%r", entry)
                 continue
             target = request.output_path
-            if target.exists() and target.stat().st_size > 0:
+            if is_plausible_complete_audio(target):
                 done = QueueItem(
                     request=request, output_path=target, state="success",
                     size_bytes=target.stat().st_size,
@@ -481,7 +495,10 @@ class DownloadQueue:
                 self._record(done)
                 completed += 1
                 continue
-            self.enqueue(request)
+            if target.exists():
+                logger.info("Re-downloading an incomplete leftover. path=%s", target)
+            # Replace the leftover in place rather than inventing a "_1" name.
+            self.enqueue(replace(request, overwrite_existing=True))
             restored += 1
         self._persist_sig = None  # force the next poll to rewrite the store
         with self._lock:

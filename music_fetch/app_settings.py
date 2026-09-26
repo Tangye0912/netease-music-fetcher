@@ -58,11 +58,30 @@ TRAILING_URL_PUNCTUATION = ")]}>,.;!?\"'，。；：、）】》"
 SHORT_LINK_HOSTS: set[str] = {"163cn.tv", "www.163cn.tv"}
 
 
+def clean_extracted_url(value: str) -> str:
+    """Trim a URL scraped out of free text.
+
+    NetEase share copy puts the link right next to CJK text
+    ("…https://163cn.tv/xxxx（@网易云音乐）"), and a URL cannot contain
+    non-ASCII: urllib encodes the request line as ASCII, so keeping the CJK
+    suffix both corrupts the URL and raises UnicodeEncodeError before any
+    request is sent.  The match is therefore cut at the first non-ASCII
+    character, then trailing punctuation is stripped.
+    """
+    cut = value
+    for index, char in enumerate(value):
+        if ord(char) > 127:
+            cut = value[:index]
+            break
+    return cut.rstrip(TRAILING_URL_PUNCTUATION).strip()
+
+
 def clamp(value: object, default: int, min_val: int, max_val: int) -> int:
     """Safely parse value as int and clamp to [min_val, max_val]."""
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # json.loads turns 1e999 into inf, and int(inf) raises OverflowError.
         return default
     return max(min_val, min(max_val, parsed))
 

@@ -132,6 +132,18 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(self.app.session.cookie, "MUSIC_U=abc")
         self.assertTrue(any("网络问题" in message for message, _error in self.app._pending_notices))
 
+    def test_unexpected_check_error_does_not_wedge_the_checking_state(self):
+        # A raw OSError (mid-read timeout) used to kill the worker before it
+        # cleared the flag, leaving the menu on "校验中…" forever.
+        self.app.session.cookie = "MUSIC_U=abc"
+        with mock.patch("music_fetch.tui.fetch_account_profile", side_effect=TimeoutError("read timed out")):
+            self.app._start_login_check()
+            self.app._login_thread.join(2)
+        self.assertFalse(self.app._login_checking)
+        self.assertEqual(self.app._login_check_result, "transient")
+        self.app._drain_login_check()
+        self.assertTrue(any("网络问题" in message for message, _error in self.app._pending_notices))
+
     def test_accept_cookie_supersedes_pending_check(self):
         self.app.session.cookie = "MUSIC_U=old"
         release = threading.Event()
@@ -177,6 +189,19 @@ class TuiAppHelperTests(unittest.TestCase):
         self.assertEqual(label, "校验中…")
         if self.app._login_thread is not None:
             self.app._login_thread.join(2)
+
+    def test_idle_shutdown_does_not_announce_cancellation(self):
+        printed: list[str] = []
+        # A saved cookie skips the login gate; the background check is kept offline.
+        self.app.session.cookie = "MUSIC_U=x"
+        with mock.patch("music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")), \
+                mock.patch("music_fetch.tui.U.menu", return_value=11), \
+                mock.patch("music_fetch.tui.U.clear_screen"), \
+                mock.patch("music_fetch.tui.U.print_header"), \
+                mock.patch("music_fetch.tui.U.print_status"), \
+                mock.patch("music_fetch.tui.U.print_info", side_effect=lambda message: printed.append(str(message))):
+            self.assertEqual(self.app.run(), 0)
+        self.assertFalse(any("正在取消下载" in message for message in printed))
 
     def test_flush_notices_prints_and_clears(self):
         self.app._enqueue_notice("普通消息")
@@ -493,6 +518,81 @@ class AlbumRoutingTests(TuiAppHelperTests):
         self.app.session.cookie = "MUSIC_U=x"
         self.app._screen_single()
         batch_mock.assert_called_once_with("https://music.163.com/album?id=1")
+
+
+class DownloadScreenProgressTests(TuiAppHelperTests):
+    """The blocking media-size probe must be covered by a spinner."""
+
+    def test_size_probe_runs_inside_a_spinner(self):
+        from music_fetch.api import SongDetectionResult
+
+        events: list[str] = []
+
+        class FakeSpinner:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def __enter__(self):
+                events.append("spinner-enter")
+                return self
+
+            def __exit__(self, *_exc) -> bool:
+                events.append("spinner-exit")
+                return False
+
+        def fake_probe(*_args, **_kwargs):
+            events.append("probe")
+            return 1024
+
+        result = SongDetectionResult(
+            song_id="1", song_name="天下", duration_ms=1000,
+            media_url="https://cdn.example.com/x.mp3", can_download=True,
+            unavailable_reason=None, artist="", album_name="", cover_url=None,
+        )
+        self.app.session.cookie = "MUSIC_U=x"
+        with mock.patch("music_fetch.tui.U.ask", return_value="1"), \
+                mock.patch("music_fetch.tui.U.spinner", FakeSpinner), \
+                mock.patch("music_fetch.tui.detect_song", return_value=result), \
+                mock.patch("music_fetch.tui.probe_media_size_bytes", side_effect=fake_probe), \
+                mock.patch("music_fetch.tui.U.print_panel"), \
+                mock.patch("music_fetch.tui.U.print_header"), \
+                mock.patch("music_fetch.tui.U.print_info"), \
+                mock.patch("music_fetch.tui.U.menu", return_value=3):  # 返回
+            self.app._screen_single()
+
+        probe_at = events.index("probe")
+        # The probe must be wrapped by its own spinner (the detection spinner
+        # has already exited by then).
+        self.assertEqual(events[probe_at - 1], "spinner-enter")
+        self.assertEqual(events[probe_at + 1], "spinner-exit")
+
+
+class GuardedWritesTests(TuiAppHelperTests):
+    """A full/read-only config dir must not crash the UI."""
+
+    def test_add_record_survives_an_oserror(self):
+        with mock.patch.object(self.app.history_store, "add", side_effect=OSError(28, "disk full")), \
+                mock.patch("music_fetch.tui.U.print_warning") as warn:
+            self.app._add_record("1", "song", "/tmp/1.mp3", 10, "success")
+        warn.assert_called_once()
+
+    def test_save_session_survives_an_oserror(self):
+        with mock.patch.object(self.session_store, "save", side_effect=OSError(28, "disk full")), \
+                mock.patch("music_fetch.tui.U.print_warning") as warn:
+            self.app._save_session()
+        warn.assert_called_once()
+
+    def test_cancel_is_not_offered_while_already_canceling(self):
+        from music_fetch.download_queue import QueueItem
+
+        item = QueueItem(
+            request=DownloadRequest("1", "song", Path("/tmp/1.mp3")),
+            output_path=Path("/tmp/1.mp3"),
+            state="canceling",
+        )
+        self.assertNotIn("取消任务", TuiApp._task_action_options(item))
+        item.state = "running"
+        self.assertIn("取消任务", TuiApp._task_action_options(item))
 
 
 class ConsistencyTests(TuiAppHelperTests):

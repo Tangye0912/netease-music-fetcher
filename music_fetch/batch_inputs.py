@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 
-from music_fetch.app_settings import TRAILING_URL_PUNCTUATION, URL_IN_TEXT_PATTERN
+from music_fetch.app_settings import URL_IN_TEXT_PATTERN, clean_extracted_url
 
 PLAYLIST_SHARE_PATTERN = re.compile(r"歌单《([^》]+)》")
 SONG_SHARE_PATTERN = re.compile(r"分享(.+?)的单曲《([^》]+)》")
@@ -109,7 +109,7 @@ def dedupe_preserve_order(items: list[str]) -> list[str]:
 def _extract_urls(text: str) -> list[str]:
     results: list[str] = []
     for matched in URL_IN_TEXT_PATTERN.findall(text):
-        cleaned = matched.rstrip(TRAILING_URL_PUNCTUATION).strip()
+        cleaned = clean_extracted_url(matched)
         if cleaned.startswith(("http://", "https://")):
             results.append(cleaned)
     return results
@@ -148,7 +148,7 @@ def _parse_share_hint(text: str) -> str:
 
 
 def _normalize_url(value: str) -> str:
-    cleaned = value.strip().rstrip(TRAILING_URL_PUNCTUATION)
+    cleaned = clean_extracted_url(value)
     if cleaned.startswith(("http://", "https://")):
         return cleaned
     return ""

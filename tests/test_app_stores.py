@@ -12,9 +12,9 @@ from music_fetch.app_settings import (
     DEFAULT_DOWNLOAD_RETRY_COUNT,
     DEFAULT_DOWNLOAD_TIMEOUT_SEC,
     MAX_DETECT_TIMEOUT_SEC,
-    MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
+    MAX_UI_CONCURRENCY,
     MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
@@ -138,7 +138,19 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(loaded.detect_timeout_sec, MIN_DETECT_TIMEOUT_SEC)
             self.assertEqual(loaded.download_timeout_sec, MAX_DOWNLOAD_TIMEOUT_SEC)
             self.assertEqual(loaded.download_retry_count, MIN_DOWNLOAD_RETRY_COUNT)
-            self.assertEqual(loaded.download_concurrency, MAX_DOWNLOAD_CONCURRENCY)
+            self.assertEqual(loaded.download_concurrency, MAX_UI_CONCURRENCY)
+
+    def test_concurrency_above_the_ui_ceiling_is_clamped_for_persistence(self):
+        # The settings screen offers 1..MAX_UI_CONCURRENCY and the queue honours
+        # it, so a saved 8 must survive a reload instead of reverting to 3.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            store = SessionStore(path)
+            store.save(AppSession(download_concurrency=MAX_UI_CONCURRENCY))
+            self.assertEqual(store.load().download_concurrency, MAX_UI_CONCURRENCY)
+
+            store.save(AppSession(download_concurrency=99))
+            self.assertEqual(store.load().download_concurrency, MAX_UI_CONCURRENCY)
 
     def test_invalid_proxy_settings_are_sanitized_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -274,6 +286,21 @@ class DownloadHistoryStoreTests(unittest.TestCase):
             self.assertEqual(store.load()[0].song_id, "new")
             self.assertEqual(store.load()[-1].song_id, "998")
 
+    def test_appends_from_a_second_instance_are_not_dropped(self):
+        # Two running instances share one history file; the second writer used
+        # to rewrite from its own stale cache and lose the other's rows.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            first = DownloadHistoryStore(path)
+            second = DownloadHistoryStore(path)
+
+            first.add(DownloadRecord("1", "a", "/tmp/a.mp3", 1, "2026-07-19 00:00:00"))
+            second.add(DownloadRecord("2", "b", "/tmp/b.mp3", 1, "2026-07-19 00:00:01"))
+            first.add(DownloadRecord("3", "c", "/tmp/c.mp3", 1, "2026-07-19 00:00:02"))
+
+            reloaded = DownloadHistoryStore(path).load()
+            self.assertEqual({row.song_id for row in reloaded}, {"1", "2", "3"})
+
 
 class QueueStoreQuarantineTests(unittest.TestCase):
     def test_corrupt_queue_file_is_moved_aside_not_discarded(self):
@@ -295,6 +322,81 @@ class QueueStoreQuarantineTests(unittest.TestCase):
 
             self.assertEqual(store.load(), [])
             self.assertTrue(path.with_name("queue.json.corrupt").exists())
+
+
+class DownloadHistoryDurabilityTests(unittest.TestCase):
+    """The history file must survive a crash mid-write (torn JSON)."""
+
+    def _store(self, tmp):
+        return DownloadHistoryStore(Path(tmp) / "downloads.json")
+
+    def _record(self, song_id: str) -> DownloadRecord:
+        return DownloadRecord(
+            song_id=song_id, song_name=f"Song {song_id}",
+            output_path=f"/tmp/{song_id}.mp3", size_bytes=10,
+            downloaded_at="2026-01-01 00:00:00",
+        )
+
+    def test_save_replaces_the_file_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            with mock.patch("music_fetch.app_stores.os.replace", wraps=os.replace) as replace:
+                store.save([self._record("1"), self._record("2")])
+            replace.assert_called_once()
+            self.assertEqual(len(store.load()), 2)
+
+    def test_torn_file_is_quarantined_and_the_history_keeps_appending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            store = DownloadHistoryStore(path)
+            for index in range(3):
+                store.add(self._record(str(index)))
+            raw = path.read_text(encoding="utf-8")
+
+            path.write_text(raw[: len(raw) // 2], encoding="utf-8")  # crash mid-write
+            reopened = DownloadHistoryStore(path)
+            self.assertEqual(reopened.load(), [])
+
+            backup = path.with_name("downloads.json.corrupt")
+            self.assertTrue(backup.exists(), "torn history must be kept for recovery")
+            self.assertEqual(backup.read_text(encoding="utf-8"), raw[: len(raw) // 2])
+
+            reopened.add(self._record("new"))
+            self.assertEqual([record.song_id for record in reopened.load()], ["new"])
+
+    def test_non_list_payload_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            path.write_text('{"unexpected": "schema"}', encoding="utf-8")
+            store = DownloadHistoryStore(path)
+            self.assertEqual(store.load(), [])
+            self.assertTrue(path.with_name("downloads.json.corrupt").exists())
+
+
+class SessionStoreRobustnessTests(unittest.TestCase):
+    def test_wrong_json_shape_falls_back_to_defaults(self):
+        for payload in ("[]", "null", "123", '"x"'):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "session.json"
+                path.write_text(payload, encoding="utf-8")
+                session = SessionStore(path).load()
+                self.assertEqual(session.cookie, "")
+                self.assertEqual(session.download_concurrency, DEFAULT_DOWNLOAD_CONCURRENCY)
+
+    def test_json_infinity_does_not_crash_the_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text('{"detect_timeout_sec": 1e999, "download_retry_count": 1e999}', encoding="utf-8")
+            session = SessionStore(path).load()
+            self.assertEqual(session.detect_timeout_sec, DEFAULT_DETECT_TIMEOUT_SEC)
+            self.assertEqual(session.download_retry_count, DEFAULT_DOWNLOAD_RETRY_COUNT)
+
+    def test_json_infinity_in_history_size_is_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "downloads.json"
+            path.write_text('[{"song_id": "1", "song_name": "x", "size_bytes": 1e999}]', encoding="utf-8")
+            records = DownloadHistoryStore(path).load()
+            self.assertEqual(records[0].size_bytes, 0)
 
 
 if __name__ == "__main__":

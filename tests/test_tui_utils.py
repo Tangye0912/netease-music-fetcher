@@ -145,6 +145,60 @@ class MultiselectKeyBindingTests(unittest.TestCase):
         )
         dialog.run.assert_called_once_with()
 
+    def test_multiselect_uses_indexes_so_duplicate_labels_stay_separate(self) -> None:
+        dialog: Application[list[str] | None] = mock.Mock(spec=Application)
+        dialog.key_bindings = KeyBindings()
+        dialog.run.return_value = ["0"]  # only the first row was checked
+        entries = [("夜曲（未知大小）", True), ("夜曲（未知大小）", True)]
+        with mock.patch("music_fetch.tui_utils.checkboxlist_dialog", return_value=dialog) as factory:
+            self.assertEqual(tui_utils.multiselect("选择", entries), [0])
+
+        values = factory.call_args.kwargs["values"]
+        self.assertEqual([value for value, _label in values], ["0", "1"])
+        self.assertEqual(factory.call_args.kwargs["default_values"], ["0", "1"])
+
+    def test_multiselect_ignores_unknown_and_duplicate_indexes(self) -> None:
+        dialog: Application[list[str] | None] = mock.Mock(spec=Application)
+        dialog.key_bindings = KeyBindings()
+        dialog.run.return_value = ["1", "1", "9", "x"]
+        with mock.patch("music_fetch.tui_utils.checkboxlist_dialog", return_value=dialog):
+            self.assertEqual(tui_utils.multiselect("选择", [("a", False), ("b", False)]), [1])
+
+
+class ParseIndexTests(unittest.TestCase):
+    def test_plain_digits_are_parsed(self) -> None:
+        self.assertEqual(tui_utils.parse_index("12"), 12)
+        self.assertEqual(tui_utils.parse_index(" 3 "), 3)
+
+    def test_non_decimal_digits_are_rejected_instead_of_raising(self) -> None:
+        # '²'.isdigit() is True but int('²') raises ValueError.
+        self.assertIsNone(tui_utils.parse_index("²"))
+        self.assertIsNone(tui_utils.parse_index("½"))
+
+    def test_huge_number_is_rejected_instead_of_raising(self) -> None:
+        self.assertIsNone(tui_utils.parse_index("9" * 5000))
+
+    def test_non_numeric_input_is_rejected(self) -> None:
+        self.assertIsNone(tui_utils.parse_index(""))
+        self.assertIsNone(tui_utils.parse_index("q"))
+        self.assertIsNone(tui_utils.parse_index("-1"))
+
+
+class TruncateWidthTests(unittest.TestCase):
+    def test_vs16_emoji_stays_within_budget(self) -> None:
+        # "❤️" is 2 codepoints but renders as one 2-column emoji.
+        self.assertEqual(tui_utils._display_width("❤️"), 2)
+        result = tui_utils._truncate_to_width("❤️" * 10, 10)
+        self.assertLessEqual(tui_utils._display_width(result), 10)
+
+    def test_zwj_sequence_is_not_split_into_extra_width(self) -> None:
+        family = "👨‍👩‍👧"
+        result = tui_utils._truncate_to_width(family * 4, 2)
+        self.assertLessEqual(tui_utils._display_width(result), 2)
+
+    def test_plain_text_is_unchanged_when_it_fits(self) -> None:
+        self.assertEqual(tui_utils._truncate_to_width("abc", 10), "abc")
+
 
 class MenuShortcutsTests(unittest.TestCase):
     def test_shortcut_key_returns_mapped_choice(self) -> None:
@@ -170,6 +224,24 @@ class MenuShortcutsTests(unittest.TestCase):
             choice = tui_utils.menu("测试", ["登录", "退出"], shortcuts={"q": 2})
         self.assertEqual(choice, 1)
 
+    def test_non_decimal_digit_input_is_retried_not_raised(self) -> None:
+        # '²'.isdigit() is True but int('²') raises; the menu must re-prompt.
+        with mock.patch.object(tui_utils, "print_info"), mock.patch.object(
+            tui_utils, "print_warning"
+        ) as warn, mock.patch.object(tui_utils, "ask", side_effect=["²", "1"]):
+            self.assertEqual(tui_utils.menu("测试", ["甲"]), 1)
+        warn.assert_called_once()
+
+    def test_out_of_range_shortcut_is_ignored(self) -> None:
+        with mock.patch.object(tui_utils, "print_info"), mock.patch.object(
+            tui_utils, "ask", side_effect=["q", "1"]
+        ):
+            self.assertEqual(tui_utils.menu("测试", ["甲"], shortcuts={"q": 9}), 1)
+
+    def test_empty_menu_fails_loudly(self) -> None:
+        with self.assertRaises(ValueError):
+            tui_utils.menu("测试", [])
+
 
 class PrintPanelTests(unittest.TestCase):
     def test_panel_renders_title_rows_and_border(self) -> None:
@@ -186,6 +258,21 @@ class PrintPanelTests(unittest.TestCase):
         plain = _plain(panel).splitlines()
         self.assertEqual(plain[-1][:1], "└")
         self.assertIn("天下", plain[1])
+
+    def test_long_value_is_truncated_inside_the_border(self) -> None:
+        # The padding used to be computed for a shortened copy while the full
+        # value was printed, so a long path overflowed the panel border.
+        long_path = "/Users/me/Music/" + "a_very_long_song_file_name/" * 4 + "song.mp3"
+        panel = tui_utils.format_panel("任务详情", [("文件", long_path)], max_width=40)
+        plain = _plain(panel).splitlines()
+        widths = [tui_utils._display_width(line) for line in plain]
+        self.assertEqual(len(set(widths)), 1, f"panel rows differ in width: {widths}")
+        self.assertIn("…", plain[1])
+        self.assertLessEqual(max(widths), 40)
+
+    def test_short_values_are_not_truncated(self) -> None:
+        panel = tui_utils.format_panel("歌曲信息", [("歌名", "天下")], max_width=40)
+        self.assertNotIn("…", _plain(panel))
 
 
 if __name__ == "__main__":

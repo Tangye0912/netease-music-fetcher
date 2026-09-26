@@ -22,6 +22,7 @@ from music_fetch.network import open_url
 
 __all__ = [
     "version_key",
+    "is_newer_version",
     "fetch_latest_project_version",
     "fetch_release_download_url",
     "check_for_updates_cached",
@@ -34,6 +35,18 @@ UPDATE_CHECK_TTL_SEC = 24 * 3600
 def version_key(version: Optional[str]) -> tuple[int, ...]:
     parts = [int(part) for part in re.findall(r"\d+", version or "")]
     return tuple(parts) if parts else (0,)
+
+
+def is_newer_version(candidate: Optional[str], current: Optional[str]) -> bool:
+    """True when *candidate* is a newer version than *current*.
+
+    Keys are zero-padded to a common width so "3.6" and "3.6.0" compare equal
+    instead of "3.6" looking older than "3.6.0".
+    """
+    left = version_key(candidate)
+    right = version_key(current)
+    width = max(len(left), len(right))
+    return left + (0,) * (width - len(left)) > right + (0,) * (width - len(right))
 
 
 def _github_headers() -> dict[str, str]:
@@ -55,7 +68,7 @@ def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
         req = request.Request(endpoint, headers=headers, method="GET")
         try:
             with open_url(req, timeout=timeout) as resp:
-                body_raw = resp.read().decode("utf-8")
+                body_bytes = resp.read()
         except error.HTTPError as err:
             remaining = ""
             try:
@@ -69,6 +82,12 @@ def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
                 saw_auth_error = True
             continue
         except (error.URLError, OSError):
+            saw_network_error = True
+            continue
+        try:
+            body_raw = body_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            # A non-UTF-8 error page is not a usable API answer.
             saw_network_error = True
             continue
         try:
@@ -109,8 +128,9 @@ def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
     req = request.Request(PROJECT_RELEASE_API, headers=headers, method="GET")
     try:
         with open_url(req, timeout=timeout) as resp:
-            body_raw = resp.read().decode("utf-8")
-    except (error.URLError, error.HTTPError, OSError):
+            body_bytes = resp.read()
+        body_raw = body_bytes.decode("utf-8")
+    except (error.URLError, error.HTTPError, OSError, UnicodeDecodeError):
         return None
     try:
         payload = json.loads(body_raw or "{}")

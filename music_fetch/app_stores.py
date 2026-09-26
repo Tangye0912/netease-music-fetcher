@@ -22,10 +22,10 @@ from music_fetch.app_settings import (
     DEFAULT_EXISTING_FILE_POLICY,
     EXISTING_FILE_POLICIES,
     MAX_DETECT_TIMEOUT_SEC,
-    MAX_DOWNLOAD_CONCURRENCY,
     MAX_DOWNLOAD_HISTORY_RECORDS,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
+    MAX_UI_CONCURRENCY,
     MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
     MIN_DOWNLOAD_RETRY_COUNT,
@@ -59,6 +59,20 @@ def _write_private_json(path: Path, payload: object) -> None:
             temp_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _quarantine_file(path: Path) -> None:
+    """Move an unreadable store aside instead of silently discarding it.
+
+    Callers treat a broken file as empty and then rewrite it, so the original
+    bytes are preserved for manual recovery.
+    """
+    backup = path.with_name(path.name + ".corrupt")
+    try:
+        path.replace(backup)
+        logger.warning("Store file unreadable; moved aside. src=%s backup=%s", path, backup)
+    except OSError as err:
+        logger.warning("Store file unreadable and could not be moved aside. path=%s reason=%s", path, err)
 
 
 @dataclass
@@ -103,6 +117,11 @@ class SessionStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             logger.warning("Failed to parse session file, fallback to empty. path=%s", self.path)
+            return AppSession()
+        if not isinstance(raw, dict):
+            # Valid JSON of the wrong shape (e.g. a hand-edited "[]") used to
+            # raise AttributeError from TuiApp.__init__, i.e. at startup.
+            logger.warning("Session file is not a JSON object, fallback to empty. path=%s", self.path)
             return AppSession()
 
         return AppSession(
@@ -172,13 +191,17 @@ class SessionStore:
 
     @staticmethod
     def _safe_download_concurrency(value: object) -> int:
-        return clamp(value, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY)
+        # The settings screen offers up to MAX_UI_CONCURRENCY and the queue
+        # honours it; clamping to the smaller legacy ceiling here made a saved
+        # value of 4-8 silently revert to 3 on the next start.
+        return clamp(value, DEFAULT_DOWNLOAD_CONCURRENCY, MIN_DOWNLOAD_CONCURRENCY, MAX_UI_CONCURRENCY)
 
     @staticmethod
     def _safe_int(value: object) -> int:
         try:
             return int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # json.loads accepts 1e999, and int(inf) raises OverflowError.
             return 0
 
     @staticmethod
@@ -209,7 +232,14 @@ class DownloadHistoryStore:
                 rows = json.loads(self.path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 logger.warning("Failed to parse download history, fallback to empty. path=%s", self.path)
+                # Keep the original bytes: the next save() rewrites the file and
+                # would otherwise destroy the whole history silently.
+                _quarantine_file(self.path)
                 # Don't cache the failure — allow next load() to retry reading.
+                return []
+            if not isinstance(rows, list):
+                logger.warning("Download history is not a list, moving it aside. path=%s", self.path)
+                _quarantine_file(self.path)
                 return []
 
             records: list[DownloadRecord] = []
@@ -236,8 +266,6 @@ class DownloadHistoryStore:
     def save(self, records: list[DownloadRecord]) -> None:
         with self._lock:
             limited_records = list(records[:MAX_DOWNLOAD_HISTORY_RECORDS])
-            self._cache = limited_records
-            self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = [
                 {
                     "song_id": r.song_id,
@@ -250,10 +278,18 @@ class DownloadHistoryStore:
                 }
                 for r in limited_records
             ]
-            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            # Atomic write (temp file + fsync + replace), like the session and
+            # queue stores: a crash mid-write used to leave a torn JSON file that
+            # the next load discarded, losing the entire history.
+            _write_private_json(self.path, payload)
+            self._cache = limited_records
 
     def add(self, record: DownloadRecord) -> None:
         with self._lock:
+            # Re-read from disk first: a second running instance may have
+            # appended since this one cached the file, and rewriting from the
+            # stale cache silently dropped its rows.
+            self._cache = None
             records = self.load()
             # v0.4.0: keep the latest task result at the top and dedupe by output path.
             filtered = [row for row in records if row.output_path != record.output_path]
@@ -279,7 +315,8 @@ class DownloadHistoryStore:
     def _safe_int(value: object) -> int:
         try:
             return int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # json.loads accepts 1e999, and int(inf) raises OverflowError.
             return 0
 
     @staticmethod
@@ -319,17 +356,8 @@ class QueueStore:
         return data
 
     def _quarantine(self) -> None:
-        """Move an unreadable queue file aside instead of silently discarding it.
-
-        Callers treat an unreadable store as empty and then rewrite it, so the
-        original bytes are preserved here for manual recovery.
-        """
-        backup = self.path.with_name(self.path.name + ".corrupt")
-        try:
-            self.path.replace(backup)
-            logger.warning("Queue file unreadable; moved aside. src=%s backup=%s", self.path, backup)
-        except OSError as err:
-            logger.warning("Queue file unreadable and could not be moved aside. path=%s reason=%s", self.path, err)
+        """Move an unreadable queue file aside instead of silently discarding it."""
+        _quarantine_file(self.path)
 
     def save(self, entries: list[dict[str, object]]) -> None:
         _write_private_json(self.path, entries)

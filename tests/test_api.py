@@ -619,3 +619,140 @@ class AlbumShareHintTests(unittest.TestCase):
         mapping = source_hint_map("分享云音乐音乐的专辑《夜曲》https://music.163.com/album?id=1")
         url = "https://music.163.com/album?id=1"
         self.assertEqual(mapping.get(url), "专辑-夜曲")
+
+
+class ShareCopyCjkTests(unittest.TestCase):
+    """NetEase share copy ends with "（@网易云音乐）"; the CJK must not enter the URL."""
+
+    def test_share_text_url_has_no_cjk_leftover(self):
+        text = "分享单曲《夜曲》https://music.163.com/song?id=185809（@网易云音乐）"
+        url = extract_url_from_input(text)
+        assert url is not None
+        self.assertTrue(url.isascii())
+        self.assertEqual(url, "https://music.163.com/song?id=185809")
+        self.assertEqual(parse_input_resource(text), ("song", "185809"))
+
+    def test_non_ascii_short_link_is_rejected_instead_of_crashing(self):
+        # urllib cannot encode a non-ASCII request line; the parser must raise a
+        # MusicFetchError (which the TUI handles), never UnicodeEncodeError.
+        with self.assertRaises(MusicFetchError) as ctx:
+            resolve_short_url("https://163cn.tv/3S7kCzr（@网易云音乐", timeout=1)
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+
+
+class PerformRequestBodyErrorTests(unittest.TestCase):
+    """A timeout/reset while READING the body is not a URLError."""
+
+    def _response_raising(self, exc):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.side_effect = exc
+        return response
+
+    def test_read_timeout_becomes_music_fetch_error(self):
+        from music_fetch.api import perform_json_get
+        response = self._response_raising(TimeoutError("timed out reading body"))
+        with mock.patch("music_fetch.api.open_url", return_value=response):
+            with self.assertRaises(MusicFetchError) as ctx:
+                perform_json_get("https://music.163.com/x", {}, timeout=1)
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    def test_connection_reset_becomes_music_fetch_error(self):
+        from music_fetch.api import perform_json_get
+        response = self._response_raising(ConnectionResetError("reset by peer"))
+        with mock.patch("music_fetch.api.open_url", return_value=response):
+            with self.assertRaises(MusicFetchError) as ctx:
+                perform_json_get("https://music.163.com/x", {}, timeout=1)
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+
+class SearchFailureTests(unittest.TestCase):
+    def test_http_401_raises_auth_expired(self):
+        from music_fetch.api import search_songs
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(401, {})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                search_songs("夜曲", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+
+    def test_server_error_raises_network_error(self):
+        from music_fetch.api import search_songs
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(500, {})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                search_songs("夜曲", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    def test_api_code_error_raises_network_error(self):
+        from music_fetch.api import search_songs
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(200, {"code": 405, "message": "busy"})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                search_songs("夜曲", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    def test_non_numeric_duration_is_zero(self):
+        from music_fetch.api import search_songs
+        body = {"code": 200, "result": {"songs": [{"id": 7, "name": "x", "duration": "unknown"}]}}
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(200, body)):
+            results = search_songs("夜曲", "MUSIC_U=test")
+        self.assertEqual(results[0].duration_ms, 0)
+
+
+class UserPlaylistFailureTests(unittest.TestCase):
+    def test_account_401_raises_auth_expired(self):
+        from music_fetch.api import fetch_user_playlists
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(401, {})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_user_playlists("MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+
+    def test_first_page_failure_is_not_reported_as_empty(self):
+        from music_fetch.api import fetch_user_playlists
+        responses = [(200, {"code": 200, "account": {"id": 1}}), (500, {})]
+        with mock.patch("music_fetch.api.perform_json_get", side_effect=responses):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_user_playlists("MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+
+class PlayableCandidateShapeTests(unittest.TestCase):
+    def _post(self, body):
+        return mock.patch("music_fetch.api.perform_json_post", return_value=(200, body))
+
+    def test_non_list_data_is_unavailable_not_a_crash(self):
+        from music_fetch.api import fetch_playable_candidates
+        with self._post({"code": 200, "data": {"url": "https://cdn/a.mp3"}}):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("42", "MUSIC_U=test", timeout=5)
+        self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
+
+    def test_null_element_is_unavailable_not_a_crash(self):
+        from music_fetch.api import fetch_playable_candidates
+        with self._post({"code": 200, "data": [None]}):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("42", "MUSIC_U=test", timeout=5)
+        self.assertEqual(ctx.exception.code, "SONG_UNAVAILABLE")
+
+    def test_server_error_wins_over_empty_data(self):
+        from music_fetch.api import fetch_playable_candidates
+        bodies = [(500, {"code": 200}), (200, {"code": 200, "data": []})]
+        with mock.patch("music_fetch.api.perform_json_post", side_effect=bodies * 4):
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("42", "MUSIC_U=test", timeout=5)
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+
+class DetectSongCandidateTests(unittest.TestCase):
+    def test_reported_quality_and_media_url_describe_the_same_candidate(self):
+        from music_fetch.api import PlayableCandidate, detect_song
+        candidates = [
+            PlayableCandidate("https://cdn/standard.mp3", 1000, "standard", "mp3"),
+            PlayableCandidate("https://cdn/hires.flac", 2000, "hires", "flac"),
+        ]
+        with mock.patch("music_fetch.api.parse_song_id", return_value="42"), mock.patch(
+            "music_fetch.api.fetch_song_metadata", return_value=("Song", 2000, None, None, None)
+        ), mock.patch("music_fetch.api.fetch_playable_candidates", return_value=candidates):
+            result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test")
+        self.assertEqual(result.level, "hires")
+        self.assertEqual(result.encode_type, "flac")
+        self.assertEqual(result.media_url, "https://cdn/hires.flac")
+        self.assertEqual(result.duration_ms, 2000)

@@ -120,6 +120,18 @@ class ProxyConfigTests(unittest.TestCase):
         self.assertFalse(normalize_proxy_config("direct").enabled)
         self.assertFalse(normalize_proxy_config("none").enabled)
 
+    def test_host_with_embedded_port_is_rejected(self):
+        # "127.0.0.1:7890" would be bracketed into an unparseable proxy URL.
+        with self.assertRaises(ProxyConfigError):
+            normalize_proxy_config("http", "127.0.0.1:7890", 7890)
+        with self.assertRaises(ProxyConfigError):
+            normalize_proxy_config("socks5", "proxy.local:1080", 1080)
+
+    def test_bare_ipv6_host_is_still_accepted(self):
+        config = normalize_proxy_config("http", "::1", 7890)
+        self.assertEqual(config.host, "::1")
+        self.assertEqual(config.proxy_url, "http://[::1]:7890")
+
     def test_http_proxy_url_encodes_credentials(self):
         config = normalize_proxy_config(
             "http",
@@ -305,6 +317,58 @@ class ProxyEndToEndTests(unittest.TestCase):
         self.assertEqual(_Socks5ProxyHandler.password, "proxy-pass")
         self.assertEqual(_Socks5ProxyHandler.destination_host, "example.test")
         self.assertEqual(_Socks5ProxyHandler.request_line, "GET /resource HTTP/1.1")
+
+
+class SocksResponseDecodingTests(unittest.TestCase):
+    """The SOCKS5 transport uses requests, which asks for gzip by default.
+
+    Reading `response.raw` without decode_content handed compressed bytes to the
+    JSON layer, so every API call failed with "invalid JSON".
+    """
+
+    def tearDown(self):
+        configure_proxy()
+
+    def test_gzip_body_is_decoded_by_the_adapter(self):
+        import gzip
+
+        from music_fetch.api import _decode_json
+        from music_fetch.network import _RequestsResponseAdapter
+
+        payload = b'{"code": 200, "songs": [{"name": "Test"}]}'
+
+        class GzipHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                    body = gzip.compress(payload)
+                    self.send_response(200)
+                    self.send_header("Content-Encoding", "gzip")
+                else:
+                    body = payload
+                    self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format, *_args):
+                return
+
+        with _running_server(GzipHandler) as server:
+            url = f"http://127.0.0.1:{server.server_address[1]}/api"
+            session = requests.Session()
+            session.trust_env = False
+            response = session.get(url, stream=True)
+            try:
+                self.assertIn("gzip", response.request.headers.get("Accept-Encoding", ""))
+                adapter = _RequestsResponseAdapter(response, session)
+                body = adapter.read()
+            finally:
+                response.close()
+                session.close()
+
+        self.assertFalse(body.startswith(b"\x1f\x8b"), "adapter leaked gzip bytes")
+        self.assertEqual(_decode_json(body)["code"], 200)
 
 
 if __name__ == "__main__":

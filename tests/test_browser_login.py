@@ -298,6 +298,57 @@ class ReadDevtoolsPortTests(unittest.TestCase):
             self.assertIsNone(browser_login._read_devtools_port(tmp))
 
 
+class NeteaseDomainTests(unittest.TestCase):
+    def test_accepts_163_domains(self) -> None:
+        for domain in ("163.com", ".163.com", "music.163.com", "API.163.com", ".music.163.com"):
+            with self.subTest(domain=domain):
+                self.assertTrue(browser_login._is_netease_domain(domain))
+
+    def test_rejects_lookalike_domains(self) -> None:
+        for domain in ("evil163.com", "not163.com", "163.com.evil.io", "163com", "example.com", ""):
+            with self.subTest(domain=domain):
+                self.assertFalse(browser_login._is_netease_domain(domain))
+
+
+class CookieSocketLoopTests(unittest.TestCase):
+    """A dead CDP socket must end the poll loop instead of spinning on recv()."""
+
+    class _Timeout(Exception):
+        pass
+
+    class _Closed(Exception):
+        pass
+
+    def _fake_websocket_module(self, recv_side_effect):
+        import types
+
+        fake_ws = mock.MagicMock()
+        fake_ws.recv.side_effect = recv_side_effect
+        module = types.SimpleNamespace(
+            create_connection=mock.MagicMock(return_value=fake_ws),
+            WebSocketTimeoutException=self._Timeout,
+        )
+        return module, fake_ws
+
+    def test_closed_socket_stops_after_one_recv(self) -> None:
+        module, fake_ws = self._fake_websocket_module(self._Closed("socket closed"))
+        with mock.patch.dict(sys.modules, {"websocket": module}), mock.patch.object(
+            browser_login, "_find_page_ws", return_value="ws://127.0.0.1:9/devtools/page/x"
+        ):
+            result = browser_login._read_music_cookies(9222, timeout=5)
+        self.assertEqual(result, "")
+        self.assertEqual(fake_ws.recv.call_count, 1)
+
+    def test_timeout_keeps_polling_until_the_deadline(self) -> None:
+        module, fake_ws = self._fake_websocket_module(self._Timeout("no frame yet"))
+        with mock.patch.dict(sys.modules, {"websocket": module}), mock.patch.object(
+            browser_login, "_find_page_ws", return_value="ws://127.0.0.1:9/devtools/page/x"
+        ):
+            result = browser_login._read_music_cookies(9222, timeout=0.2)
+        self.assertEqual(result, "")
+        self.assertGreater(fake_ws.recv.call_count, 1)
+
+
 def json_dumps(value: dict[str, object]) -> str:
     import json
 
