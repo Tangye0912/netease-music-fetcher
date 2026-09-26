@@ -2,12 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- **CI 门禁**：新增 `.github/workflows/ci.yml`，push 到 `main` 与 PR 时运行 `pytest --cov`（75% 门槛）、非仓库根目录回归、`mypy --strict` 与 `ruff check .`；此前这套门禁只在打 tag 时执行。
+- **许可证**：新增 MIT `LICENSE`。
+
 ### Changed
 
 - **文档与仓库一致性**：README（后台下载持久化、任务页 `P`/`R`/`n`/`p`/`g` 按键、项目结构表、依赖列表）、CHANGELOG（v3.6.0 日期与 QA 数字、v3.5.0 分组）、CONTRIBUTING（检查命令对齐 CI）、ROADMAP（测试文件名）对齐 v3.6.0 代码现状。
+- **仓库卫生**：新增 `.gitattributes` 固定行尾——`*.bat` 保持 CRLF，`*.command`/`music-fetch`/`*.sh` 保持 LF，避免跨平台 checkout 破坏 shell 脚本。
 
 ### Fixed
 
+- **测试不再依赖工作目录**：`tests/test_entrypoints.py` 与 `tests/test_packaging.py` 改为按 `__file__` 定位仓库文件，从任意目录运行都通过（此前从非仓库根目录运行有 7 例失败）。
 - **依赖声明补全**：`wcwidth` 由 `tui_utils` 直接导入，现显式列入 `pyproject.toml`；此前只靠 `prompt-toolkit` 传递安装，源码安装与冻结包都不保证它存在。
 - **打包防回归**：`music-fetch.spec` 增加断言，禁止重新引用已删除模块（`batch_download`/`cli`/`weapi`/`qrcode`）并确保收集 `wcwidth`。
 

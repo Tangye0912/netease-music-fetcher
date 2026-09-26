@@ -207,6 +207,7 @@ git push origin v3.0.0
 | `music-fetch` | macOS/Linux 包装脚本（进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
 | `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`、`wcwidth`）。 |
+| `.github/workflows/ci.yml` / `build.yml` | CI：push/PR 跑测试与静态检查；打 `v*` tag 触发三平台打包发布。 |
 | `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
 
@@ -225,7 +226,9 @@ python3 -m ruff check music_fetch/ tests/
 - 日志不会打印完整 `MUSIC_U` 值与代理密码（已脱敏）
 - 主菜单“诊断中心”可查看运行环境、API/CDN 连通性、最近告警并导出脱敏报告
 
-## 9. 合规说明
+## 9. 合规说明与许可证
 
 仅用于你已获得合法授权的音频素材。
 本工具不提供 DRM/版权绕过能力。
+
+本项目以 [MIT 许可证](LICENSE) 发布。

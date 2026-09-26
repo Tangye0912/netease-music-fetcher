@@ -1,0 +1,19 @@
+# Keep checkout line endings deterministic across platforms, independent of the
+# contributor's core.autocrlf setting.
+* text=auto
+
+# Batch files must stay CRLF or cmd.exe misparses labels and blocks.
+*.bat text eol=crlf
+
+# Shell entry points must stay LF: a CRLF shebang breaks bash on macOS/Linux
+# ("/usr/bin/env: 'bash\r': No such file or directory").
+*.sh text eol=lf
+*.command text eol=lf
+music-fetch text eol=lf
+
+# Binary-ish assets that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.exe binary
