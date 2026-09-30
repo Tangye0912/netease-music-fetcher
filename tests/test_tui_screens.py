@@ -866,6 +866,37 @@ class BatchFlowInteractionTests(TuiScreenTestCase):
         self.assertEqual(labels, ["1. A（未知大小）", "3. C（未知大小）"])
 
 
+class PagerHelperTests(unittest.TestCase):
+    """The paging primitives shared by the picker and the batch table."""
+
+    def test_page_count_always_reports_at_least_one_page(self):
+        self.assertEqual(TuiApp._page_count(0, 15), 1)
+        self.assertEqual(TuiApp._page_count(1, 15), 1)
+        self.assertEqual(TuiApp._page_count(15, 15), 1)
+        self.assertEqual(TuiApp._page_count(16, 15), 2)
+        self.assertEqual(TuiApp._page_count(30, 15), 2)
+        self.assertEqual(TuiApp._page_count(31, 15), 3)
+
+    def test_page_turn_moves_within_range(self):
+        self.assertEqual(TuiApp._page_turn("n", 0, 3), 1)
+        self.assertEqual(TuiApp._page_turn(" N ", 1, 3), 2)
+        self.assertEqual(TuiApp._page_turn("p", 2, 3), 1)
+
+    def test_page_turn_warns_at_the_boundaries(self):
+        with offline_ui() as ui:
+            self.assertIsNone(TuiApp._page_turn("n", 2, 3))
+            self.assertIsNone(TuiApp._page_turn("p", 0, 3))
+        warnings = [str(call.args[0]) for call in ui["print_warning"].call_args_list]
+        self.assertIn("已经是最后一页。", warnings)
+        self.assertIn("已经是第一页。", warnings)
+
+    def test_page_turn_ignores_other_input(self):
+        with offline_ui() as ui:
+            self.assertIsNone(TuiApp._page_turn("2", 0, 3))
+            self.assertIsNone(TuiApp._page_turn("", 0, 3))
+        ui["print_warning"].assert_not_called()
+
+
 class SessionNormalizationTests(unittest.TestCase):
     def test_a_blank_download_dir_falls_back_to_the_default(self):
         with tempfile.TemporaryDirectory() as tmp:

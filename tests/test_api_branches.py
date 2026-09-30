@@ -14,6 +14,8 @@ from music_fetch.api import (
     fetch_song_metadata,
     fetch_songs_metadata,
     parse_input_resource,
+    search_playlists,
+    search_songs,
 )
 from urllib import parse
 
@@ -197,6 +199,24 @@ class BatchedMetadataTests(unittest.TestCase):
         self.assertEqual(result.song_name, "Prefetched")
         self.assertEqual(result.artist, "Artist")
         self.assertEqual(result.duration_ms, 2000)
+
+
+class SearchPayloadTests(unittest.TestCase):
+    """Song and playlist search share a helper, so pin what distinguishes them."""
+
+    def test_song_search_requests_type_1_and_reads_songs(self):
+        body = {"code": 200, "result": {"songs": [{"id": 7, "name": "Song"}], "playlists": [{"id": 9}]}}
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(200, body)) as post_mock:
+            results = search_songs("kw", "MUSIC_U=test")
+        self.assertEqual(post_mock.call_args.args[1]["type"], "1")
+        self.assertEqual([song.song_id for song in results], ["7"])
+
+    def test_playlist_search_requests_type_1000_and_reads_playlists(self):
+        body = {"code": 200, "result": {"songs": [{"id": 7}], "playlists": [{"id": 9, "name": "List"}]}}
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(200, body)) as post_mock:
+            results = search_playlists("kw", "MUSIC_U=test")
+        self.assertEqual(post_mock.call_args.args[1]["type"], "1000")
+        self.assertEqual([playlist.playlist_id for playlist in results], ["9"])
 
 
 class InvalidSongIdTests(unittest.TestCase):

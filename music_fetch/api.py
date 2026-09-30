@@ -780,30 +780,48 @@ def _safe_duration_ms(value: object) -> int:
         return 0
 
 
+def _search_result_rows(
+    keyword: str,
+    search_type: str,
+    container: str,
+    cookie: str,
+    timeout: int,
+    limit: int,
+    request_label: str,
+) -> list[Any]:
+    """Run a keyword search and return its raw result rows.
+
+    Song and playlist searches share this endpoint and differ only by ``type`` and
+    by the key their rows live under.  Request failures raise MusicFetchError so
+    callers can tell "no results" apart from a network problem.
+    """
+    if not keyword.strip():
+        return []
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    payload = {"s": keyword, "type": search_type, "limit": str(limit), "offset": "0"}
+    status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
+    if status in (401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
+    if status != 200 or body.get("code") != 200:
+        # "no results" and "the request failed" must stay distinguishable for the
+        # caller (an empty row list is a legitimate empty result).
+        raise MusicFetchError(
+            ErrorCode.NETWORK_ERROR,
+            str(body.get("message") or f"{request_label} request failed: status={status}, code={body.get('code')}"),
+        )
+    raw_result = body.get("result")
+    rows = raw_result.get(container) if isinstance(raw_result, dict) else None
+    return rows if isinstance(rows, list) else []
+
+
 def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) -> list[SearchResult]:
     """Search songs by keyword on NetEase Cloud Music.
 
     Request failures raise MusicFetchError so callers can tell "no results"
     apart from a network problem; an empty result set returns [].
     """
-    if not keyword.strip():
-        return []
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    payload = {"s": keyword, "type": "1", "limit": str(limit), "offset": "0"}
-    status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
-    if status in (401, 403):
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
-    if status != 200 or body.get("code") != 200:
-        # "no results" and "the request failed" must stay distinguishable for the
-        # caller (the empty-result case below returns [] legitimately).
-        raise MusicFetchError(
-            ErrorCode.NETWORK_ERROR,
-            str(body.get("message") or f"Search request failed: status={status}, code={body.get('code')}"),
-        )
-    raw_result = body.get("result")
-    raw_songs = raw_result.get("songs") or [] if isinstance(raw_result, dict) else []
     results: list[SearchResult] = []
-    for song in raw_songs:
+    for song in _search_result_rows(keyword, SONG_SEARCH_TYPE, "songs", cookie, timeout, limit, "Search"):
         if not isinstance(song, dict):
             continue
         song_id = str(song.get("id") or "")
@@ -851,6 +869,7 @@ def _safe_int(value: object) -> int:
 
 USER_PLAYLIST_API = "https://music.163.com/api/user/playlist"
 # The search endpoint multiplexes on `type`: 1 = songs, 1000 = playlists.
+SONG_SEARCH_TYPE = "1"
 PLAYLIST_SEARCH_TYPE = "1000"
 
 
@@ -936,22 +955,11 @@ def search_playlists(keyword: str, cookie: str, timeout: int = 10, limit: int = 
     (1000 = playlists).  Request failures raise MusicFetchError so callers can
     tell "no results" apart from a network problem; no matches returns [].
     """
-    if not keyword.strip():
-        return []
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    payload = {"s": keyword, "type": PLAYLIST_SEARCH_TYPE, "limit": str(limit), "offset": "0"}
-    status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
-    if status in (401, 403):
-        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
-    if status != 200 or body.get("code") != 200:
-        raise MusicFetchError(
-            ErrorCode.NETWORK_ERROR,
-            str(body.get("message") or f"Playlist search failed: status={status}, code={body.get('code')}"),
-        )
-    raw_result = body.get("result")
-    raw_playlists = raw_result.get("playlists") or [] if isinstance(raw_result, dict) else []
     results: list[UserPlaylist] = []
-    for playlist in raw_playlists:
+    rows = _search_result_rows(
+        keyword, PLAYLIST_SEARCH_TYPE, "playlists", cookie, timeout, limit, "Playlist search"
+    )
+    for playlist in rows:
         if not isinstance(playlist, dict):
             continue
         playlist_id = str(playlist.get("id") or "")

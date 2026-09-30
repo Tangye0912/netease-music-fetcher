@@ -629,6 +629,31 @@ class TuiApp:
             on_pick=on_pick,
         )
 
+    @staticmethod
+    def _page_count(total: int, page_size: int) -> int:
+        """Number of pages for *total* rows (always at least one)."""
+        return max(1, (total + page_size - 1) // page_size)
+
+    @staticmethod
+    def _page_turn(raw: str, page: int, total_pages: int) -> Optional[int]:
+        """Return the page that n/p switches to, or None for any other input.
+
+        Shared by the picker and the batch table so both warn about the same
+        boundaries instead of each keeping its own copy of the two messages.
+        """
+        key = raw.strip().lower()
+        if key == "n":
+            if page + 1 < total_pages:
+                return page + 1
+            U.print_warning("已经是最后一页。")
+            return None
+        if key == "p":
+            if page > 0:
+                return page - 1
+            U.print_warning("已经是第一页。")
+            return None
+        return None
+
     def _paginated_pick(
         self,
         items: Sequence[_T],
@@ -646,7 +671,7 @@ class TuiApp:
         or False to leave the screen.  Search and playlist screens share this so
         their prompts and paging behaviour cannot drift apart.
         """
-        total_pages = max(1, (len(items) + page_size - 1) // page_size)
+        total_pages = self._page_count(len(items), page_size)
         page = 0
         while True:
             start = page * page_size
@@ -658,18 +683,12 @@ class TuiApp:
                 raw = U.ask(prompt).strip()
                 if not raw or raw == "0":
                     return
-                if raw.lower() == "n":
-                    if page + 1 < total_pages:
-                        page += 1
-                        break
-                    U.print_warning("已经是最后一页。")
-                    continue
-                if raw.lower() == "p":
-                    if page > 0:
-                        page -= 1
-                        break
-                    U.print_warning("已经是第一页。")
-                    continue
+                turned = self._page_turn(raw, page, total_pages)
+                if turned is not None:
+                    page = turned
+                    break
+                if raw.strip().lower() in ("n", "p"):
+                    continue  # a boundary press: _page_turn already warned
                 number = U.parse_index(raw)
                 if number is not None:
                     index = number - 1
@@ -954,7 +973,7 @@ class TuiApp:
         separate list over the ready subset and numbers itself with the table
         row, so the two cannot be confused.
         """
-        total_pages = max(1, (len(rows) + page_size - 1) // page_size)
+        total_pages = self._page_count(len(rows), page_size)
         page = 0
         while True:
             start = page * page_size
@@ -973,18 +992,12 @@ class TuiApp:
                 return
             U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(rows)} 条")
             raw = U.ask("n 下一页；p 上一页；回车继续").strip().lower()
-            if raw == "n":
-                if page + 1 < total_pages:
-                    page += 1
-                else:
-                    U.print_warning("已经是最后一页。")
+            turned = self._page_turn(raw, page, total_pages)
+            if turned is not None:
+                page = turned
                 continue
-            if raw == "p":
-                if page > 0:
-                    page -= 1
-                else:
-                    U.print_warning("已经是第一页。")
-                continue
+            if raw in ("n", "p"):
+                continue  # a boundary press: _page_turn already warned
             return
 
     @staticmethod

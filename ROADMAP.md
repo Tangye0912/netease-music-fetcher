@@ -38,10 +38,7 @@
 
 ### Quality and Architecture
 
-- [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
 - [ ] **单曲识别里最大的开销是音质档案循环**：`fetch_playable_candidates` 会为 7 个 `PLAYABLE_REQUEST_PROFILES` 各发一次请求且不提前退出（实测 300 首 → 2100 次请求），占每首歌 9 次请求中的 7 次。可考虑两条路：拿到 `hires` 候选即跳出（对能播放最高音质的账号安全等价），或把 7 次请求并发发出（请求总数不变、单曲延迟约降 4 倍）。**两条都需要真机确认音质选择语义与此前一致**（网易云在无权限时会返回降级音质），故未动。
-- [ ] 合并重复的搜索实现：`search_songs` 与 `search_playlists` 仅 `type` 与行解析不同，约 25 行需要同步维护。
-- [ ] 合并两处分页逻辑：`_paginated_pick`（0 返回、非法输入重问）与 `_show_batch_rows`（除 n/p 外一律继续）语义不同，各自需要单独维护。
 - [ ] 维持 95%+ 覆盖率（当前 95.2%，CI 门槛已提到 94%）；剩余缺口集中在 `audio.py` 的转码/ffmpeg 错误路径（89%）、`tui.py` 的 `main()` 启动装配（95%）与 `browser_login.py` 的 CDP 异常分支（79%）——都需要真实终端/浏览器或外部工具的错误注入。
 - [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
 

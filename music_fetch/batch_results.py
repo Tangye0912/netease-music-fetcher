@@ -6,8 +6,9 @@ import csv
 from collections import Counter
 from dataclasses import dataclass
 from io import StringIO
-from typing import Iterable, Protocol
+from typing import Iterable
 
+from music_fetch.batch_models import BatchDetectRow
 from music_fetch.csv_utils import safe_csv_text
 import music_fetch.ui_texts as T
 
@@ -29,16 +30,6 @@ UNKNOWN_FAILURE_REASON = "未知原因"
 
 
 __all__ = ['BATCH_CSV_FIELDS', 'UNKNOWN_FAILURE_REASON', 'build_batch_results_csv', 'retryable_failed_rows', 'summarize_batch_rows']
-class BatchResultRow(Protocol):
-    raw_input: str
-    source_type: str
-    source_label: str
-    song_id: str
-    song_name: str
-    status: str
-    message: str
-    media_size_bytes: int
-    selected: bool
 
 
 @dataclass(frozen=True)
@@ -58,11 +49,11 @@ class BatchSummary:
         return self.failed + self.unavailable
 
 
-def retryable_failed_rows(rows: Iterable[BatchResultRow]) -> list[BatchResultRow]:
+def retryable_failed_rows(rows: Iterable[BatchDetectRow]) -> list[BatchDetectRow]:
     return [row for row in rows if _normalized_status(row) == "download_failed"]
 
 
-def summarize_batch_rows(rows: Iterable[BatchResultRow]) -> BatchSummary:
+def summarize_batch_rows(rows: Iterable[BatchDetectRow]) -> BatchSummary:
     materialized = list(rows)
     counts = Counter(_normalized_status(row) for row in materialized)
     failure_reasons: Counter[str] = Counter()
@@ -84,7 +75,7 @@ def summarize_batch_rows(rows: Iterable[BatchResultRow]) -> BatchSummary:
     )
 
 
-def build_batch_results_csv(rows: Iterable[BatchResultRow]) -> str:
+def build_batch_results_csv(rows: Iterable[BatchDetectRow]) -> str:
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=BATCH_CSV_FIELDS, lineterminator="\n")
     writer.writeheader()
@@ -106,5 +97,5 @@ def build_batch_results_csv(rows: Iterable[BatchResultRow]) -> str:
     return output.getvalue()
 
 
-def _normalized_status(row: BatchResultRow) -> str:
+def _normalized_status(row: BatchDetectRow) -> str:
     return (row.status or "").strip().lower()
