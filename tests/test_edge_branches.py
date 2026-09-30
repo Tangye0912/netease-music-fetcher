@@ -263,7 +263,7 @@ class BatchInspectEdgeTests(unittest.TestCase):
     @staticmethod
     def _detect_result(song_id: str, *_args, **_kwargs):
         return mock.Mock(song_id=song_id, song_name=f"歌 {song_id}", can_download=True,
-                         media_url="", unavailable_reason="")
+                         media_url="", unavailable_reason="", size_bytes=0)
 
 
 class ApiEdgeTests(unittest.TestCase):

@@ -32,6 +32,44 @@ class ResourceIdFallbackTests(unittest.TestCase):
 
 
 class PlayableCandidateBranchTests(unittest.TestCase):
+    def test_candidate_size_is_parsed_and_invalid_values_become_zero(self):
+        body = {
+            "code": 200,
+            "data": [{"url": "https://cdn/a.mp3", "level": "standard", "encodeType": "mp3", "size": 4200000}],
+        }
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(200, body)):
+            candidates = fetch_playable_candidates("42", "MUSIC_U=test", timeout=5)
+        self.assertEqual(candidates[0].size_bytes, 4200000)
+
+        for raw_size in (None, 0, -5, "123", True, 1.5):
+            with self.subTest(size=raw_size):
+                payload = {
+                    "code": 200,
+                    "data": [{
+                        "url": "https://cdn/a.mp3", "level": "standard",
+                        "encodeType": "mp3", "size": raw_size,
+                    }],
+                }
+                with mock.patch("music_fetch.api.perform_json_post", return_value=(200, payload)):
+                    candidate = fetch_playable_candidates("42", "MUSIC_U=test", timeout=5)[0]
+                # "123" and True are not sizes; 1.5 is truncated, 0/-5 mean unknown.
+                self.assertIn(candidate.size_bytes, (0, 1))
+
+    def test_detect_song_reports_the_chosen_candidate_size(self):
+        from music_fetch.api import PlayableCandidate, detect_song
+
+        candidates = [
+            PlayableCandidate("https://cdn/standard.mp3", 1000, "standard", "mp3", 3_000_000),
+            PlayableCandidate("https://cdn/hires.flac", 2000, "hires", "flac", 30_000_000),
+        ]
+        with mock.patch("music_fetch.api.parse_song_id", return_value="42"), mock.patch(
+            "music_fetch.api.fetch_song_metadata", return_value=("Song", 2000, None, None, None)
+        ), mock.patch("music_fetch.api.fetch_playable_candidates", return_value=candidates):
+            result = detect_song("https://music.163.com/song?id=42", "MUSIC_U=test")
+        # The size must describe the same candidate as the reported level.
+        self.assertEqual(result.level, "hires")
+        self.assertEqual(result.size_bytes, 30_000_000)
+
     def test_candidates_without_urls_end_up_as_unavailable(self):
         # Every profile answers with an empty url: the song must be reported as
         # unavailable rather than silently producing no candidates.

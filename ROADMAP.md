@@ -24,7 +24,7 @@
 
 - [ ] 分组视图的批次信息跨重启保留（当前 `_batches` 仅存在于本次运行）。
 - [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。冻结包启动与主菜单渲染已在 v3.6.1 的 Windows 构建上本地验证（无缺失导入、版本号正确），其余交互项仍待人工验证。
-- [ ] 「我喜欢的音乐」直达需真机确认：代码假设网易云把该歌单挂在账号自己的 ID 下（`playlist?id=<uid>`），离线无法验证；若接口不是这样，改一行 URL 即可。同时确认超过 1000 首时不会被 `trackIds` 分页静默截断（`fetch_playlist_song_ids` 在"下一页返回同一批 ID"时会停止）。
+- [ ] 「我喜欢的音乐」直达需真机确认：代码假设网易云把该歌单挂在账号自己的 ID 下（`playlist?id=<uid>`），离线无法验证；若接口不是这样，改一行 URL 即可。同一轮真机确认还应覆盖：超过 1000 首时不会被 `trackIds` 分页静默截断（`fetch_playlist_song_ids` 在"下一页返回同一批 ID"时会停止）；以及鉴权下播放地址接口确实返回非 0 的 `size`（它决定批量识别能否省掉每首歌那次 CDN HEAD 探测——匿名请求实测为 0，拿不到时已回退探测，不会变慢）。
 
 ### v4.0 — Fullscreen Experiment（待定）
 
@@ -39,6 +39,7 @@
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
+- [ ] 检测前批量预取歌曲元数据：`/api/song/detail` 支持一次传多个 id（实测 30 个 id 一次请求 0.16s，逐首则 83ms/次，约 6 倍），千首歌单还能再少一个数量级的请求。
 - [ ] 合并重复的搜索实现：`search_songs` 与 `search_playlists` 仅 `type` 与行解析不同，约 25 行需要同步维护。
 - [ ] 合并两处分页逻辑：`_paginated_pick`（0 返回、非法输入重问）与 `_show_batch_rows`（除 n/p 外一律继续）语义不同，各自需要单独维护。
 - [ ] 维持 95%+ 覆盖率（当前 95.2%，CI 门槛已提到 94%）；剩余缺口集中在 `audio.py` 的转码/ffmpeg 错误路径（89%）、`tui.py` 的 `main()` 启动装配（95%）与 `browser_login.py` 的 CDP 异常分支（79%）——都需要真实终端/浏览器或外部工具的错误注入。

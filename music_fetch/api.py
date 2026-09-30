@@ -109,6 +109,7 @@ class SongDetectionResult:
     album_name: Optional[str] = None
     level: str = ""  # highest available quality level (standard/higher/exhigh/lossless/hires)
     encode_type: str = ""  # e.g. mp3 / aac of that level
+    size_bytes: int = 0  # size of that candidate's file, 0 when the API omits it
 
 
 @dataclass
@@ -126,6 +127,9 @@ class PlayableCandidate:
     duration_ms: Optional[int]
     level: str
     encode_type: str
+    # File size reported by the playable-url API (0 when absent).  Callers prefer
+    # it over an extra HEAD request to the CDN.
+    size_bytes: int = 0
 
 
 ProgressCallback = Callable[[int, Optional[int]], None]
@@ -444,7 +448,13 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
         seen_urls.add(media_url)
         media_host = parse.urlparse(media_url).netloc
         logger.info("Playable url resolved. song_id=%s level=%s encode=%s media_host=%s duration_ms=%s", song_id, level, encode_type, media_host, media.get("time"))
-        candidates.append(PlayableCandidate(media_url=media_url, duration_ms=media.get("time"), level=level, encode_type=encode_type))
+        raw_size = media.get("size")
+        size_bytes = (
+            int(raw_size)
+            if isinstance(raw_size, (int, float)) and not isinstance(raw_size, bool) and raw_size > 0
+            else 0
+        )
+        candidates.append(PlayableCandidate(media_url=media_url, duration_ms=media.get("time"), level=level, encode_type=encode_type, size_bytes=size_bytes))
 
     if candidates:
         return candidates
@@ -662,7 +672,7 @@ def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionR
     # same candidate, so the best one is used consistently.
     best = _pick_best_candidate(candidates)
     duration = meta_duration if meta_duration is not None else best.duration_ms
-    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=best.media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name, level=best.level, encode_type=best.encode_type)
+    return SongDetectionResult(song_id=song_id, song_name=song_name, duration_ms=duration, media_url=best.media_url, can_download=True, unavailable_reason=None, cover_url=cover_url, artist=artist, album_name=album_name, level=best.level, encode_type=best.encode_type, size_bytes=best.size_bytes)
 
 
 # ── Media URL utils ──────────────────────────────────────────────

@@ -142,7 +142,12 @@ def run_batch_detect(
             result = detect_song(song_id, cookie, timeout=timeout)
             size_bytes = 0
             if result.can_download and result.media_url and not cancel.is_set():
-                size_bytes = probe_media_size_bytes(result.media_url, timeout=min(10, timeout))
+                # The playable-url response already reports the file size for most
+                # songs, so only fall back to a CDN HEAD request when it is missing
+                # (one extra request per song dominated detection on long lists).
+                size_bytes = result.size_bytes or probe_media_size_bytes(
+                    result.media_url, timeout=min(10, timeout)
+                )
             final_source_label = source_label
             if source_type == "song" and not final_source_label:
                 if result.song_name:

@@ -42,6 +42,7 @@
 
 ### Changed
 
+- **批量识别每首歌少发一次请求**：播放地址接口的响应带文件体积字段（`size`，已实测该字段存在；匿名请求下为 `0`），但 `PlayableCandidate` 此前没有解析它，于是每首歌都要额外向 CDN 发一次 HEAD 去探测大小——实测这次 HEAD 要 **128–254ms**，而取元数据只要 **83ms**，它反而是单曲检测里最贵的一步。现在优先使用接口返回的体积（与所选音质一一对应），接口没给（缺失/0/非数值）时照旧回退到 HEAD 探测，所以拿不到该字段时行为与性能都不回退。鉴权正常时千首歌单的请求数由约 3000 降到约 2000，识别阶段约快三分之一。
 - **CI 依赖升级到 Node 24 版本**：`actions/checkout` v4→v7、`actions/setup-python` v5→v7、`actions/upload-artifact` v4→v7、`softprops/action-gh-release` v2→v3。GitHub 已把这些 action 强制跑在 Node 24 上，弃用告警随时可能变成硬失败；升级前逐条核对了跨大版本的破坏性变更（checkout 的凭证持久化与 fork PR 限制、setup-python 移除的 `pip-install` 输入、upload-artifact 新增且默认不变的 `archive` 参数），对本项目用法均无影响。三平台构建、产物上传与 release 上传均已实测通过。
 - **TUI 分页逻辑收敛**：搜索页与歌单页各自复制的一份"翻页 + 序号校验 + 边界提示"合并为 `_paginated_pick`（顺带删除定义了却从未使用的 `_pick_from_rows`），两页的提示文案与边界行为不再各写一遍。
 

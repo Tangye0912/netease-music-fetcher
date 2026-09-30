@@ -29,8 +29,34 @@ class BatchInspectTests(unittest.TestCase):
         self.assertEqual(len(ready), 1)
         self.assertEqual(ready[0].song_id, "100")
 
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.detect_song")
-    def test_detect_failure_creates_failed_row(self, mock_detect):
+    def test_reported_size_skips_the_cdn_probe(self, mock_detect, mock_probe):
+        """The playable-url response carries the size, so no HEAD request is needed."""
+        result = self._detect_result("500")
+        result.size_bytes = 5_000_000
+        mock_detect.return_value = result
+
+        rows = run_batch_detect("https://music.163.com/song?id=500", "MUSIC_U=test", timeout=5)
+
+        mock_probe.assert_not_called()
+        self.assertEqual(rows[0].media_size_bytes, 5_000_000)
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=1234)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_missing_size_falls_back_to_the_probe(self, mock_detect, mock_probe):
+        result = self._detect_result("600")
+        result.size_bytes = 0
+        mock_detect.return_value = result
+
+        rows = run_batch_detect("https://music.163.com/song?id=600", "MUSIC_U=test", timeout=5)
+
+        mock_probe.assert_called_once()
+        self.assertEqual(rows[0].media_size_bytes, 1234)
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_detect_failure_creates_failed_row(self, mock_detect, _mock_probe):
         mock_detect.side_effect = MusicFetchError("SONG_UNAVAILABLE", "not available")
         rows = run_batch_detect("https://music.163.com/song?id=200", "MUSIC_U=test", timeout=5)
         failed = [r for r in rows if r.status == "failed"]
