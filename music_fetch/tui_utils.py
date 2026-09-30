@@ -248,7 +248,10 @@ def ask(message: str, default: str = "") -> str:
 def ask_required(message: str, default: str = "") -> str:
     while True:
         value = ask(message, default=default)
-        if value:
+        # Whitespace-only input is not an answer either: "required" must not be
+        # satisfied by a stray space (callers treat the value as a real host,
+        # path or keyword).
+        if value.strip():
             return value
         print_warning("输入不能为空。")
 

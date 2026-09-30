@@ -54,6 +54,7 @@ select = ["E", "F", "W"]
 ignore = ["E501"]
 
 [tool.coverage.report]
-# Floor set at the measured 75% baseline (2026-09); raise as coverage grows.
-fail_under = 75
+# Floor tracks the measured coverage (2026-09-30: 93.6% locally, 93.7% on CI);
+# raise it again as coverage grows, so a regression fails the build.
+fail_under = 90
 show_missing = true

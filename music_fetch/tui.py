@@ -129,6 +129,11 @@ class TuiApp:
         U.set_theme(self.session.ui_theme)
         self._nickname = ""
         self._apply_proxy()
+        # Deferred UI notices: worker threads append, the menu loop prints.
+        # Initialised before the queue is restored, because restoring unfinished
+        # tasks queues a notice of its own.
+        self._notice_lock = threading.Lock()
+        self._pending_notices: list[tuple[str, bool]] = []
         self.queue = DownloadQueue(self.history_store, self.session.cookie,
                                    self.session.download_concurrency,
                                    persist_path=queue_path if queue_path is not None else QUEUE_FILE)
@@ -139,9 +144,6 @@ class TuiApp:
                 message += f"，{completed} 个文件已存在、直接记为完成"
             self._enqueue_notice(message + "。")
         self._batches: list[tuple[list[BatchDetectRow], dict[int, str]]] = []
-        # Deferred UI notices: worker threads append, the menu loop prints.
-        self._notice_lock = threading.Lock()
-        self._pending_notices: list[tuple[str, bool]] = []
         # Background startup validation of the saved cookie (generation guard
         # so a manual login/logout supersedes an in-flight check).
         self._login_checking = False

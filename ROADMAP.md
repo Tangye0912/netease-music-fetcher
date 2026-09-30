@@ -38,7 +38,7 @@
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
-- [ ] 逐步把覆盖率从 75% 门槛提升到 95%，优先覆盖 TUI 路由和错误恢复分支。
+- [ ] 继续把覆盖率从当前的 93.6% 推向 95%：剩余缺口集中在 `main()` 启动装配、`browser_login` 的 CDP 异常分支与 `audio` 的转码/ffmpeg 错误路径（CI 门槛已随本轮提升到 90%）。
 - [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
 
 ### Distribution
