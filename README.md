@@ -13,6 +13,13 @@
 
    > v3.7.0 起三个平台的产物文件名互不相同。此前 macOS 与 Linux 都叫 `music-fetch`，
    > 上传到 Release 时会互相覆盖，导致 macOS 用户实际下载到的是 Linux 版本。
+
+   > **macOS 首次运行会被 Gatekeeper 拦截**：当前构建尚未做 Apple 签名与公证，双击会提示
+   > "无法打开，因为无法验证开发者"。任选一种方式放行：
+   > - 在 Finder 里 **右键（或 Control+点击）→ 打开 → 再点一次「打开」**；或
+   > - 在终端执行 `xattr -dr com.apple.quarantine music-fetch-macos` 后再运行。
+   >
+   > 之后每次启动都不会再拦。若你的环境不允许放行未签名程序，请改用「方式二」用 Python 运行。
 2. 双击运行，首次启动进入登录引导：选择「登录」后自动打开浏览器扫码页 → 用**网易云 App** 扫码 → 登录完成即可下载。
 
 ### 方式二：Python 安装（开发者 / 有 Python 环境的用户）
