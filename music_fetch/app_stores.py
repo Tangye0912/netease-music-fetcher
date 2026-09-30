@@ -9,7 +9,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from music_fetch.app_logging import get_logger
 from music_fetch.app_settings import (
@@ -25,6 +25,7 @@ from music_fetch.app_settings import (
     MAX_DOWNLOAD_HISTORY_RECORDS,
     MAX_DOWNLOAD_RETRY_COUNT,
     MAX_DOWNLOAD_TIMEOUT_SEC,
+    MAX_SAVED_BATCHES,
     MAX_UI_CONCURRENCY,
     MIN_DETECT_TIMEOUT_SEC,
     MIN_DOWNLOAD_CONCURRENCY,
@@ -361,3 +362,79 @@ class QueueStore:
 
     def save(self, entries: list[dict[str, object]]) -> None:
         _write_private_json(self.path, entries)
+
+
+@dataclass
+class SavedBatch:
+    """A detection batch kept on disk so its result stays exportable later.
+
+    Rows stay plain dicts here: the store owns persistence, while the TUI owns the
+    ``BatchDetectRow`` type it rebuilds them into.
+    """
+
+    created_at: str
+    rows: list[dict[str, object]]
+    task_ids: dict[str, str]
+
+
+class BatchStore:
+    """The most recent detection batches (newest last)."""
+
+    def __init__(self, path: Path, max_batches: int = MAX_SAVED_BATCHES) -> None:
+        self.path = path
+        self.max_batches = max(1, int(max_batches))
+        self._lock = threading.RLock()
+
+    def load(self) -> list[SavedBatch]:
+        """Read the saved batches, dropping anything that is not a usable entry."""
+        with self._lock:
+            if not self.path.exists():
+                return []
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                logger.warning("Failed to parse saved batches, moving them aside. path=%s", self.path)
+                _quarantine_file(self.path)
+                return []
+            if not isinstance(data, list):
+                logger.warning("Saved batches are not a list, moving them aside. path=%s", self.path)
+                _quarantine_file(self.path)
+                return []
+            batches: list[SavedBatch] = []
+            for entry in data:
+                batch = self._parse_entry(entry)
+                if batch is not None:
+                    batches.append(batch)
+            return batches[-self.max_batches:]
+
+    @staticmethod
+    def _parse_entry(entry: object) -> Optional[SavedBatch]:
+        if not isinstance(entry, dict):
+            return None
+        rows = entry.get("rows")
+        task_ids = entry.get("task_ids")
+        if not isinstance(rows, list) or not isinstance(task_ids, dict):
+            return None
+        clean_rows = [row for row in rows if isinstance(row, dict)]
+        if not clean_rows:
+            return None
+        clean_ids = {
+            str(index): str(task_id)
+            for index, task_id in task_ids.items()
+            if task_id not in (None, "")
+        }
+        return SavedBatch(
+            created_at=str(entry.get("created_at") or ""),
+            rows=clean_rows,
+            task_ids=clean_ids,
+        )
+
+    def save(self, batches: Sequence[SavedBatch]) -> None:
+        """Persist the newest *max_batches* batches (caller handles OSError)."""
+        with self._lock:
+            kept = list(batches)[-self.max_batches:]
+            payload = [
+                {"created_at": batch.created_at, "rows": batch.rows, "task_ids": batch.task_ids}
+                for batch in kept
+            ]
+            _write_private_json(self.path, payload)

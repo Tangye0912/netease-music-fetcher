@@ -9,7 +9,7 @@ from prompt_toolkit.output import DummyOutput
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.batch_models import BatchDetectRow
 from music_fetch.download_queue import DownloadProgressSnapshot, DownloadRequest
-from music_fetch.tui import MENU_QUIT, MENU_SEARCH, MENU_TASKS, TuiApp
+from music_fetch.tui import MENU_QUIT, MENU_SEARCH, MENU_TASKS, TuiApp, _DetectedBatch
 import music_fetch.tui_utils as U
 
 
@@ -62,8 +62,8 @@ def test_batch_submits_selected_rows_and_retains_export_context(app, tmp_path):
         app._batch_flow("album link")
     (item,) = app.queue.snapshot()
     assert item.request.song_id == "2" and item.request.lyric_mode == "translation"
-    assert len(app._batches[0][0]) == 3
-    assert app._batches[0][1] == {1: item.task_id}
+    assert len(app._batches[0].rows) == 3
+    assert app._batches[0].task_ids == {1: item.task_id}
     app.queue.cancel(item.task_id)
     with mock.patch("music_fetch.tui.U.menu", return_value=1), mock.patch.object(app, "_offer_batch_export") as export:
         app._export_queue_batch()
@@ -74,10 +74,10 @@ def test_batch_submits_selected_rows_and_retains_export_context(app, tmp_path):
 
 def test_task_retry_updates_batch_export_to_latest_attempt(app, tmp_path):
     item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "song.mp3", lyric_mode="bilingual"))
-    app._batches = [([BatchDetectRow("1", song_id="1")], {0: item.task_id})]
+    app._batches = [_DetectedBatch([BatchDetectRow("1", song_id="1")], {0: item.task_id})]
     app.queue.cancel(item.task_id)
     app._retry_task(item.task_id)
-    assert app._batches[0][1][0] == app.queue.snapshot()[1].task_id
+    assert app._batches[0].task_ids[0] == app.queue.snapshot()[1].task_id
     assert app.queue.snapshot()[1].request.lyric_mode == "bilingual"
 
 
@@ -219,7 +219,7 @@ def test_status_provider_refreshes_during_real_input_and_preserves_typed_text():
 
 
 def test_batch_summary_keeps_failures_and_reason_counts(app, tmp_path):
-    app._batches = [([
+    app._batches = [_DetectedBatch([
         BatchDetectRow("1", song_id="1", status="download_failed", message="网络中断"),
         BatchDetectRow("2", song_id="2", status="download_failed", message="网络中断"),
         BatchDetectRow("3", song_id="3", status="download_success"),
@@ -307,7 +307,7 @@ def test_task_page_batch_column_and_grouped_view(app, tmp_path):
         item = app.queue.enqueue(DownloadRequest(row.song_id, row.song_name, tmp_path / f"{row.song_id}.mp3"))
         task_ids[index] = item.task_id
     app.queue.enqueue(DownloadRequest("9", "单曲歌", tmp_path / "9.mp3"))
-    app._batches.append((batch_rows, task_ids))
+    app._batches.append(_DetectedBatch(batch_rows, task_ids))
     app.queue._items[0].state = "success"  # batch song 1 is already done
 
     flat = app._render_task_screen(0, grouped=False)
@@ -472,7 +472,7 @@ def test_task_detail_cancel_records_history(app, tmp_path):
 
 def test_task_detail_retry_remaps_the_batch_mapping(app, tmp_path):
     item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
-    app._batches = [([BatchDetectRow("1", song_id="1")], {0: item.task_id})]
+    app._batches = [_DetectedBatch([BatchDetectRow("1", song_id="1")], {0: item.task_id})]
     app.queue.cancel(item.task_id)
 
     with mock.patch("music_fetch.tui.U.print_panel"), mock.patch(
@@ -482,7 +482,7 @@ def test_task_detail_retry_remaps_the_batch_mapping(app, tmp_path):
 
     items = app.queue.snapshot()
     assert len(items) == 2  # the canceled row plus the requeued one
-    assert app._batches[0][1][0] == items[-1].task_id
+    assert app._batches[0].task_ids[0] == items[-1].task_id
 
 
 def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
@@ -496,7 +496,7 @@ def test_grouped_view_operates_on_the_task_it_numbers(app, tmp_path):
     # Batch B1 holds only the second enqueued task, so the grouped order is
     # [second, first, third] while the flat order stays [first, second, third].
     rows = [BatchDetectRow(raw_input="y", song_id="2", song_name="乙", status="ready", selected=True)]
-    app._batches.append((rows, {0: second.task_id}))
+    app._batches.append(_DetectedBatch(rows, {0: second.task_id}))
 
     items = app.queue.snapshot()
     assert [item.task_id for item in app._grouped_order(items)] == [

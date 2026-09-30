@@ -32,6 +32,7 @@ from music_fetch.tui import (
     MENU_SINGLE,
     MENU_UPDATE,
     TuiApp,
+    _DetectedBatch,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -456,7 +457,7 @@ class TaskActionHelperTests(TuiScreenTestCase):
 
     def test_export_queue_batch_can_be_cancelled(self):
         item = self.app.queue.enqueue(DownloadRequest("1", "song", Path(self._tmp.name) / "1.mp3"))
-        self.app._batches = [([BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: item.task_id})]
+        self.app._batches = [_DetectedBatch([BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: item.task_id})]
         with mock.patch.object(self.app, "_offer_batch_export") as export_mock, offline_ui(menu=2):
             self.app._export_queue_batch()
         export_mock.assert_not_called()
@@ -465,7 +466,7 @@ class TaskActionHelperTests(TuiScreenTestCase):
         item = self.app.queue.enqueue(DownloadRequest("1", "song", Path(self._tmp.name) / "1.mp3"))
         self.app.queue._items[0].state = "success"
         self.app.queue._items[0].size_bytes = 4096
-        self.app._batches = [([BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: item.task_id})]
+        self.app._batches = [_DetectedBatch([BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: item.task_id})]
         with mock.patch.object(self.app, "_offer_batch_export") as export_mock, offline_ui(menu=1):
             self.app._export_queue_batch()
         rows = export_mock.call_args.args[0]
@@ -864,6 +865,129 @@ class BatchFlowInteractionTests(TuiScreenTestCase):
         # Only ready rows are listed, but they keep the table numbering so a user
         # counting rows on screen cannot queue the wrong song.
         self.assertEqual(labels, ["1. A（未知大小）", "3. C（未知大小）"])
+
+
+class BatchPersistenceTests(TuiScreenTestCase):
+    """Batches survive a restart so their results stay exportable."""
+
+    def _batch_store(self, base: Path):
+        from music_fetch.app_stores import BatchStore
+
+        return BatchStore(base / "batches.json")
+
+    def test_store_round_trip_and_malformed_entries(self):
+        base = Path(self._tmp.name)
+        store = self._batch_store(base)
+        from music_fetch.app_stores import SavedBatch
+
+        store.save([
+            SavedBatch("2026-09-30 08:00:00", [{"song_id": "1", "status": "ready"}], {"0": "t1"}),
+            SavedBatch("", [], {"0": "t2"}),          # no rows → dropped
+            SavedBatch("", [{"song_id": "3"}], {}),   # rebuilt but has rows
+        ])
+        loaded = store.load()
+        self.assertEqual([batch.task_ids for batch in loaded], [{"0": "t1"}, {}])
+
+    def test_store_keeps_only_the_newest_batches(self):
+        base = Path(self._tmp.name)
+        from music_fetch.app_stores import BatchStore, SavedBatch
+        import json as json_module
+
+        store = BatchStore(base / "batches.json", max_batches=2)
+        store.save([SavedBatch(f"t{index}", [{"song_id": str(index), "status": "ready"}], {}) for index in range(5)])
+        loaded = store.load()
+        self.assertEqual([batch.created_at for batch in loaded], ["t3", "t4"])
+        # The file itself must be trimmed too, otherwise it grows without bound.
+        persisted = json_module.loads(store.path.read_text(encoding="utf-8"))
+        self.assertEqual([entry["created_at"] for entry in persisted], ["t3", "t4"])
+
+    def test_entries_with_the_wrong_shape_are_dropped(self):
+        base = Path(self._tmp.name)
+        import json as json_module
+
+        store = self._batch_store(base)
+        store.path.write_text(json_module.dumps([
+            "not a dict",
+            {"rows": "not a list", "task_ids": {}},
+            {"rows": [{"song_id": "1", "status": "ready"}]},          # no task_ids
+            {"task_ids": {}, "rows": [{"song_id": "2", "status": "ready"}]},
+        ]), encoding="utf-8")
+        loaded = store.load()
+        self.assertEqual([batch.rows[0]["song_id"] for batch in loaded], ["2"])
+
+    def test_unreadable_store_file_is_quarantined(self):
+        base = Path(self._tmp.name)
+        store = self._batch_store(base)
+        store.path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(store.load(), [])
+        self.assertTrue(store.path.with_name(store.path.name + ".corrupt").exists())
+
+    def test_restored_batch_reports_a_notice(self):
+        base = Path(self._tmp.name)
+        self.app._batches = [_DetectedBatch(
+            [BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: "task-1"},
+            created_at="2026-09-30 08:00:00",
+        )]
+        self.app._save_batches()
+
+        restarted = TuiApp(
+            session_store=self.session_store,
+            history_store=self.history_store,
+            queue_path=base / "queue.json",
+        )
+        self.assertEqual(len(restarted._batches), 1)
+        restored = restarted._batches[0]
+        self.assertEqual([row.song_id for row in restored.rows], ["1"])
+        self.assertEqual(restored.task_ids, {0: "task-1"})
+        self.assertEqual(restored.created_at, "2026-09-30 08:00:00")
+        notices = [message for message, _error in restarted._pending_notices]
+        self.assertTrue(any("历史批次" in message for message in notices))
+
+    def test_restored_batch_exports_the_history_status(self):
+        from music_fetch.app_stores import DownloadRecord
+
+        base = Path(self._tmp.name)
+        self.app._batches = [_DetectedBatch(
+            [BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: "task-1"},
+            created_at="2026-09-30 08:00:00",
+        )]
+        self.app._save_batches()
+        self.history_store.add(DownloadRecord("1", "A", str(base / "1.mp3"), 4096, "2026-09-30 08:01:00", status="success"))
+
+        restarted = TuiApp(
+            session_store=self.session_store,
+            history_store=self.history_store,
+            queue_path=base / "queue.json",
+        )
+        with mock.patch.object(restarted, "_offer_batch_export") as export_mock, offline_ui(menu=1):
+            restarted._export_queue_batch()
+
+        rows = export_mock.call_args.args[0]
+        self.assertEqual(rows[0].status, "download_success")
+        self.assertEqual(rows[0].media_size_bytes, 4096)
+        self.assertFalse(rows[0].selected)
+
+    def test_batch_without_a_live_task_or_history_keeps_its_recorded_status(self):
+        self.app._batches = [_DetectedBatch(
+            [BatchDetectRow("1", song_id="1", song_name="A", status="ready")], {0: "gone-task"},
+        )]
+
+        with mock.patch.object(self.app, "_offer_batch_export") as export_mock, offline_ui(menu=1):
+            self.app._export_queue_batch()  # must not raise on the missing task
+
+        rows = export_mock.call_args.args[0]
+        self.assertEqual(rows[0].status, "ready")
+        self.assertEqual(rows[0].message, "")
+
+    def test_submitting_a_batch_persists_it(self):
+        rows = [BatchDetectRow("1", song_id="1", song_name="A", status="ready")]
+        with mock.patch("music_fetch.tui.run_batch_detect", return_value=rows), mock.patch.object(
+            self.app, "_save_batches"
+        ) as save_mock, mock.patch.object(self.app, "_offer_batch_export"), offline_ui(menu=1, multiselect=[0]):
+            self.app._batch_flow("x")
+        save_mock.assert_called_once()
+        self.assertEqual(len(self.app._batches), 1)
+        self.assertTrue(self.app._batches[0].created_at)
 
 
 class PagerHelperTests(unittest.TestCase):

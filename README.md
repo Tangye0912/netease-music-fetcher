@@ -117,7 +117,7 @@ music-fetch    # 交互界面（TUI），唯一入口
 - 我喜欢的音乐（下一版）：主菜单直达，取到账号 ID 后进入该歌单的批量流程，整单挑选下载
 - 歌单搜索（下一版）：按关键词搜索歌单，分页选择后整单进入批量下载
 - 专辑：输入专辑链接或分享文案，自动展开曲目进入批量下载
-- 批量：多行粘贴 → 并发识别（歌单/专辑自动展开、去重；识别中可按 Ctrl+C 中断并保留已识别结果）→ 结果分页显示（`n`/`p` 翻页）→ 键盘多选 → 后台并发下载 → 任务页查看结果、重试和导出批次 CSV
+- 批量：多行粘贴 → 并发识别（歌单/专辑自动展开、去重；识别中可按 Ctrl+C 中断并保留已识别结果）→ 结果分页显示（`n`/`p` 翻页）→ 键盘多选 → 后台并发下载 → 任务页查看结果、重试和导出批次 CSV（批次会保留，重启后仍可导出）
 - 歌词：原文、翻译或按时间轴合并的双语 `.lrc`，并嵌入支持的音频标签
 - 封面与标签：歌名/艺人/专辑按容器写入 ID3（MP3）、MP4 原子（M4A）或 Vorbis 注释（FLAC）；封面分别嵌入 `APIC`/`covr`/`PICTURE`，MIME 按图片实际格式嗅探
 - 下载历史：分页浏览、状态筛选、关键词搜索、失败重试、打开目录、删除、筛选结果 CSV 导出（防公式注入）
@@ -228,7 +228,7 @@ git push origin v3.0.0
 | `music_fetch/batch_inputs.py` | 批量输入解析：多行链接、分享文案、去重。 |
 | `music_fetch/batch_models.py` | 批量数据模型与格式化工具。 |
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败筛选、状态汇总、失败原因聚合、安全 CSV 生成。 |
-| `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史、任务队列（`queue.json`）。 |
+| `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史、任务队列（`queue.json`）与最近的识别批次（`batches.json`）。 |
 | `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、分页、安全 CSV 导出。 |
 | `music_fetch/csv_utils.py` | CSV 单元格防护（防公式注入），被批量结果与下载历史导出共用。 |
 | `music_fetch/download_tasks.py` / `download_retry.py` | 任务状态模型与失败重试判断。 |

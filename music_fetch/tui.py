@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, TypeVar
@@ -38,9 +38,11 @@ from music_fetch.app_logging import default_log_path, setup_logging
 from music_fetch.app_settings import (
     APP_NAME,
     APP_VERSION,
+    BATCH_FILE,
     CONFIG_DIR,
     DOWNLOAD_HISTORY_FILE,
     EXISTING_FILE_POLICIES,
+    MAX_SAVED_BATCHES,
     MAX_UI_CONCURRENCY,
     MIN_DOWNLOAD_CONCURRENCY,
     PROJECT_GITHUB_URL,
@@ -48,7 +50,14 @@ from music_fetch.app_settings import (
     SESSION_FILE,
     SHUTDOWN_WAIT_SEC,
 )
-from music_fetch.app_stores import AppSession, DownloadHistoryStore, DownloadRecord, SessionStore
+from music_fetch.app_stores import (
+    AppSession,
+    BatchStore,
+    DownloadHistoryStore,
+    DownloadRecord,
+    SavedBatch,
+    SessionStore,
+)
 from music_fetch.audio import (
     is_ffmpeg_available,
     resolve_output_path,
@@ -80,6 +89,36 @@ import music_fetch.tui_utils as U
 import music_fetch.ui_texts as T
 
 logger = logging.getLogger("music_fetch.tui")
+
+
+@dataclass
+class _DetectedBatch:
+    """One detection run, kept so its results stay exportable (also across restarts)."""
+
+    rows: list[BatchDetectRow]
+    task_ids: dict[int, str]
+    created_at: str = ""
+
+
+def _batch_row_from_dict(payload: dict[str, object]) -> Optional[BatchDetectRow]:
+    """Rebuild a saved detection row; None when it carries no usable status."""
+    status = str(payload.get("status") or "")
+    if not status:
+        return None
+    raw_size = payload.get("media_size_bytes")
+    size = int(raw_size) if isinstance(raw_size, (int, float)) and not isinstance(raw_size, bool) else 0
+    return BatchDetectRow(
+        raw_input=str(payload.get("raw_input") or ""),
+        source_type=str(payload.get("source_type") or "unknown"),
+        source_label=str(payload.get("source_label") or ""),
+        song_id=str(payload.get("song_id") or ""),
+        song_name=str(payload.get("song_name") or ""),
+        status=status,
+        message=str(payload.get("message") or ""),
+        media_size_bytes=size,
+        selected=bool(payload.get("selected")),
+    )
+
 
 MENU_SINGLE = "单曲下载"
 MENU_SEARCH = "搜索下载"
@@ -123,9 +162,18 @@ class TuiApp:
         session_store: Optional[SessionStore] = None,
         history_store: Optional[DownloadHistoryStore] = None,
         queue_path: Optional[Path] = None,
+        batch_store: Optional[BatchStore] = None,
     ) -> None:
         self.session_store = session_store or SessionStore(SESSION_FILE)
         self.history_store = history_store or DownloadHistoryStore(DOWNLOAD_HISTORY_FILE)
+        # Batches live next to the queue: callers that redirect the queue (tests,
+        # embedded use) must not end up reading or writing the real config dir.
+        if batch_store is not None:
+            self.batch_store = batch_store
+        elif queue_path is not None:
+            self.batch_store = BatchStore(queue_path.with_name("batches.json"))
+        else:
+            self.batch_store = BatchStore(BATCH_FILE)
         self.session: AppSession = self.session_store.load()
         U.set_theme(self.session.ui_theme)
         self._nickname = ""
@@ -144,7 +192,7 @@ class TuiApp:
             if completed:
                 message += f"，{completed} 个文件已存在、直接记为完成"
             self._enqueue_notice(message + "。")
-        self._batches: list[tuple[list[BatchDetectRow], dict[int, str]]] = []
+        self._batches: list[_DetectedBatch] = self._restore_batches()
         # Background startup validation of the saved cookie (generation guard
         # so a manual login/logout supersedes an in-flight check).
         self._login_checking = False
@@ -953,7 +1001,12 @@ class TuiApp:
             except (MusicFetchError, OSError, ValueError) as err:
                 row.status = "download_failed"
                 row.message = str(err)
-        self._batches.append((rows, task_ids))
+        self._batches.append(_DetectedBatch(
+            rows=rows,
+            task_ids=task_ids,
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
+        self._save_batches()
         self.session.last_download_dir = str(out_dir)
         self._save_session()
         if skipped:
@@ -1042,11 +1095,48 @@ class TuiApp:
             parts.append("历史保存失败")
         return "任务 | " + " · ".join(parts)
 
+    def _restore_batches(self) -> list[_DetectedBatch]:
+        """Reload previously detected batches so their results stay exportable."""
+        try:
+            saved = self.batch_store.load()
+        except OSError:
+            logger.warning("Could not read saved batches.", exc_info=True)
+            return []
+        batches: list[_DetectedBatch] = []
+        for entry in saved:
+            rows = [row for row in (_batch_row_from_dict(payload) for payload in entry.rows) if row is not None]
+            if not rows:
+                continue
+            task_ids = {
+                int(index): task_id
+                for index, task_id in entry.task_ids.items()
+                if index.lstrip("-").isdigit()
+            }
+            batches.append(_DetectedBatch(rows=rows, task_ids=task_ids, created_at=entry.created_at))
+        if batches:
+            self._enqueue_notice(f"已恢复 {len(batches)} 个历史批次，可在下载任务页导出结果。")
+        return batches
+
+    def _save_batches(self) -> None:
+        """Persist the recent batches; a read-only config dir must not crash the UI."""
+        saved = [
+            SavedBatch(
+                created_at=batch.created_at,
+                rows=[asdict(row) for row in batch.rows],
+                task_ids={str(index): task_id for index, task_id in batch.task_ids.items()},
+            )
+            for batch in self._batches[-MAX_SAVED_BATCHES:]
+        ]
+        try:
+            self.batch_store.save(saved)
+        except OSError as err:
+            logger.warning("Could not save batches: %s", err)
+
     def _batch_label_map(self) -> dict[str, str]:
         """task_id → 批次 label (B1/B2/…)；不在任何批次里的任务是单曲。"""
         labels: dict[str, str] = {}
-        for batch_no, (_rows, mapping) in enumerate(self._batches, start=1):
-            for task_id in mapping.values():
+        for batch_no, batch in enumerate(self._batches, start=1):
+            for task_id in batch.task_ids.values():
                 labels.setdefault(task_id, f"B{batch_no}")
         return labels
 
@@ -1090,8 +1180,8 @@ class TuiApp:
         by_id = {item.task_id: item for item in items}
         ordered: list[QueueItem] = []
         grouped_ids: set[str] = set()
-        for _rows, mapping in self._batches:
-            members = [by_id[task_id] for task_id in mapping.values() if task_id in by_id]
+        for batch in self._batches:
+            members = [by_id[task_id] for task_id in batch.task_ids.values() if task_id in by_id]
             ordered.extend(members)
             grouped_ids.update(member.task_id for member in members)
         ordered.extend(item for item in items if item.task_id not in grouped_ids)
@@ -1103,8 +1193,8 @@ class TuiApp:
         sections: list[str] = []
         grouped_ids: set[str] = set()
         index = 1
-        for batch_no, (_rows, mapping) in enumerate(self._batches, start=1):
-            members = [by_id[task_id] for task_id in mapping.values() if task_id in by_id]
+        for batch_no, batch in enumerate(self._batches, start=1):
+            members = [by_id[task_id] for task_id in batch.task_ids.values() if task_id in by_id]
             if not members:
                 continue
             grouped_ids.update(member.task_id for member in members)
@@ -1254,43 +1344,79 @@ class TuiApp:
         except (OSError, ValueError) as err:
             U.print_error(f"无法提交重试：{err}")
             return
-        for _rows, mapping in self._batches:
-            for index, old_id in mapping.items():
+        for batch in self._batches:
+            for index, old_id in batch.task_ids.items():
                 if old_id == task_id:
-                    mapping[index] = item.task_id
+                    batch.task_ids[index] = item.task_id
+        self._save_batches()
 
     def _export_queue_batch(self) -> None:
         if not self._batches:
-            U.print_info("本次运行没有批次。单曲结果可从下载历史导出。")
+            U.print_info("没有可导出的批次。单曲结果可从下载历史导出。")
             return
-        choices = [f"批次 {index}（{len(rows)} 条）" for index, (rows, _) in enumerate(self._batches, 1)]
+        choices = [
+            f"批次 {index}（{len(batch.rows)} 条{self._batch_time_suffix(batch)}）"
+            for index, batch in enumerate(self._batches, 1)
+        ]
         choices.append("返回")
         selected = U.menu("选择批次", choices)
         if selected == len(choices):
             return
-        rows, mapping = self._batches[selected - 1]
+        batch = self._batches[selected - 1]
         by_id = {item.task_id: item for item in self.queue.snapshot()}
-        export_rows = [replace(row) for row in rows]
+        history_by_song: dict[str, list[DownloadRecord]] = {}
+        for record in self.history_store.load():
+            history_by_song.setdefault(record.song_id, []).append(record)
+        export_rows = [replace(row) for row in batch.rows]
         states = {"pending": "download_pending", "running": "downloading", "paused": "download_paused",
                   "waiting_login": "waiting_login", "canceling": "canceling", "success": "download_success",
                   "failed": "download_failed", "canceled": "download_canceled"}
-        for index, task_id in mapping.items():
-            item = by_id[task_id]
+        unfinished = 0
+        for index, task_id in batch.task_ids.items():
+            if not 0 <= index < len(export_rows):
+                continue
             row = export_rows[index]
-            row.status = states[item.state]
-            row.message = item.message or str(item.output_path)
-            row.selected = item.state not in FINAL_STATES
-            if item.state == "success":
-                row.media_size_bytes = item.size_bytes
+            item = by_id.get(task_id)
+            if item is not None:
+                row.status = states.get(item.state, row.status)
+                row.message = item.message or str(item.output_path)
+                row.selected = item.state not in FINAL_STATES
+                if item.state == "success":
+                    row.media_size_bytes = item.size_bytes
+                if item.state not in FINAL_STATES:
+                    unfinished += 1
+                continue
+            # The task is gone (this batch was restored after a restart, or the
+            # queue was cleared): the download history holds its outcome, and the
+            # status recorded at detection time stays as a last resort.
+            history_record = self._find_history_record(history_by_song.get(row.song_id, []), row)
+            if history_record is None:
+                continue
+            row.status = states.get(history_record.status, row.status)
+            row.message = history_record.error_code or str(history_record.output_path)
+            row.selected = False
+            if history_record.status == TASK_STATE_SUCCESS:
+                row.media_size_bytes = history_record.size_bytes
         summary = summarize_batch_rows(export_rows)
-        unfinished = sum(by_id[task_id].state not in FINAL_STATES for task_id in mapping.values())
-        panel_rows = [("已提交", str(len(mapping))), ("未完成", str(unfinished)),
+        panel_rows = [("已提交", str(len(batch.task_ids))), ("未完成", str(unfinished)),
                       ("成功", str(summary.download_success)), ("失败", str(summary.download_failed)),
                       ("取消", str(summary.download_canceled))]
         for reason, count in sorted(summary.failure_reasons.items(), key=lambda pair: pair[1], reverse=True)[:3]:
             panel_rows.append(("失败原因", f"{count} 首：{reason}"))
         U.print_panel(f"批次 {selected} 结果", panel_rows)
         self._offer_batch_export(export_rows)
+
+    @staticmethod
+    def _batch_time_suffix(batch: _DetectedBatch) -> str:
+        return f"，{batch.created_at}" if batch.created_at else ""
+
+    @staticmethod
+    def _find_history_record(records: Sequence[DownloadRecord], row: BatchDetectRow) -> Optional[DownloadRecord]:
+        """Newest history entry for *row*, preferring one whose name matches."""
+        for record in reversed(list(records)):
+            if not row.song_name or not record.song_name or record.song_name == row.song_name:
+                return record
+        return records[-1] if records else None
 
     # ── download options ──────────────────────────────────────────
 

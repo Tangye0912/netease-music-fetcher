@@ -16,6 +16,7 @@ CONFIG_DIR = Path.home() / ".config" / APP_NAME
 SESSION_FILE = CONFIG_DIR / "session.json"
 DOWNLOAD_HISTORY_FILE = CONFIG_DIR / "downloads.json"
 QUEUE_FILE = CONFIG_DIR / "queue.json"
+BATCH_FILE = CONFIG_DIR / "batches.json"
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads")
 
 DEFAULT_TARGET_FORMAT = "mp3"
@@ -49,6 +50,10 @@ SHUTDOWN_WAIT_SEC = 10
 # stay inside the 40-row terminal preset (start_mac.command / start_windows.bat).
 DOWNLOAD_HISTORY_PAGE_SIZE = 15
 MAX_DOWNLOAD_HISTORY_RECORDS = 1000
+# Detection batches are kept so their results can still be exported after a
+# restart; only the most recent ones are worth keeping (each holds up to a few
+# thousand rows).
+MAX_SAVED_BATCHES = 5
 
 UNKNOWN_SONG_NAME = "未知歌曲"
 
