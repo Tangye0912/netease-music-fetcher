@@ -253,6 +253,12 @@ python3 -m mypy music_fetch/ --strict
 python3 -m ruff check music_fetch/ tests/
 ```
 
+需要真实账号才能确认的假设（「我喜欢的音乐」入口、喜欢列表分页、播放地址接口的 `size`、音质档案回包）已写成可选检查；不设置该环境变量时它们自动跳过，普通测试也不会联网：
+
+```bash
+MUSIC_FETCH_LIVE_COOKIE="MUSIC_U=…" python3 -m pytest tests/test_live_api.py -v
+```
+
 ## 8. 日志与排障
 
 - 默认日志：`~/.config/music-fetch/logs/music-fetch.log`
