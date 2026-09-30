@@ -42,6 +42,7 @@
 
 ### Changed
 
+- **CI 依赖升级到 Node 24 版本**：`actions/checkout` v4→v7、`actions/setup-python` v5→v7、`actions/upload-artifact` v4→v7、`softprops/action-gh-release` v2→v3。GitHub 已把这些 action 强制跑在 Node 24 上，弃用告警随时可能变成硬失败；升级前逐条核对了跨大版本的破坏性变更（checkout 的凭证持久化与 fork PR 限制、setup-python 移除的 `pip-install` 输入、upload-artifact 新增且默认不变的 `archive` 参数），对本项目用法均无影响。三平台构建、产物上传与 release 上传均已实测通过。
 - **TUI 分页逻辑收敛**：搜索页与歌单页各自复制的一份"翻页 + 序号校验 + 边界提示"合并为 `_paginated_pick`（顺带删除定义了却从未使用的 `_pick_from_rows`），两页的提示文案与边界行为不再各写一遍。
 
 ### Fixed

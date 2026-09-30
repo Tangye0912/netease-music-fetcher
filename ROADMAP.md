@@ -46,7 +46,5 @@
 
 ### Distribution
 
-- [ ] 升级 CI 依赖的 actions：`actions/checkout@v4` 与 `actions/setup-python@v5` 已被 GitHub 标记为 Node.js 20 弃用（现被强制跑在 Node 24 上），待对应 action 发布 Node 24 版本后跟进。
-
 - [ ] 为 macOS 构建补代码签名、公证和可重复的启动冒烟检查。
 - [ ] 评估 UPX 与依赖裁剪对三平台单文件体积和启动速度的影响。
