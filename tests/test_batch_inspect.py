@@ -112,6 +112,32 @@ class BatchInspectTests(unittest.TestCase):
 
     @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.detect_song")
+    def test_cancel_with_a_full_pool_still_stops_the_backlog(self, mock_detect, mock_probe):
+        """With several workers, cancelling must not drain the whole list.
+
+        The TUI detects with concurrency 5 against lists that can hold thousands
+        of songs, so "already queued" work has to stop too.
+        """
+        cancel_event = threading.Event()
+
+        def detect_and_cancel(song_id, *_args, **_kwargs):
+            cancel_event.set()
+            return self._detect_result(song_id)
+
+        mock_detect.side_effect = detect_and_cancel
+        raw = "\n".join(f"https://music.163.com/song?id={index}" for index in range(1, 31))
+        rows = run_batch_detect(
+            raw, "MUSIC_U=test", timeout=5, detect_concurrency=3, cancel_event=cancel_event,
+        )
+
+        # At most the pool-sized batch may be in flight; the other 27 never run.
+        self.assertLessEqual(mock_detect.call_count, 3)
+        ready = [row for row in rows if row.status == "ready"]
+        self.assertGreaterEqual(len(ready), 1)
+        self.assertLessEqual(len(ready), mock_detect.call_count)
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
     def test_cancel_stops_queued_detection_and_preserves_completed_row(self, mock_detect, mock_probe):
         cancel_event = threading.Event()
 

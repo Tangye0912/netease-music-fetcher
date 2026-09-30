@@ -8,6 +8,7 @@ until it was killed.
 import contextlib
 import json
 import shutil
+import signal
 import tempfile
 import unittest
 from pathlib import Path
@@ -768,6 +769,68 @@ class BatchFlowInteractionTests(TuiScreenTestCase):
         ), offline_ui(menu=1, multiselect=[0]):
             self.app._batch_flow("x")
         export_mock.assert_not_called()
+
+    def test_ctrl_c_during_detection_cancels_and_keeps_partial_rows(self):
+        captured: dict = {}
+        partial = [BatchDetectRow("1", song_id="1", song_name="A", status="ready")]
+
+        def fake_signal(signum, handler):
+            captured["handler"] = handler
+            return "previous-handler"
+
+        def fake_detect(text, cookie, timeout, detect_concurrency=5, cancel_event=None, on_progress=None):
+            captured["cancel_event"] = cancel_event
+            captured["handler"](signal.SIGINT, None)  # the user presses Ctrl+C
+            self.assertTrue(cancel_event.is_set())
+            return partial
+
+        with mock.patch("music_fetch.tui.signal.signal", side_effect=fake_signal) as signal_mock, mock.patch(
+            "music_fetch.tui.run_batch_detect", side_effect=fake_detect
+        ), mock.patch.object(self.app, "_offer_batch_export"), offline_ui(menu=3) as ui:
+            self.app._batch_flow("x")
+
+        # The previous SIGINT handler is restored…
+        self.assertEqual(signal_mock.call_args_list[-1].args[1], "previous-handler")
+        # …the interruption is reported, and the rows found so far survive.
+        warnings = " ".join(str(call.args[0]) for call in ui["print_warning"].call_args_list)
+        self.assertIn("识别已中断", warnings)
+        self.assertTrue(captured["cancel_event"].is_set())
+        self.assertEqual(ui["print_table"].call_count, 1)
+
+    def test_detection_receives_a_cancel_event(self):
+        seen: dict = {}
+
+        def fake_detect(text, cookie, timeout, detect_concurrency=5, cancel_event=None, on_progress=None):
+            seen["event"] = cancel_event
+            return [BatchDetectRow("1", song_id="1", song_name="A", status="ready")]
+
+        with mock.patch("music_fetch.tui.run_batch_detect", side_effect=fake_detect), mock.patch.object(
+            self.app, "_offer_batch_export"
+        ), offline_ui(menu=3):
+            self.app._batch_flow("x")
+
+        self.assertIsNotNone(seen["event"])
+        self.assertFalse(seen["event"].is_set())
+
+    def test_detection_survives_an_uninstallable_sigint_handler(self):
+        # signal.signal raises off the main thread; detection must still run.
+        rows = [BatchDetectRow("1", song_id="1", song_name="A", status="ready")]
+        with mock.patch("music_fetch.tui.signal.signal", side_effect=ValueError("not main thread")), mock.patch(
+            "music_fetch.tui.run_batch_detect", return_value=rows
+        ), mock.patch.object(self.app, "_offer_batch_export"), offline_ui(menu=3) as ui:
+            self.app._batch_flow("x")
+        self.assertTrue(ui["print_table"].called)
+
+    def test_cancelled_detection_without_rows_says_so(self):
+        def fake_detect(text, cookie, timeout, detect_concurrency=5, cancel_event=None, on_progress=None):
+            cancel_event.set()
+            return []
+
+        with mock.patch("music_fetch.tui.run_batch_detect", side_effect=fake_detect), offline_ui() as ui:
+            self.app._batch_flow("x")
+
+        warnings = " ".join(str(call.args[0]) for call in ui["print_warning"].call_args_list)
+        self.assertIn("已取消识别", warnings)
 
     def test_preview_prompt_stays_readable_for_huge_batches(self):
         rows = [

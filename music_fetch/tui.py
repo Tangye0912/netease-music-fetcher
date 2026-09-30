@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Any, Callable, Optional, Sequence, TypeVar
 
 from music_fetch.api import (
     MusicFetchError,
@@ -782,27 +783,61 @@ class TuiApp:
             return
         self._batch_flow(text)
 
-    def _batch_flow(self, raw_input: str) -> None:
-        U.print_info("批量识别中...")
-        detect_total = [0]
+    def _detect_batch(self, raw_input: str, detect_total: list[int]) -> tuple[list[BatchDetectRow], bool]:
+        """Run batch detection, letting Ctrl+C cancel it without losing progress.
+
+        Returns (rows, cancelled).  The first Ctrl+C sets a cancellation event
+        instead of raising: an exception would unwind straight through the worker
+        pool, and the pool then still runs every song that was already queued (a
+        liked-songs list queues thousands).  With the event set,
+        run_batch_detect stops launching new work and hands back the rows it
+        already has.
+        """
+        cancel_event = threading.Event()
+
+        def _cancel_on_interrupt(_signum: int, _frame: object) -> None:
+            cancel_event.set()
+
+        installed = False
+        previous: Any = None
+        try:
+            previous = signal.signal(signal.SIGINT, _cancel_on_interrupt)
+            installed = True
+        except ValueError:
+            # signal.signal only works on the main thread; keep the default
+            # handler and let the interrupt propagate as usual.
+            logger.warning("Could not install the detection SIGINT handler.")
         try:
             rows = run_batch_detect(
                 raw_input,
                 self.session.cookie,
                 timeout=self.session.detect_timeout_sec,
                 detect_concurrency=5,
+                cancel_event=cancel_event,
                 on_progress=lambda current, total, song_id: self._detect_progress(current, total, detect_total),
             )
+        finally:
+            if installed:
+                signal.signal(signal.SIGINT, previous)
+            if detect_total[0] > 0:
+                print()
+        return rows, cancel_event.is_set()
+
+    def _batch_flow(self, raw_input: str) -> None:
+        U.print_info("批量识别中...")
+        detect_total = [0]
+        try:
+            rows, cancelled = self._detect_batch(raw_input, detect_total)
         except MusicFetchError as err:
             U.print_error(user_error_message(err.code, err.message))
             if err.code == "AUTH_EXPIRED":
                 self._handle_auth_expired()
             return
-        if detect_total[0] > 0:
-            print()
         if not rows:
-            U.print_warning("未识别到任何歌曲，请检查输入内容。")
+            U.print_warning("已取消识别。" if cancelled else "未识别到任何歌曲，请检查输入内容。")
             return
+        if cancelled:
+            U.print_warning(f"识别已中断，保留已识别的 {len(rows)} 条；可继续挑选下载，或按「返回」退出。")
         summary = summarize_batch_rows(rows)
         U.print_info(
             f"识别完成：共 {summary.total} 条，可下载 {summary.ready} 条，"
