@@ -47,6 +47,9 @@ def manager_status_text(status: str) -> str:
     normalized = (status or "").strip().lower()
     mapping = {
         "pending": MANAGER_FILTER_PENDING,
+        # The queue calls an in-flight task "running"; "downloading" is kept for
+        # records written by older versions.
+        "running": MANAGER_FILTER_DOWNLOADING,
         "downloading": MANAGER_FILTER_DOWNLOADING,
         "success": MANAGER_FILTER_SUCCESS,
         "failed": MANAGER_FILTER_FAILED,

@@ -1635,15 +1635,16 @@ class TuiApp:
         return mapping.get(status_filter, status_filter)
 
     def _pick_status_filter(self) -> str:
+        # Download history only records finished tasks (success/failed/canceled;
+        # skipped files count as success), so "待下载/下载中" could never match a
+        # record and used to sit in this menu as dead options.
         options = [
             T.MANAGER_FILTER_ALL,
             T.MANAGER_FILTER_SUCCESS,
             T.MANAGER_FILTER_FAILED,
             T.MANAGER_FILTER_CANCELED,
-            T.MANAGER_FILTER_PENDING,
-            T.MANAGER_FILTER_DOWNLOADING,
         ]
-        keys = ["all", "success", "failed", "canceled", "pending", "downloading"]
+        keys = ["all", "success", "failed", "canceled"]
         choice = U.menu("状态筛选", options)
         return keys[choice - 1]
 

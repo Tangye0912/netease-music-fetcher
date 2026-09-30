@@ -579,8 +579,10 @@ class HistoryScreenTests(TuiScreenTestCase):
         clear_mock.assert_called_once()
 
     def test_pick_status_filter_maps_the_choice(self):
-        with offline_ui(menu=2):
+        with offline_ui(menu=2) as ui:
             self.assertEqual(self.app._pick_status_filter(), "success")
+        # Only states that history can actually hold are offered.
+        self.assertEqual(ui["menu"].call_args.args[1], ["全部", "成功", "失败", "已取消"])
 
     def test_export_history_csv_writes_the_filtered_rows(self):
         self._seed()
