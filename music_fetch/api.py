@@ -15,7 +15,7 @@ __all__ = [
     "configure_proxy",
     "extract_csrf", "parse_cookie_fields", "normalize_cookie", "build_cookie_string",
     "fetch_account_profile",
-    "fetch_playable_candidates", "fetch_song_metadata", "fetch_playlist_song_ids",
+    "fetch_playable_candidates", "fetch_song_metadata", "fetch_songs_metadata", "SongMetadata", "METADATA_CHUNK_SIZE", "fetch_playlist_song_ids",
     "fetch_album_songs", "AlbumDetail", "ALBUM_API",
     "detect_song", "normalize_media_url",
     "search_songs", "SearchResult", "search_playlists",
@@ -30,9 +30,10 @@ __all__ = [
 import http.client
 import json
 import re
+import threading
 from enum import Enum
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple
 from urllib import error, parse, request
 
 from music_fetch.app_logging import get_logger
@@ -467,30 +468,26 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
     raise MusicFetchError(ErrorCode.NETWORK_ERROR, "Could not resolve playable media url.")
 
 
-def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str]]:
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    query = parse.urlencode({"ids": f"[{song_id}]"})
-    url = f"{SONG_DETAIL_API}?{query}"
-    try:
-        status, body = perform_json_get(url, headers, timeout=timeout)
-    except MusicFetchError as err:
-        logger.warning("Failed to fetch song metadata. song_id=%s code=%s message=%s", song_id, err.code, err.message)
-        return None, None, None, None, None
-    if status != 200 or body.get("code") != 200:
-        return None, None, None, None, None
-    songs = body.get("songs") or []
-    if not songs:
-        logger.warning("Song metadata not found. song_id=%s", song_id)
-        return None, None, None, None, None
-    song = songs[0]  # type: ignore[index]
-    name = song.get("name")
+@dataclass
+class SongMetadata:
+    """Display metadata for one song; the API may omit any individual field."""
+
+    song_name: Optional[str]
+    duration_ms: Optional[int]
+    cover_url: Optional[str]
+    artist: Optional[str]
+    album_name: Optional[str]
+
+
+def _parse_song_detail(song: dict[str, Any]) -> SongMetadata:
+    """Extract the fields the app displays from one /api/song/detail row."""
+    raw_name = song.get("name")
+    name = raw_name.strip() or None if isinstance(raw_name, str) else None
     duration_ms = song.get("dt")
-    # Extract cover art URL from album info
-    cover_url = None
+    if not isinstance(duration_ms, int):
+        duration_ms = None
     album = song.get("al")
-    if isinstance(album, dict):
-        cover_url = album.get("picUrl") or None
-    # Extract artist names
+    cover_url = album.get("picUrl") or None if isinstance(album, dict) else None
     artist_names: list[str] = []
     artists = song.get("ar")
     if isinstance(artists, list):
@@ -499,18 +496,80 @@ def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Option
                 ar_name = ar.get("name")
                 if isinstance(ar_name, str) and ar_name.strip():
                     artist_names.append(ar_name.strip())
-    artist_str = " / ".join(artist_names) if artist_names else None
-    # Extract album name
     album_name = album.get("name") if isinstance(album, dict) else None
     if isinstance(album_name, str):
         album_name = album_name.strip() or None
-    if isinstance(name, str):
-        name = name.strip() or None
-    else:
-        name = None
-    if not isinstance(duration_ms, int):
-        duration_ms = None
-    return name, duration_ms, cover_url, artist_str, album_name
+    return SongMetadata(
+        song_name=name,
+        duration_ms=duration_ms,
+        cover_url=cover_url,
+        artist=" / ".join(artist_names) if artist_names else None,
+        album_name=album_name,
+    )
+
+
+# The detail endpoint takes an id array; one request with 30 ids answered in
+# ~0.16 s, while single-id requests cost ~83 ms each (measured 2026-09-30).
+METADATA_CHUNK_SIZE = 100
+
+
+def fetch_songs_metadata(
+    song_ids: Sequence[str],
+    cookie: str,
+    timeout: int = 20,
+    chunk_size: int = METADATA_CHUNK_SIZE,
+    cancel_event: Optional[threading.Event] = None,
+) -> dict[str, SongMetadata]:
+    """Fetch metadata for many songs, one request per chunk of ids.
+
+    A 1000-song list therefore costs ~10 requests instead of 1000.  Failures are
+    per chunk: a failing chunk is skipped (the caller falls back to the per-song
+    path) rather than failing the whole batch.
+    """
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    # str(None) would become "None" and be requested as if it were an id.
+    unique_ids = [
+        song_id
+        for song_id in dict.fromkeys(str(value).strip() for value in song_ids if value is not None)
+        if song_id
+    ]
+    results: dict[str, SongMetadata] = {}
+    step = max(1, int(chunk_size))
+    for start in range(0, len(unique_ids), step):
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        chunk = unique_ids[start:start + step]
+        query = parse.urlencode({"ids": "[" + ",".join(chunk) + "]"})
+        try:
+            status, body = perform_json_get(f"{SONG_DETAIL_API}?{query}", headers, timeout=timeout)
+        except MusicFetchError as err:
+            logger.warning(
+                "Batched metadata request failed. songs=%s code=%s message=%s", len(chunk), err.code, err.message
+            )
+            continue
+        if status != 200 or body.get("code") != 200:
+            logger.warning(
+                "Batched metadata request returned non-200. songs=%s status=%s code=%s",
+                len(chunk), status, body.get("code"),
+            )
+            continue
+        for song in body.get("songs") or []:
+            if not isinstance(song, dict):
+                continue
+            song_id = song.get("id")
+            if song_id is None:
+                continue
+            results[str(song_id)] = _parse_song_detail(song)
+    return results
+
+
+def fetch_song_metadata(song_id: str, cookie: str, timeout: int) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str]]:
+    """Single-song metadata as a tuple (the shape the existing callers expect)."""
+    metadata = fetch_songs_metadata([song_id], cookie, timeout=timeout).get(str(song_id))
+    if metadata is None:
+        logger.warning("Song metadata not found. song_id=%s", song_id)
+        return None, None, None, None, None
+    return metadata.song_name, metadata.duration_ms, metadata.cover_url, metadata.artist, metadata.album_name
 
 
 def fetch_playlist_song_ids(playlist_id: str, cookie: str, timeout: int = 20) -> list[str]:
@@ -658,10 +717,22 @@ def _pick_highest_level(candidates: list[PlayableCandidate]) -> tuple[str, str]:
     return best.level, best.encode_type
 
 
-def detect_song(song_url: str, cookie: str, timeout: int = 20) -> SongDetectionResult:
+def detect_song(
+    song_url: str,
+    cookie: str,
+    timeout: int = 20,
+    metadata: Optional[SongMetadata] = None,
+) -> SongDetectionResult:
     song_id = parse_song_id(song_url)
     logger.info("Detecting song by url. song_id=%s", song_id)
-    song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(song_id, cookie, timeout=timeout)
+    if metadata is None:
+        song_name, meta_duration, cover_url, artist, album_name = fetch_song_metadata(
+            song_id, cookie, timeout=timeout
+        )
+    else:
+        # Batch detection prefetches metadata for every song at once.
+        song_name, meta_duration = metadata.song_name, metadata.duration_ms
+        cover_url, artist, album_name = metadata.cover_url, metadata.artist, metadata.album_name
     try:
         candidates = fetch_playable_candidates(song_id, cookie, timeout=timeout)
     except MusicFetchError as err:

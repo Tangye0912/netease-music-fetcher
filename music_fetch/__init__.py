@@ -11,6 +11,7 @@ from music_fetch.api import (
     DownloadCanceled,
     # Data classes
     SongDetectionResult,
+    SongMetadata,
     AccountProfile,
     PlayableCandidate,
     # Callback types
@@ -33,6 +34,7 @@ from music_fetch.api import (
     # Song / playlist
     fetch_playable_candidates,
     fetch_song_metadata,
+    fetch_songs_metadata,
     fetch_playlist_song_ids,
     fetch_album_songs,
     AlbumDetail,
@@ -91,6 +93,7 @@ __all__ = [
     "ProxyConfigError",
     # Data classes
     "SongDetectionResult",
+    "SongMetadata",
     "AccountProfile",
     "PlayableCandidate",
     "SearchResult",
@@ -117,6 +120,7 @@ __all__ = [
     # Song / playlist / search
     "fetch_playable_candidates",
     "fetch_song_metadata",
+    "fetch_songs_metadata",
     "fetch_playlist_song_ids",
     "fetch_album_songs",
     "AlbumDetail",

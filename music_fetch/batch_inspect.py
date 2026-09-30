@@ -13,7 +13,15 @@ import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Callable, Optional
 
-from music_fetch.api import MusicFetchError, detect_song, fetch_album_songs, fetch_playlist_song_ids, parse_input_resource
+from music_fetch.api import (
+    MusicFetchError,
+    SongMetadata,
+    detect_song,
+    fetch_album_songs,
+    fetch_playlist_song_ids,
+    fetch_songs_metadata,
+    parse_input_resource,
+)
 from music_fetch.app_logging import get_logger
 from music_fetch.batch_inputs import collect_batch_candidates, source_hint_map
 from music_fetch.batch_models import BatchDetectRow, probe_media_size_bytes
@@ -123,6 +131,23 @@ def run_batch_detect(
         seen_song_ids.add(song_id)
         unique_expanded.append((source_type, source_value, song_id, source_label))
 
+    # Metadata is fetched in batches up front: the detail endpoint accepts an id
+    # array (one request per 100 ids), and one metadata request per song used to
+    # dominate detection on long lists (measured 83 ms each).
+    prefetched: dict[str, SongMetadata] = {}
+    if unique_expanded and not cancel.is_set():
+        try:
+            prefetched = fetch_songs_metadata(
+                [item[2] for item in unique_expanded],
+                cookie,
+                timeout=timeout,
+                cancel_event=cancel,
+            )
+        except Exception:
+            # An optimization must never abort detection: songs without prefetched
+            # metadata just take the per-song path below.
+            logger.exception("Batched metadata prefetch failed; falling back to per-song fetches.")
+
     # Keep only a small bounded set of futures alive so cancellation does not
     # leave a large queue of network requests waiting to start.
     completed_count = 0
@@ -139,7 +164,7 @@ def run_batch_detect(
         if cancel.is_set():
             return (index, None)
         try:
-            result = detect_song(song_id, cookie, timeout=timeout)
+            result = detect_song(song_id, cookie, timeout=timeout, metadata=prefetched.get(song_id))
             size_bytes = 0
             if result.can_download and result.media_url and not cancel.is_set():
                 # The playable-url response already reports the file size for most

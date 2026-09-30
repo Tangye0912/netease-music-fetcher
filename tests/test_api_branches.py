@@ -6,11 +6,13 @@ from unittest import mock
 from music_fetch.api import (
     ErrorCode,
     MusicFetchError,
+    PlayableCandidate,
     _extract_resource_id,
     fetch_lyric,
     fetch_playable_candidates,
     fetch_playlist_song_ids,
     fetch_song_metadata,
+    fetch_songs_metadata,
     parse_input_resource,
 )
 from urllib import parse
@@ -124,6 +126,77 @@ class LyricFailureTests(unittest.TestCase):
         ):
             result = fetch_lyric("42")
         self.assertEqual(result.lyric, "")
+
+
+class BatchedMetadataTests(unittest.TestCase):
+    """The detail endpoint takes an id array, so metadata is fetched in chunks."""
+
+    def _body(self, *ids):
+        return {"code": 200, "songs": [{"id": int(sid), "name": f"Song {sid}", "dt": 1000} for sid in ids]}
+
+    def test_ids_are_chunked_and_results_are_keyed_by_id(self):
+        with mock.patch(
+            "music_fetch.api.perform_json_get", side_effect=[(200, self._body("1", "2")), (200, self._body("3"))]
+        ) as get_mock:
+            metadata = fetch_songs_metadata(["1", "2", "3"], "MUSIC_U=test", timeout=5, chunk_size=2)
+        self.assertEqual(get_mock.call_count, 2)
+        self.assertEqual(sorted(metadata), ["1", "2", "3"])
+        self.assertEqual(metadata["3"].song_name, "Song 3")
+
+    def test_duplicate_ids_are_requested_once(self):
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(200, self._body("1"))) as get_mock:
+            fetch_songs_metadata(["1", "1", "1"], "MUSIC_U=test", timeout=5)
+        sent = parse.parse_qs(parse.urlparse(get_mock.call_args.args[0]).query)
+        self.assertEqual(sent["ids"], ["[1]"])
+
+    def test_malformed_rows_and_trailing_garbage_are_ignored(self):
+        body = {"code": 200, "songs": ["junk", {"name": "no id"}, {"id": 5, "name": "ok"}]}
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(200, body)):
+            metadata = fetch_songs_metadata(["5"], "MUSIC_U=test", timeout=5)
+        self.assertEqual(list(metadata), ["5"])
+
+    def test_a_failing_chunk_does_not_discard_the_others(self):
+        responses = [
+            (200, self._body("1")),
+            MusicFetchError(ErrorCode.NETWORK_ERROR, "boom"),
+            (500, {}),
+            (200, self._body("4")),
+        ]
+        with mock.patch("music_fetch.api.perform_json_get", side_effect=responses):
+            metadata = fetch_songs_metadata(["1", "2", "3", "4"], "MUSIC_U=test", timeout=5, chunk_size=1)
+        self.assertEqual(sorted(metadata), ["1", "4"])
+
+    def test_cancellation_stops_before_the_first_request(self):
+        import threading
+
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch("music_fetch.api.perform_json_get") as get_mock:
+            metadata = fetch_songs_metadata(["1"], "MUSIC_U=test", timeout=5, cancel_event=cancel)
+        self.assertEqual(metadata, {})
+        get_mock.assert_not_called()
+
+    def test_a_blank_id_list_makes_no_request(self):
+        with mock.patch("music_fetch.api.perform_json_get") as get_mock:
+            self.assertEqual(fetch_songs_metadata(["", None], "MUSIC_U=test", timeout=5), {})
+        get_mock.assert_not_called()
+
+    def test_detect_song_skips_the_per_song_metadata_request(self):
+        from music_fetch.api import SongMetadata, detect_song
+
+        candidates = [PlayableCandidate("https://cdn/a.mp3", 1000, "standard", "mp3", 10)]
+        with mock.patch("music_fetch.api.fetch_song_metadata") as per_song_mock, mock.patch(
+            "music_fetch.api.fetch_playable_candidates", return_value=candidates
+        ):
+            result = detect_song(
+                "https://music.163.com/song?id=42",
+                "MUSIC_U=test",
+                metadata=SongMetadata("Prefetched", 2000, "cover", "Artist", "Album"),
+            )
+        per_song_mock.assert_not_called()
+        self.assertEqual(result.song_name, "Prefetched")
+        self.assertEqual(result.artist, "Artist")
+        self.assertEqual(result.duration_ms, 2000)
 
 
 class InvalidSongIdTests(unittest.TestCase):

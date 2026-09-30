@@ -56,6 +56,39 @@ class BatchInspectTests(unittest.TestCase):
 
     @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.detect_song")
+    @mock.patch("music_fetch.batch_inspect.fetch_songs_metadata")
+    def test_metadata_is_prefetched_once_for_all_songs(self, mock_prefetch, mock_detect, _mock_probe):
+        """One batched request instead of one metadata request per song."""
+        from music_fetch.api import SongMetadata
+
+        prefetched = {"100": SongMetadata("A", 1000, None, None, None)}
+        mock_prefetch.return_value = prefetched
+        mock_detect.return_value = self._detect_result("100")
+
+        raw = "\n".join(f"https://music.163.com/song?id={sid}" for sid in ("100", "200", "300"))
+        run_batch_detect(raw, "MUSIC_U=test", timeout=5)
+
+        mock_prefetch.assert_called_once()
+        self.assertEqual(mock_prefetch.call_args.args[0], ["100", "200", "300"])
+        passed = [call.kwargs.get("metadata") for call in mock_detect.call_args_list]
+        self.assertIn(prefetched["100"], passed)
+        # Songs the API did not return fall back to the per-song path.
+        self.assertIn(None, passed)
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
+    @mock.patch("music_fetch.batch_inspect.fetch_songs_metadata")
+    def test_prefetch_failure_does_not_abort_detection(self, mock_prefetch, mock_detect, _mock_probe):
+        mock_prefetch.side_effect = RuntimeError("boom")
+        mock_detect.return_value = self._detect_result("100")
+
+        rows = run_batch_detect("https://music.163.com/song?id=100", "MUSIC_U=test", timeout=5)
+
+        self.assertEqual([row.status for row in rows], ["ready"])
+        self.assertIsNone(mock_detect.call_args.kwargs.get("metadata"))
+
+    @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
+    @mock.patch("music_fetch.batch_inspect.detect_song")
     def test_detect_failure_creates_failed_row(self, mock_detect, _mock_probe):
         mock_detect.side_effect = MusicFetchError("SONG_UNAVAILABLE", "not available")
         rows = run_batch_detect("https://music.163.com/song?id=200", "MUSIC_U=test", timeout=5)
@@ -121,7 +154,7 @@ class BatchInspectTests(unittest.TestCase):
     @mock.patch("music_fetch.batch_inspect.probe_media_size_bytes", return_value=0)
     @mock.patch("music_fetch.batch_inspect.detect_song")
     def test_duplicate_rows_are_appended_to_tail(self, mock_detect, _mock_probe):
-        def _detect(song_id, cookie, timeout):
+        def _detect(song_id, cookie, timeout, **_kwargs):
             result = self._detect_result(song_id)
             return result
         mock_detect.side_effect = _detect
@@ -218,7 +251,7 @@ class BatchInspectTests(unittest.TestCase):
     @mock.patch("music_fetch.batch_inspect.detect_song")
     def test_album_link_expands_into_album_rows(self, mock_detect, mock_album, _mock_probe):
         from music_fetch.api import AlbumDetail
-        mock_detect.side_effect = lambda song_id, cookie, timeout: self._detect_result(song_id)
+        mock_detect.side_effect = lambda song_id, cookie, timeout, **kwargs: self._detect_result(song_id)
         mock_album.return_value = AlbumDetail(name="夜曲", song_ids=["11", "12", "11"])
         rows = run_batch_detect("https://music.163.com/album?id=99", "MUSIC_U=test", timeout=5)
         ready = [r for r in rows if r.status == "ready"]

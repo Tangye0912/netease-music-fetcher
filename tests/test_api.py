@@ -505,7 +505,7 @@ class DetectSongTests(unittest.TestCase):
         meta_resp.__enter__.return_value = meta_resp
         meta_resp.status = 200
         meta_resp.read.return_value = (
-            b'{"code": 200, "songs": [{"name": "Test Song", "dt": 240000, '
+            b'{"code": 200, "songs": [{"id": 42, "name": "Test Song", "dt": 240000, '
             b'"al": {"picUrl": "http://cover.jpg"}, "ar": [{"name": "Artist"}]}]}'
         )
         # Mock playable URL response — one per profile in PLAYABLE_REQUEST_PROFILES
@@ -527,7 +527,7 @@ class DetectSongTests(unittest.TestCase):
         meta_resp.__enter__.return_value = meta_resp
         meta_resp.status = 200
         meta_resp.read.return_value = (
-            b'{"code": 200, "songs": [{"name": "Test", "dt": 240000}]}'
+            b'{"code": 200, "songs": [{"id": 42, "name": "Test", "dt": 240000}]}'
         )
         empty_resp = mock.MagicMock()
         empty_resp.__enter__.return_value = empty_resp
