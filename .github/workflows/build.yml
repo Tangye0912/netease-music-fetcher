@@ -45,11 +45,17 @@ jobs:
             echo "name=music-fetch-windows" >> $GITHUB_OUTPUT
             echo "file=dist/music-fetch.exe" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # Give every platform a distinct *file name*: the release upload
+            # uses the file's own name, so macOS and Linux both publishing
+            # "music-fetch" made them overwrite each other and silently shipped
+            # a Linux binary to macOS users.
+            cp dist/music-fetch dist/music-fetch-macos
             echo "name=music-fetch-macos" >> $GITHUB_OUTPUT
-            echo "file=dist/music-fetch" >> $GITHUB_OUTPUT
+            echo "file=dist/music-fetch-macos" >> $GITHUB_OUTPUT
           else
+            cp dist/music-fetch dist/music-fetch-linux
             echo "name=music-fetch-linux" >> $GITHUB_OUTPUT
-            echo "file=dist/music-fetch" >> $GITHUB_OUTPUT
+            echo "file=dist/music-fetch-linux" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload artifact

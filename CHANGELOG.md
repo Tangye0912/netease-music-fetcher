@@ -34,6 +34,7 @@
 - **代理配置失败不再污染会话**：`_edit_proxy` 原先在校验通过后、`configure_proxy` 之前就把新代理写进会话；运行时不接受该代理（`ProxyConfigError`）时字段已被改动，用户再按"保存设置"就会把无效代理持久化。现在只在运行时接受后才写入会话，并删掉了重复的一次校验调用。
 - **队列轮询不再持锁写盘**：`poll()` 原先在持有队列锁时写下载历史与 `queue.json`，历史接近 1000 条时会让每 0.5 秒刷新一次的界面卡住。现在状态变更仍在锁内完成，两次磁盘写入移到锁外；历史写失败仍会保留重试机会（`recorded` 只在写成功后置位）。
 - **退出等待不再无限期卡住**：`TuiApp.run()` 的收尾等待原本没有上限——若某个任务卡在不可取消的步骤（ffmpeg 转码不响应取消），Ctrl+C 只会重复提示"仍在等待下载线程安全结束"而无法退出。现在最多等待 `SHUTDOWN_WAIT_SEC`（10 秒），超时后提示剩余线程数并直接退出；调度线程改为 daemon，未完成任务保留在队列文件中供下次启动恢复。
+- **macOS 产物不再被 Linux 覆盖**：三平台构建里 macOS 与 Linux 都产出名为 `music-fetch` 的文件，而 Release 上传用的是文件名——两者互相覆盖，macOS 用户下到的其实是 Linux 版本（自 v3.2.0 起一直如此，Release 里只有 `music-fetch` 与 `music-fetch.exe` 两个资产）。现在构建时改为 `music-fetch-macos` / `music-fetch-linux`，README 也按平台写明要下载哪个文件。
 - **无控制台启动给出中文提示**：在双击运行或 stdin 被管道/重定向时，`prompt_toolkit` 会抛 `NoConsoleScreenBufferError`，此前用户看到的是英文 `No Windows console found`（更早版本是原始 traceback）。现在识别该异常并提示"请在 Windows Terminal / cmd / PowerShell 等终端窗口中直接运行"。
 - **超长文件名/路径不再报"未知错误"**：文件名按 120 字符 / 200 UTF-8 字节上限截断，Windows 下再按整条路径 250 字符预算截断（自动生成的名字保留尾部 `-歌曲ID` 便于识别）；新增 `PATH_TOO_LONG` 错误码与中文提示，替换原先的"未知错误"。实测 172 字符的深目录 + 640 字符歌名仍能正常创建文件。
 

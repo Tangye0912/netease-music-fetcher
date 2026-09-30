@@ -6,9 +6,13 @@
 
 ### 方式一：直接下载可执行文件（普通用户，免装 Python）
 
-1. 打开本仓库 [Releases](../../releases) 页，下载最新版：
+1. 打开本仓库 [Releases](../../releases) 页，下载对应平台的文件：
    - Windows：`music-fetch.exe`；
-   - macOS：`music-fetch`（首次使用先执行 `chmod +x music-fetch`）。
+   - macOS：`music-fetch-macos`（首次使用先执行 `chmod +x music-fetch-macos`）；
+   - Linux：`music-fetch-linux`（同样需要 `chmod +x`）。
+
+   > v3.7.0 起三个平台的产物文件名互不相同。此前 macOS 与 Linux 都叫 `music-fetch`，
+   > 上传到 Release 时会互相覆盖，导致 macOS 用户实际下载到的是 Linux 版本。
 2. 双击运行，首次启动进入登录引导：选择「登录」后自动打开浏览器扫码页 → 用**网易云 App** 扫码 → 登录完成即可下载。
 
 ### 方式二：Python 安装（开发者 / 有 Python 环境的用户）
