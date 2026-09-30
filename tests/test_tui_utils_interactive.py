@@ -10,11 +10,24 @@ from music_fetch.tui_utils import format_table
 
 
 class ClearScreenTests(unittest.TestCase):
-    def test_clear_screen_writes_the_ansi_sequence(self):
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
+    def test_clear_screen_asks_for_the_ansi_sequence(self):
+        # Prompt_toolkit's ANSI() consumes the escapes into styling, so assert
+        # what clear_screen hands to the printer instead of the rendered output
+        # (which also depends on the platform and on stdout being an fd).
+        with mock.patch("music_fetch.tui_utils._safe_print_formatted") as safe_mock:
             U.clear_screen()
-        self.assertIn("\x1b[2J", buffer.getvalue())
+        self.assertIn("\x1b[2J", safe_mock.call_args.args[0])
+
+    def test_safe_print_falls_back_to_plain_text_without_a_console(self):
+        # CI runners and piped stdout take this branch: ANSI must be stripped and
+        # characters the console cannot encode must not raise.
+        with mock.patch(
+            "music_fetch.tui_utils.print_formatted_text", side_effect=RuntimeError("no console")
+        ), mock.patch("builtins.print") as print_mock:
+            U.print_info("\x1b[32m✓ 完成\x1b[0m")
+        printed = str(print_mock.call_args)
+        self.assertIn("完成", printed)
+        self.assertNotIn("\x1b", printed)
 
 
 class AskHelperTests(unittest.TestCase):
