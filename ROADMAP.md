@@ -39,10 +39,9 @@
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
-- [ ] 决定 `version_check.fetch_release_download_url` 的归宿：它只匹配 `.exe/.dmg/.zip`，产物改名后（`music-fetch-macos`/`music-fetch-linux`）只能返回 Windows 包，且当前没有任何生产调用方（更新检查只打印 Release 页面地址）。要么删除，要么接进更新页。
 - [ ] 合并重复的搜索实现：`search_songs` 与 `search_playlists` 仅 `type` 与行解析不同，约 25 行需要同步维护。
 - [ ] 合并两处分页逻辑：`_paginated_pick`（0 返回、非法输入重问）与 `_show_batch_rows`（除 n/p 外一律继续）语义不同，各自需要单独维护。
-- [ ] 继续把覆盖率从当前的 93.6% 推向 95%：剩余缺口集中在 `main()` 启动装配、`browser_login` 的 CDP 异常分支与 `audio` 的转码/ffmpeg 错误路径（CI 门槛已随本轮提升到 90%）。
+- [ ] 维持 95%+ 覆盖率（当前 95.2%，CI 门槛已提到 94%）；剩余缺口集中在 `audio.py` 的转码/ffmpeg 错误路径（89%）、`tui.py` 的 `main()` 启动装配（95%）与 `browser_login.py` 的 CDP 异常分支（79%）——都需要真实终端/浏览器或外部工具的错误注入。
 - [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
 
 ### Distribution

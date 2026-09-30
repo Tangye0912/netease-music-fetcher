@@ -22,11 +22,12 @@
 ### Removed
 
 - **删除 `eapi.py`**：该模块（`/eapi/` AES-128-ECB 加密传输）已无任何引用——扫码登录早已迁到浏览器 CDP，加密传输也未接入任何调用，属于审查报告标注的死代码。随之移除 `pycryptodome` 依赖、`music-fetch.spec` 里的 `Crypto*` hiddenimports 与 `tests/test_eapi.py`；新增断言防止它被重新引入。
+- **删除 `version_check.fetch_release_download_url`**：它只匹配 `.exe/.dmg/.zip`，而三平台产物现已改名为 `music-fetch.exe`/`music-fetch-macos`/`music-fetch-linux`——接进更新页的话 macOS/Linux 用户会拿到 Windows 的 `.exe`，比没有更糟；且自 v3.4 移除脚本模式后它已无任何调用方（更新检查只打印 Release 页面地址，README 也按平台写明该下哪个文件）。按 eapi 的同样标准删除，连同 4 条只测它的用例。
 
 ### QA
 
-- 覆盖率 **85.73% → 93.76%**（`tui.py` 70% → 95%、`tui_utils.py` 80% → 98%（Linux 上 96%，清屏走的是平台相关分支）、`api.py` 90% → 94%），CI 门槛由 75% 提到 **90%**，回归即失败。
-- 回归测试 785 → **902 通过 + 68 子测试**（新增 `tests/test_tui_screens.py` 与 `tests/test_api_branches.py`、`tests/test_tui_utils_interactive.py`）。补齐的重点是此前完全没跑到的屏幕分支：菜单派发与登录守卫、单曲/搜索/歌单/喜欢/批量的失败与空结果路径、批量结果翻页与试听序号校验、历史记录操作（打开目录/删除/重试/清空/导出）、设置页各项、诊断导出与更新检查、`_open_path` 的三个平台分支、表格在窄窗口下的截断。
+- 覆盖率 **85.73% → 95.18%**（`tui_utils.py` 100%、`app_stores.py` 99%、`download_queue.py` 99%、`network.py` 99%、`batch_inputs.py` 99%、`tui_utils` 之外的 `api.py` 97%、`batch_inspect.py` 96%、`tui.py` 95%、`audio.py` 89%），CI 门槛由 75% 提到 **94%**，回归即失败。
+- 回归测试 785 → **939 通过 + 68 子测试**（新增 `tests/test_tui_screens.py`、`tests/test_api_branches.py`、`tests/test_tui_utils_interactive.py`、`tests/test_edge_branches.py`）。补齐的重点是此前完全没跑到的屏幕分支与错误路径：菜单派发与登录守卫、单曲/搜索/歌单/喜欢/批量的失败与空结果路径、批量结果翻页与试听序号校验、历史记录操作（打开目录/删除/重试/清空/导出）、设置页各项、诊断导出与更新检查、`_open_path` 的三个平台分支、窄窗口下的表格截断；以及各模块的存储损坏/隔离失败/历史写失败/代理校验/请求异常/分页游标等边缘分支。
 - 本轮含一次针对上述新代码的独立审查（新功能 / 启动与发布链路 / 新测试诚实性三路）。**其中一条结论指向我自己的测试**：`test_safe_print_falls_back_to_plain_text_without_a_console` 断言的是 `repr`（转义符在其中变成字面量 `\x1b`，断言永远成立），"资源 ID 兜底"用例走的其实是 `parse_qs` 分支——两条都属于假绿。现已改为断言真实参数、并用真正触发兜底正则的输入，且用变异测试逐条复核：**7/7 定向变异均被测试捕获**（含上述两条与新增的五条行为）。
 - 仍未覆盖的部分集中在：`main()` 的启动装配与 `__main__` 入口、`browser_login` 的 CDP 异常分支、`audio` 的转码/ffmpeg 错误路径——要么需要真实终端/浏览器，要么是外部工具的错误路径。
 - 顺带修掉两个覆盖率补测过程中发现的真实缺陷（见上：队列恢复崩溃、必填输入接受纯空格）。

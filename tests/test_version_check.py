@@ -7,12 +7,10 @@ from email.message import Message
 from pathlib import Path
 from unittest import mock
 from urllib import error
-from urllib.error import URLError
 
 from music_fetch.version_check import (
     check_for_updates_cached,
     fetch_latest_project_version,
-    fetch_release_download_url,
     is_newer_version,
     version_key,
 )
@@ -158,31 +156,6 @@ class FetchLatestProjectVersionTagFallbackTests(unittest.TestCase):
         self.assertEqual(tag_name, "v3.0.0")
 
 
-class FetchReleaseDownloadUrlTests(unittest.TestCase):
-    """Test fetch_release_download_url."""
-
-    def test_returns_exe_url(self):
-        mock_resp = mock.MagicMock()
-        mock_resp.__enter__.return_value = mock_resp
-        mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.exe", "browser_download_url": "http://dl.exe"}]}'
-        with mock.patch("music_fetch.version_check.request.urlopen", return_value=mock_resp):
-            result = fetch_release_download_url(timeout=3)
-        self.assertEqual(result, "http://dl.exe")
-
-    def test_returns_dmg_url(self):
-        mock_resp = mock.MagicMock()
-        mock_resp.__enter__.return_value = mock_resp
-        mock_resp.read.return_value = b'{"assets": [{"name": "music-fetch.dmg", "browser_download_url": "http://dl.dmg"}]}'
-        with mock.patch("music_fetch.version_check.request.urlopen", return_value=mock_resp):
-            result = fetch_release_download_url(timeout=3)
-        self.assertEqual(result, "http://dl.dmg")
-
-    def test_network_error_returns_none(self):
-        with mock.patch("music_fetch.version_check.request.urlopen", side_effect=URLError("timeout")):
-            result = fetch_release_download_url(timeout=3)
-        self.assertIsNone(result)
-
-
 class CheckForUpdatesCachedTests(unittest.TestCase):
     """The TUI caches update checks for a day to respect the anonymous
     GitHub API rate limit (60 requests/hour)."""
@@ -260,13 +233,6 @@ class NonUtf8ResponseTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 fetch_latest_project_version(timeout=3)
         self.assertIn("网络", str(ctx.exception))
-
-    def test_release_download_url_returns_none(self):
-        with mock.patch(
-            "music_fetch.version_check.open_url",
-            return_value=self._response(b"\xff\xfe not utf-8"),
-        ):
-            self.assertIsNone(fetch_release_download_url(timeout=3))
 
 
 if __name__ == "__main__":

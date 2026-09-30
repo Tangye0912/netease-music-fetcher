@@ -24,7 +24,6 @@ __all__ = [
     "version_key",
     "is_newer_version",
     "fetch_latest_project_version",
-    "fetch_release_download_url",
     "check_for_updates_cached",
 ]
 
@@ -120,34 +119,6 @@ def fetch_latest_project_version(timeout: int = 6) -> tuple[str, str]:
     if saw_network_error:
         raise RuntimeError("网络不可用，无法访问 GitHub，请稍后再试。")
     raise RuntimeError("GitHub API 无有效响应。")
-
-
-def fetch_release_download_url(timeout: int = 10) -> Optional[str]:
-    """Fetch the download URL for the latest release asset (exe/dmg/zip)."""
-    headers = _github_headers()
-    req = request.Request(PROJECT_RELEASE_API, headers=headers, method="GET")
-    try:
-        with open_url(req, timeout=timeout) as resp:
-            body_bytes = resp.read()
-        body_raw = body_bytes.decode("utf-8")
-    except (error.URLError, error.HTTPError, OSError, UnicodeDecodeError):
-        return None
-    try:
-        payload = json.loads(body_raw or "{}")
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    assets = payload.get("assets") or []
-    for asset in assets:
-        if not isinstance(asset, dict):
-            continue
-        name = str(asset.get("name") or "").lower()
-        if name.endswith(".exe") or name.endswith(".dmg") or name.endswith(".zip"):
-            url = str(asset.get("browser_download_url") or "").strip()
-            if url:
-                return url
-    return None
 
 
 def _read_update_cache(cache_file: Path) -> dict[str, object]:
