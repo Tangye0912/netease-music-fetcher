@@ -756,3 +756,68 @@ class DetectSongCandidateTests(unittest.TestCase):
         self.assertEqual(result.encode_type, "flac")
         self.assertEqual(result.media_url, "https://cdn/hires.flac")
         self.assertEqual(result.duration_ms, 2000)
+
+
+class PlaylistSearchTests(unittest.TestCase):
+    """search_playlists shares the search endpoint and only switches `type`."""
+
+    def _search(self, body, status=200, **kwargs):
+        from music_fetch.api import search_playlists
+
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(status, body)) as post_mock:
+            return search_playlists(kwargs.pop("keyword", "摇滚"), "MUSIC_U=test", **kwargs), post_mock
+
+    def test_parses_playlists_and_requests_type_1000(self):
+        body = {
+            "code": 200,
+            "result": {
+                "playlists": [
+                    {"id": 123, "name": "摇滚精选", "trackCount": 42,
+                     "coverImgUrl": "https://cdn/c.jpg", "creator": {"nickname": "某人"}},
+                    {"id": "456", "name": "爵士", "trackCount": "7"},
+                    "junk",
+                    {"name": "no id"},
+                ]
+            },
+        }
+        results, post_mock = self._search(body)
+
+        self.assertEqual([p.playlist_id for p in results], ["123", "456"])
+        self.assertEqual(results[0].name, "摇滚精选")
+        self.assertEqual(results[0].song_count, 42)
+        self.assertEqual(results[0].cover_url, "https://cdn/c.jpg")
+        self.assertEqual(results[0].creator, "某人")
+        self.assertEqual(results[1].song_count, 7)
+        self.assertEqual(post_mock.call_args.args[1]["type"], "1000")
+
+    def test_odd_track_count_does_not_crash(self):
+        body = {"code": 200, "result": {"playlists": [{"id": 1, "trackCount": "1e999"}]}}
+        results, _ = self._search(body)
+        self.assertEqual(results[0].song_count, 0)
+
+    def test_blank_keyword_skips_the_request(self):
+        from music_fetch.api import search_playlists
+
+        with mock.patch("music_fetch.api.perform_json_post") as post_mock:
+            self.assertEqual(search_playlists("   ", "MUSIC_U=test"), [])
+        post_mock.assert_not_called()
+
+    def test_auth_failure_raises_auth_expired(self):
+        from music_fetch.api import search_playlists
+
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(403, {})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                search_playlists("摇滚", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "AUTH_EXPIRED")
+
+    def test_request_failure_is_not_mistaken_for_no_results(self):
+        from music_fetch.api import search_playlists
+
+        with mock.patch("music_fetch.api.perform_json_post", return_value=(500, {"code": 500, "message": "boom"})):
+            with self.assertRaises(MusicFetchError) as ctx:
+                search_playlists("摇滚", "MUSIC_U=test")
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
+
+    def test_no_matches_returns_empty_list(self):
+        results, _ = self._search({"code": 200, "result": {"playlists": []}})
+        self.assertEqual(results, [])

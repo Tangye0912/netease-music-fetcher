@@ -388,6 +388,55 @@ def test_settings_can_change_existing_file_policy(app):
     assert app.session.existing_file_policy == "overwrite"
 
 
+def test_batch_rows_are_paged_with_global_numbering(app):
+    rows = [
+        BatchDetectRow(str(index), song_id=str(index), song_name=f"歌 {index}", status="ready")
+        for index in range(1, 21)
+    ]
+    rendered = []
+    with mock.patch(
+        "music_fetch.tui.U.print_table", side_effect=lambda headers, table_rows: rendered.append(table_rows)
+    ), mock.patch("music_fetch.tui.U.print_info"), mock.patch(
+        "music_fetch.tui.U.ask", side_effect=["n", ""]
+    ) as ask_mock:
+        app._show_batch_rows(rows)
+
+    assert len(rendered) == 2
+    assert rendered[0][0][0] == "1"    # the first page starts at row 1…
+    assert rendered[1][0][0] == "16"   # …and the second keeps global numbering
+    assert [call.args[0] for call in ask_mock.call_args_list] == ["n 下一页；p 上一页；回车继续"] * 2
+
+
+def test_single_page_batch_rows_do_not_prompt(app):
+    rows = [
+        BatchDetectRow(str(index), song_id=str(index), song_name=f"歌 {index}", status="ready")
+        for index in range(1, 6)
+    ]
+    with mock.patch("music_fetch.tui.U.print_table"), mock.patch(
+        "music_fetch.tui.U.print_info"
+    ), mock.patch("music_fetch.tui.U.ask") as ask_mock:
+        app._show_batch_rows(rows)
+
+    ask_mock.assert_not_called()  # small batches behave exactly as before
+
+
+def test_batch_row_page_boundaries_warn(app):
+    rows = [
+        BatchDetectRow(str(index), song_id=str(index), song_name=f"歌 {index}", status="ready")
+        for index in range(1, 21)
+    ]
+    with mock.patch("music_fetch.tui.U.print_table"), mock.patch(
+        "music_fetch.tui.U.print_info"
+    ), mock.patch("music_fetch.tui.U.ask", side_effect=["p", "n", "n", ""]), mock.patch(
+        "music_fetch.tui.U.print_warning"
+    ) as warning_mock:
+        app._show_batch_rows(rows)
+
+    warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
+    assert "已经是第一页。" in warnings
+    assert "已经是最后一页。" in warnings
+
+
 def test_task_detail_pause_then_resume(app, tmp_path):
     item = app.queue.enqueue(DownloadRequest("1", "song", tmp_path / "1.mp3"))
 

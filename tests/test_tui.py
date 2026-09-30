@@ -176,7 +176,10 @@ class TuiAppHelperTests(unittest.TestCase):
             return mock.Mock(nickname="测试用户")
 
         with mock.patch("music_fetch.tui.fetch_account_profile", side_effect=slow_fetch), \
-                mock.patch("music_fetch.tui.U.menu", return_value=11) as menu_mock, \
+                mock.patch(
+                    "music_fetch.tui.U.menu",
+                    side_effect=lambda title, options, **kwargs: options.index(MENU_QUIT) + 1,
+                ) as menu_mock, \
                 mock.patch("music_fetch.tui.U.print_status") as status_mock, \
                 mock.patch("music_fetch.tui.U.clear_screen"), \
                 mock.patch("music_fetch.tui.U.print_header"), \
@@ -195,7 +198,10 @@ class TuiAppHelperTests(unittest.TestCase):
         # A saved cookie skips the login gate; the background check is kept offline.
         self.app.session.cookie = "MUSIC_U=x"
         with mock.patch("music_fetch.tui.fetch_account_profile", return_value=mock.Mock(nickname="测")), \
-                mock.patch("music_fetch.tui.U.menu", return_value=11), \
+                mock.patch(
+                    "music_fetch.tui.U.menu",
+                    side_effect=lambda title, options, **kwargs: options.index(MENU_QUIT) + 1,
+                ), \
                 mock.patch("music_fetch.tui.U.clear_screen"), \
                 mock.patch("music_fetch.tui.U.print_header"), \
                 mock.patch("music_fetch.tui.U.print_status"), \
@@ -449,6 +455,74 @@ class TuiAppHelperTests(unittest.TestCase):
             self.app._edit_proxy()
         configure_mock.assert_not_called()
 
+    def test_liked_screen_opens_the_account_playlist(self):
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch(
+            "music_fetch.tui.fetch_account_profile", return_value=mock.Mock(user_id=4242)
+        ), mock.patch("music_fetch.tui.U.spinner"), mock.patch(
+            "music_fetch.tui.U.print_header"
+        ), mock.patch.object(self.app, "_batch_flow") as batch_mock:
+            self.app._screen_liked()
+        batch_mock.assert_called_once_with("https://music.163.com/playlist?id=4242")
+
+    def test_liked_screen_warns_when_the_account_id_is_missing(self):
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch(
+            "music_fetch.tui.fetch_account_profile", return_value=mock.Mock(user_id=None)
+        ), mock.patch("music_fetch.tui.U.spinner"), mock.patch(
+            "music_fetch.tui.U.print_header"
+        ), mock.patch("music_fetch.tui.U.print_warning") as warning_mock, mock.patch.object(
+            self.app, "_batch_flow"
+        ) as batch_mock:
+            self.app._screen_liked()
+        warning_mock.assert_called_once()
+        batch_mock.assert_not_called()
+
+    def test_liked_screen_hands_expired_login_to_the_reauth_flow(self):
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch(
+            "music_fetch.tui.fetch_account_profile",
+            side_effect=MusicFetchError("AUTH_EXPIRED", "expired"),
+        ), mock.patch("music_fetch.tui.U.spinner"), mock.patch(
+            "music_fetch.tui.U.print_header"
+        ), mock.patch("music_fetch.tui.U.print_error"), mock.patch.object(
+            self.app, "_handle_auth_expired"
+        ) as expired_mock, mock.patch.object(self.app, "_batch_flow") as batch_mock:
+            self.app._screen_liked()
+        expired_mock.assert_called_once()
+        batch_mock.assert_not_called()
+
+    def test_playlist_search_opens_the_picked_playlist(self):
+        playlists = [
+            UserPlaylist(str(index), f"歌单 {index}", index, "", "用户")
+            for index in range(1, 12)
+        ]
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.search_playlists", return_value=playlists), mock.patch(
+            "music_fetch.tui.U.spinner"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.print_table"
+        ) as table_mock, mock.patch("music_fetch.tui.U.print_info"), mock.patch(
+            "music_fetch.tui.U.ask", side_effect=["摇滚", "n", "11"]
+        ), mock.patch.object(self.app, "_batch_flow") as batch_mock:
+            self.app._screen_playlist_search()
+
+        self.assertEqual(table_mock.call_count, 2)  # page 1 → page 2
+        batch_mock.assert_called_once_with("https://music.163.com/playlist?id=11")
+
+    def test_playlist_search_without_matches_warns(self):
+        self.app.session.cookie = "MUSIC_U=test"
+        with mock.patch("music_fetch.tui.search_playlists", return_value=[]), mock.patch(
+            "music_fetch.tui.U.spinner"
+        ), mock.patch("music_fetch.tui.U.print_header"), mock.patch(
+            "music_fetch.tui.U.ask", return_value="摇滚"
+        ), mock.patch(
+            "music_fetch.tui.U.print_warning"
+        ) as warning_mock, mock.patch.object(self.app, "_batch_flow") as batch_mock:
+            self.app._screen_playlist_search()
+        warning_mock.assert_called_once()
+        batch_mock.assert_not_called()
+
     def test_search_screen_pages_and_redraws_after_pick(self):
         results = [
             SearchResult(str(index), f"歌 {index}", "歌手", "专辑", 60000)
@@ -619,10 +693,13 @@ class ConsistencyTests(TuiAppHelperTests):
     def test_submenu_ctrl_c_returns_to_menu_instead_of_exiting(self):
         # Footer promises "Ctrl+C 返回" on sub-screens: it must not quit.
         self.app.session.cookie = "MUSIC_U=x"
-        menu_inputs = iter([1, 11])  # 单曲下载 → Ctrl+C inside → 退出
+        labels = iter([music_fetch.tui.MENU_SINGLE, MENU_QUIT])  # 单曲下载 → Ctrl+C inside → 退出
+
         def fake_menu(title, options, **kwargs):
             if title == "主菜单":
-                return next(menu_inputs)
+                # Resolve by label so adding a menu entry cannot silently retarget
+                # this test at a different screen.
+                return options.index(next(labels)) + 1
             return 1
         with mock.patch(
             # run() kicks off the background login check; keep it offline.

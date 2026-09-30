@@ -39,6 +39,7 @@ from music_fetch.api import (
     detect_song,
     normalize_media_url,
     search_songs,
+    search_playlists,
     SearchResult,
     fetch_user_playlists,
     UserPlaylist,
@@ -122,6 +123,7 @@ __all__ = [
     "detect_song",
     "normalize_media_url",
     "search_songs",
+    "search_playlists",
     "fetch_user_playlists",
     "fetch_lyric",
     # Download runner / batch (TUI-era)

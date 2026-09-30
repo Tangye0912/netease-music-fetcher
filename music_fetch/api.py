@@ -18,7 +18,7 @@ __all__ = [
     "fetch_playable_candidates", "fetch_song_metadata", "fetch_playlist_song_ids",
     "fetch_album_songs", "AlbumDetail", "ALBUM_API",
     "detect_song", "normalize_media_url",
-    "search_songs", "SearchResult",
+    "search_songs", "SearchResult", "search_playlists",
     "fetch_user_playlists", "UserPlaylist",
     "SUPPORTED_AUDIO_FORMATS",
     "USER_AGENT", "OUTER_MEDIA_URL_API",
@@ -741,9 +741,19 @@ def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) 
     return results
 
 
+def _safe_int(value: object) -> int:
+    """Coerce an untyped API field to int; unusable values become 0."""
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 # ── User playlists ──────────────────────────────────────────────
 
 USER_PLAYLIST_API = "https://music.163.com/api/user/playlist"
+# The search endpoint multiplexes on `type`: 1 = songs, 1000 = playlists.
+PLAYLIST_SEARCH_TYPE = "1000"
 
 
 @dataclass
@@ -804,7 +814,7 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
             results.append(UserPlaylist(
                 playlist_id=playlist_id,
                 name=str(playlist.get("name") or ""),
-                song_count=int(playlist.get("trackCount") or 0),
+                song_count=_safe_int(playlist.get("trackCount")),
                 cover_url=str(playlist.get("coverImgUrl") or ""),
                 creator=str(creator.get("nickname") or ""),
             ))
@@ -818,6 +828,47 @@ def fetch_user_playlists(cookie: str, timeout: int = 10) -> list[UserPlaylist]:
         if more is False or (more is None and len(raw_playlists) < page_size):
             break
     logger.info("User playlists fetched. count=%s", len(results))
+    return results
+
+
+def search_playlists(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) -> list[UserPlaylist]:
+    """Search playlists by keyword on NetEase Cloud Music.
+
+    Shares the search endpoint with search_songs and differs only by `type`
+    (1000 = playlists).  Request failures raise MusicFetchError so callers can
+    tell "no results" apart from a network problem; no matches returns [].
+    """
+    if not keyword.strip():
+        return []
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
+    payload = {"s": keyword, "type": PLAYLIST_SEARCH_TYPE, "limit": str(limit), "offset": "0"}
+    status, body = perform_json_post(SEARCH_API, payload, headers, timeout=timeout)
+    if status in (401, 403):
+        raise MusicFetchError(ErrorCode.AUTH_EXPIRED, "Login state expired. Run music-fetch without arguments to scan QR login again.")
+    if status != 200 or body.get("code") != 200:
+        raise MusicFetchError(
+            ErrorCode.NETWORK_ERROR,
+            str(body.get("message") or f"Playlist search failed: status={status}, code={body.get('code')}"),
+        )
+    raw_result = body.get("result")
+    raw_playlists = raw_result.get("playlists") or [] if isinstance(raw_result, dict) else []
+    results: list[UserPlaylist] = []
+    for playlist in raw_playlists:
+        if not isinstance(playlist, dict):
+            continue
+        playlist_id = str(playlist.get("id") or "")
+        if not playlist_id:
+            continue
+        creator_value = playlist.get("creator")
+        creator = creator_value if isinstance(creator_value, dict) else {}
+        results.append(UserPlaylist(
+            playlist_id=playlist_id,
+            name=str(playlist.get("name") or ""),
+            song_count=_safe_int(playlist.get("trackCount")),
+            cover_url=str(playlist.get("coverImgUrl") or ""),
+            creator=str(creator.get("nickname") or ""),
+        ))
+    logger.info("Playlist search completed. keyword=%s results=%s", keyword, len(results))
     return results
 
 

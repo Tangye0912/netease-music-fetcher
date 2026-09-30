@@ -30,6 +30,7 @@ from music_fetch.api import (
     fetch_user_playlists,
     normalize_cookie,
     parse_input_resource,
+    search_playlists,
     search_songs,
 )
 from music_fetch.app_logging import default_log_path, setup_logging
@@ -81,7 +82,9 @@ logger = logging.getLogger("music_fetch.tui")
 
 MENU_SINGLE = "单曲下载"
 MENU_SEARCH = "搜索下载"
+MENU_LIKED = "我喜欢的音乐"
 MENU_PLAYLISTS = "我的歌单"
+MENU_PLAYLIST_SEARCH = "歌单搜索"
 MENU_BATCH = "批量下载"
 MENU_TASKS = "下载任务"
 MENU_HISTORY = "下载历史"
@@ -314,7 +317,9 @@ class TuiApp:
                 options = [
                     MENU_SINGLE,
                     MENU_SEARCH,
+                    MENU_LIKED,
                     MENU_PLAYLISTS,
+                    MENU_PLAYLIST_SEARCH,
                     MENU_BATCH,
                     MENU_TASKS,
                     MENU_HISTORY,
@@ -365,8 +370,12 @@ class TuiApp:
             self._screen_single()
         elif label == MENU_SEARCH:
             self._screen_search()
+        elif label == MENU_LIKED:
+            self._screen_liked()
         elif label == MENU_PLAYLISTS:
             self._screen_playlists()
+        elif label == MENU_PLAYLIST_SEARCH:
+            self._screen_playlist_search()
         elif label == MENU_BATCH:
             self._screen_batch()
         elif label == MENU_HISTORY:
@@ -704,6 +713,62 @@ class TuiApp:
             on_pick=on_pick,
         )
 
+    def _screen_liked(self) -> None:
+        """Jump straight into the liked-songs list as a batch download."""
+        U.print_header(MENU_LIKED)
+        if not self._require_login():
+            return
+        with U.spinner("获取喜欢的音乐..."):
+            try:
+                profile = fetch_account_profile(self.session.cookie, timeout=self.session.detect_timeout_sec)
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                if err.code == "AUTH_EXPIRED":
+                    self._handle_auth_expired()
+                return
+        if not profile.user_id:
+            U.print_warning("无法确定账号 ID，请改用「我的歌单」进入。")
+            return
+        # NetEase exposes the liked-songs playlist under the account's own id,
+        # so this reuses the playlist expansion path instead of a second API.
+        self._batch_flow(f"https://music.163.com/playlist?id={profile.user_id}")
+
+    def _screen_playlist_search(self) -> None:
+        U.print_header(MENU_PLAYLIST_SEARCH)
+        keyword = U.ask("输入歌单关键词（回车返回）")
+        if not keyword:
+            return
+        if not self._require_login():
+            return
+        with U.spinner("搜索歌单中..."):
+            try:
+                playlists = search_playlists(keyword, self.session.cookie, timeout=self.session.detect_timeout_sec)
+            except MusicFetchError as err:
+                U.print_error(user_error_message(err.code, err.message))
+                if err.code == "AUTH_EXPIRED":
+                    self._handle_auth_expired()
+                return
+        if not playlists:
+            U.print_warning("未找到相关歌单。")
+            return
+
+        def render_row(index: int, playlist: UserPlaylist) -> tuple[str, ...]:
+            return (str(index), playlist.name, str(playlist.song_count), playlist.creator or "-")
+
+        def on_pick(playlist: UserPlaylist) -> bool:
+            self._batch_flow(f"https://music.163.com/playlist?id={playlist.playlist_id}")
+            return False
+
+        self._paginated_pick(
+            playlists,
+            page_size=10,
+            headers=["#", "歌单", "歌数", "创建者"],
+            render_row=render_row,
+            count_label=f"共 {len(playlists)} 个歌单",
+            prompt="输入序号（0 返回；n 下一页；p 上一页）",
+            on_pick=on_pick,
+        )
+
     # ── batch ─────────────────────────────────────────────────────
 
     def _screen_batch(self) -> None:
@@ -741,16 +806,7 @@ class TuiApp:
             f"识别完成：共 {summary.total} 条，可下载 {summary.ready} 条，"
             f"重复 {summary.duplicate} 条，失败/不可下载 {summary.bad} 条。"
         )
-        table_rows = [
-            (
-                f"{index}",
-                row.song_name or row.song_id,
-                format_bytes(row.media_size_bytes) if row.media_size_bytes else "-",
-                T.batch_detect_status_text(row.status),
-            )
-            for index, row in enumerate(rows, start=1)
-        ]
-        U.print_table(["#", "歌曲", "大小", "状态"], table_rows)
+        self._show_batch_rows(rows)
         ready = [row for row in rows if row.status == "ready"]
         if not ready:
             U.print_warning("没有可下载的歌曲。")
@@ -839,6 +895,45 @@ class TuiApp:
             U.print_info("主菜单 → 下载任务：查看进度、重试失败项或导出批次结果。")
         else:
             U.print_warning("没有需要下载的歌曲（已存在的都已跳过）。")
+
+    def _show_batch_rows(self, rows: Sequence[BatchDetectRow], page_size: int = 15) -> None:
+        """Print the detected rows a page at a time so long playlists stay readable.
+
+        Row numbers stay global (1..len(rows)), so the preview prompt and the
+        download selection keep referring to the same indexes as before.
+        """
+        total_pages = max(1, (len(rows) + page_size - 1) // page_size)
+        page = 0
+        while True:
+            start = page * page_size
+            page_rows = rows[start:start + page_size]
+            table_rows = [
+                (
+                    f"{index}",
+                    row.song_name or row.song_id,
+                    format_bytes(row.media_size_bytes) if row.media_size_bytes else "-",
+                    T.batch_detect_status_text(row.status),
+                )
+                for index, row in enumerate(page_rows, start=start + 1)
+            ]
+            U.print_table(["#", "歌曲", "大小", "状态"], table_rows)
+            if total_pages <= 1:
+                return
+            U.print_info(f"第 {page + 1}/{total_pages} 页 · 共 {len(rows)} 条")
+            raw = U.ask("n 下一页；p 上一页；回车继续").strip().lower()
+            if raw == "n":
+                if page + 1 < total_pages:
+                    page += 1
+                else:
+                    U.print_warning("已经是最后一页。")
+                continue
+            if raw == "p":
+                if page > 0:
+                    page -= 1
+                else:
+                    U.print_warning("已经是第一页。")
+                continue
+            return
 
     @staticmethod
     def _detect_progress(current: int, total: int, state: list[int]) -> None:
