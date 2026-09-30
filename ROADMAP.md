@@ -7,15 +7,19 @@
 - `ROADMAP.md` 只记录尚未完成、可以验证的后续工作。
 - 每条行为改动必须补对应测试，并优先采用小而可审查的提交。
 
-## Current Backlog (after v3.6.1)
+## Current Backlog (after v3.7.0)
 
 > v3.4 起移除脚本模式（CLI），所有后续工作聚焦 TUI 体验。
-> v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化，v3.6.1 为修复版本；
-> 增量下载策略（跳过/覆盖/重命名）与 M4A/FLAC 封面嵌入已落地，见 CHANGELOG 的 Unreleased 段。
+> v3.5 交付后台任务队列，v3.6 交付队列持久化与任务页实时化，v3.6.1 为修复版本。
+> v3.7.0 交付增量下载策略与 M4A/FLAC 封面嵌入，并修复 v3.6.1 代码审查发现的 27 项问题（详见 CHANGELOG 与 `CODE_REVIEW.md`）。
 
-### Known Issues（v3.6.1 代码审查遗留，尚未修复）
+### 有意保留（审查结论，暂不修改）
 
-- [ ] 无控制台环境（stdin 被管道或重定向）启动冻结包时，菜单能正常以纯文本渲染，但读取输入会抛出 `prompt_toolkit...NoConsoleScreenBufferError` 的原始 traceback 并以 1 退出（v3.6.1 Windows 构建本地实测）。计划：捕获该异常并给出中文提示。
+> 完整理由见 `CODE_REVIEW.md` 的「明确未改」一节；这里只保留需要跟踪的结论。
+
+- [ ] `cancel()`/`cancel_all()` 仍在队列锁内写历史：`poll()` 这条热路径已不持锁写盘，彻底移出需要重构 `cancel_all`/`close` 的锁边界，收益小、风险高。
+- [ ] `eapi.py` 当前零引用（死代码）：删除属结构性清理，是否真做加密传输迁移见下方 v3.8。
+- [ ] 同一 stem 的不同格式共用 `.lrc`：会话内由队列的 stem 预留规避，跨会话冲突概率极低；改名（如 `song.mp3.lrc`）会影响用户可见文件名，故保留。
 
 ### TUI Experience
 
@@ -25,9 +29,9 @@
 - [ ] 分组视图的批次信息跨重启保留（当前 `_batches` 仅存在于本次运行）。
 - [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。冻结包启动与主菜单渲染已在 v3.6.1 的 Windows 构建上本地验证（无缺失导入、版本号正确），其余交互项仍待人工验证。
 
-### v3.7 — Download Efficiency and API Evolution
+### v3.8 — API Evolution（待决策）
 
-- [ ] 将可播放地址请求逐步迁移到 `eapi.py` 加密传输，并保留可回退的兼容路径（CHANGELOG v3.3.0 起的既定方向）。
+- [ ] 决定 `eapi.py` 的归宿：目前它**零引用**（QR 登录早已迁到浏览器 CDP，加密传输未接入任何调用）。要么删除（连带 `tests/test_eapi.py`、`music-fetch.spec` 的 `Crypto*` hiddenimports 与相关 CHANGELOG 引用），要么真做迁移——把可播放地址请求切到加密传输并保留可回退路径（CHANGELOG v3.3.0 起的既定方向），后者需要真实接口验证且收益未证实。
 
 ### v4.0 — Fullscreen Experiment（待定）
 

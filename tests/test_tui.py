@@ -505,6 +505,26 @@ class TuiMainTests(unittest.TestCase):
         instance.run.side_effect = KeyboardInterrupt()
         self.assertEqual(music_fetch.tui.main(), 0)
 
+    @mock.patch("music_fetch.tui.U.print_info")
+    @mock.patch("music_fetch.tui.U.print_error")
+    @mock.patch("music_fetch.tui.setup_logging")
+    @mock.patch("music_fetch.tui.TuiApp")
+    def test_missing_console_gets_a_friendly_hint(self, app_mock, _log_mock, error_mock, info_mock):
+        class NoConsoleScreenBufferError(Exception):
+            """Stands in for prompt_toolkit's win32 error (matched by name)."""
+
+        app_mock.return_value.run.side_effect = NoConsoleScreenBufferError("No Windows console found")
+        self.assertEqual(music_fetch.tui.main(), 1)
+        self.assertIn("终端控制台", str(error_mock.call_args))
+        self.assertIn("终端窗口", str(info_mock.call_args))
+
+    def test_missing_console_error_is_matched_by_class_name(self):
+        class NoConsoleScreenBufferError(Exception):
+            pass
+
+        self.assertTrue(music_fetch.tui._is_missing_console_error(NoConsoleScreenBufferError("x")))
+        self.assertFalse(music_fetch.tui._is_missing_console_error(RuntimeError("x")))
+
 
 if __name__ == "__main__":
     unittest.main()

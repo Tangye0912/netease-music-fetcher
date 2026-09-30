@@ -1636,6 +1636,15 @@ class TuiApp:
             U.print_success(f"当前已是最新版本（v{APP_VERSION}）。")
 
 
+def _is_missing_console_error(err: BaseException) -> bool:
+    """True when prompt_toolkit reports that the process has no usable console.
+
+    Matched by class name: prompt_toolkit's win32 output module cannot be
+    imported (or even referenced) on the other platforms.
+    """
+    return err.__class__.__name__ == "NoConsoleScreenBufferError"
+
+
 def main() -> int:
     setup_logging(default_log_path(), level=logging.INFO)
     logger.info("TUI started. version=%s", APP_VERSION)
@@ -1649,6 +1658,17 @@ def main() -> int:
     except EOFError:
         return 0
     except Exception as err:
+        if _is_missing_console_error(err):
+            # Launched without a console (or with stdin piped/redirected): the
+            # menu can still be drawn, but input cannot be read.  Say what to do
+            # instead of surfacing "No Windows console found".
+            print()
+            U.print_error("未检测到可用的终端控制台，无法进入交互界面。")
+            U.print_info(
+                "请在 Windows Terminal、cmd 或 PowerShell 等终端窗口中直接运行本程序，"
+                "不要用管道或重定向提供输入。"
+            )
+            return 1
         # Last-resort guard: an unexpected error must leave the terminal usable
         # and point at the log, not dump an interpreter traceback on the user.
         logger.exception("Unhandled error in the TUI.")
