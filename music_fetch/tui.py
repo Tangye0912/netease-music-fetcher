@@ -820,11 +820,16 @@ class TuiApp:
             if action == 3:
                 return
             if action == 2:
+                # Only ready rows are offered; an empty list is impossible here
+                # because the caller already returned when nothing is ready.
                 ready_numbers = [str(index) for index, row in enumerate(rows, start=1) if row.status == "ready"]
-                if not ready_numbers:
-                    U.print_warning("没有可试听的歌曲。")
-                    continue
-                pick = U.ask(f"输入要试听的序号（{'、'.join(ready_numbers)}；0 返回）").strip()
+                # A liked-songs list can hold thousands of tracks: listing every
+                # ready number makes the prompt unreadable (and thousands of
+                # characters long), so show a prefix — any number is accepted.
+                shown_numbers = "、".join(ready_numbers[:15])
+                if len(ready_numbers) > 15:
+                    shown_numbers += "…"
+                pick = U.ask(f"输入要试听的序号（{shown_numbers}；0 返回）").strip()
                 if not pick or pick == "0":
                     continue
                 picked = U.parse_index(pick)
@@ -838,15 +843,23 @@ class TuiApp:
                 U.print_warning(f"请输入 1-{len(rows)} 的序号，或 0 返回。")
                 continue
             break
+        # The checklist only holds the ready subset, so it numbers itself with
+        # the *table row* — otherwise a user counting rows on screen picks the
+        # wrong song (entry #2 of three table rows used to be the third song).
+        ready_indexed = [(index, row) for index, row in enumerate(rows, start=1) if row.status == "ready"]
         entries = [
-            (f"{row.song_name or row.song_id}（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）", row.selected)
-            for row in ready
+            (
+                f"{index}. {row.song_name or row.song_id}"
+                f"（{format_bytes(row.media_size_bytes) if row.media_size_bytes else '未知大小'}）",
+                row.selected,
+            )
+            for index, row in ready_indexed
         ]
         selected = U.multiselect("选择要下载的歌曲（空格勾选，Tab 切到「确定」后回车提交，Esc 取消）", entries)
         if not selected:
             self._offer_batch_export(rows)
             return
-        chosen = [ready[index] for index in selected]
+        chosen = [ready_indexed[index][1] for index in selected]
         out_dir_raw = self._ask_with_cancel(
             "保存目录（直接回车用默认；输入 0 取消）", default=self.session.last_download_dir
         )
@@ -901,8 +914,10 @@ class TuiApp:
     def _show_batch_rows(self, rows: Sequence[BatchDetectRow], page_size: int = 15) -> None:
         """Print the detected rows a page at a time so long playlists stay readable.
 
-        Row numbers stay global (1..len(rows)), so the preview prompt and the
-        download selection keep referring to the same indexes as before.
+        Row numbers stay global (1..len(rows)), so the preview prompt keeps
+        referring to the same indexes as before.  The download checklist is a
+        separate list over the ready subset and numbers itself with the table
+        row, so the two cannot be confused.
         """
         total_pages = max(1, (len(rows) + page_size - 1) // page_size)
         page = 0
@@ -1753,12 +1768,17 @@ def main() -> int:
         U.print_info("再见！")
         return 0
     except EOFError:
+        # No interactive input available (stdin closed or redirected).  POSIX
+        # takes this path; Windows takes the console-error branch below.
+        print()
+        U.print_info("输入已结束，退出。")
         return 0
     except Exception as err:
         if _is_missing_console_error(err):
-            # Launched without a console (or with stdin piped/redirected): the
-            # menu can still be drawn, but input cannot be read.  Say what to do
-            # instead of surfacing "No Windows console found".
+            # prompt_toolkit's Win32 *output* path raises this when the process
+            # has no usable console (launched without one, or stdout redirected):
+            # the menu can still be drawn, but nothing can be asked.  Explain
+            # that instead of surfacing "No Windows console found".
             print()
             U.print_error("未检测到可用的终端控制台，无法进入交互界面。")
             U.print_info(

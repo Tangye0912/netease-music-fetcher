@@ -599,6 +599,16 @@ class TuiMainTests(unittest.TestCase):
         self.assertTrue(music_fetch.tui._is_missing_console_error(NoConsoleScreenBufferError("x")))
         self.assertFalse(music_fetch.tui._is_missing_console_error(RuntimeError("x")))
 
+    @mock.patch("music_fetch.tui.U.print_info")
+    @mock.patch("music_fetch.tui.setup_logging")
+    @mock.patch("music_fetch.tui.TuiApp")
+    def test_end_of_input_exits_with_a_farewell(self, app_mock, _log_mock, info_mock):
+        # POSIX takes this path when there is no interactive console; exiting
+        # silently left the user with no explanation at all.
+        app_mock.return_value.run.side_effect = EOFError()
+        self.assertEqual(music_fetch.tui.main(), 0)
+        self.assertIn("输入已结束", str(info_mock.call_args))
+
 
 if __name__ == "__main__":
     unittest.main()

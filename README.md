@@ -101,12 +101,14 @@ music-fetch    # 交互界面（TUI），唯一入口
 
 ### 1.10 核心能力
 
+> 「下一版」标记的功能已在 `main` 上实现，但**尚未包含在最新发布版 v3.7.0** 的二进制里（见 CHANGELOG 的 Unreleased 段）。
+
 - 登录：自动打开 Chrome/Edge 官网二维码页面，扫码后经本机 DevTools 协议取回并保存凭证；无需提前登录网易云网页
 - 单曲：链接/分享文案/歌曲 ID → 检测 → 目录/文件名/格式/歌词模式 → 加入后台队列，立即继续浏览
 - 搜索：按歌名/歌手名搜索并直接下载
 - 我的歌单：登录后分页浏览创建/收藏的歌单，选中即进入批量流程
-- 我喜欢的音乐：主菜单直达，取到账号 ID 后进入该歌单的批量流程，整单挑选下载
-- 歌单搜索：按关键词搜索歌单，分页选择后整单进入批量下载
+- 我喜欢的音乐（下一版）：主菜单直达，取到账号 ID 后进入该歌单的批量流程，整单挑选下载
+- 歌单搜索（下一版）：按关键词搜索歌单，分页选择后整单进入批量下载
 - 专辑：输入专辑链接或分享文案，自动展开曲目进入批量下载
 - 批量：多行粘贴 → 并发识别（歌单/专辑自动展开、去重）→ 结果分页显示（`n`/`p` 翻页）→ 键盘多选 → 后台并发下载 → 任务页查看结果、重试和导出批次 CSV
 - 歌词：原文、翻译或按时间轴合并的双语 `.lrc`，并嵌入支持的音频标签
@@ -206,7 +208,7 @@ git push origin v3.0.0
 | 路径 | 职责 |
 | --- | --- |
 | `music_fetch/app.py` | 入口：无参数进入 TUI；传参数提示"脚本模式已移除"并退出。 |
-| `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/专辑/批量/历史/设置/诊断。 |
+| `music_fetch/tui.py` | 终端交互界面：主菜单、登录、单曲/搜索/歌单/我喜欢的音乐/歌单搜索/专辑/批量/历史/设置/诊断。 |
 | `music_fetch/tui_utils.py` | TUI 组件：菜单、确认、键盘多选、信息卡片、加载动画、表格与进度辅助。 |
 | `music_fetch/download_queue.py` | 应用后台队列、统一并发、任务控制、登录恢复与结果落盘。 |
 | `music_fetch/download_runner.py` | 线程下载任务：进度快照、暂停/恢复/取消（替换原 QThread worker）。 |
@@ -221,6 +223,7 @@ git push origin v3.0.0
 | `music_fetch/batch_results.py` | 批量结果纯逻辑：失败筛选、状态汇总、失败原因聚合、安全 CSV 生成。 |
 | `music_fetch/app_stores.py` | 本地持久化：扫码登录会话、下载历史、任务队列（`queue.json`）。 |
 | `music_fetch/history_results.py` | 下载历史纯逻辑：组合筛选、分页、安全 CSV 导出。 |
+| `music_fetch/csv_utils.py` | CSV 单元格防护（防公式注入），被批量结果与下载历史导出共用。 |
 | `music_fetch/download_tasks.py` / `download_retry.py` | 任务状态模型与失败重试判断。 |
 | `music_fetch/diagnostics.py` | 诊断核心：日志尾部、脱敏、API/CDN 探针与报告生成。 |
 | `music_fetch/version_check.py` | GitHub API 版本检查。 |
@@ -232,7 +235,7 @@ git push origin v3.0.0
 | `.github/workflows/ci.yml` / `build.yml` | CI：push/PR 跑测试与静态检查；打 `v*` tag 触发三平台打包发布。 |
 | `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）；`tests/conftest.py` 会拦截任何真实出网请求。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |
-| `CODE_REVIEW.md` | 针对 v3.6.1 的一次完整代码审查记录（27 条发现的现象、复现与修复状态）。 |
+| `CODE_REVIEW.md` | 代码审查记录：v3.6.1 一轮（27 条）与 v3.7.0 发布后一轮（含对新增测试假绿的复核与处置）。 |
 
 ## 7. 测试
 

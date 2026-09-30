@@ -127,7 +127,7 @@ class SessionStore:
         return AppSession(
             cookie=str(raw.get("cookie") or ""),
             remember_login=bool(raw.get("remember_login", True)),
-            last_download_dir=str(raw.get("last_download_dir") or DEFAULT_DOWNLOAD_DIR),
+            last_download_dir=str(raw.get("last_download_dir") or "").strip() or DEFAULT_DOWNLOAD_DIR,
             detect_timeout_sec=self._safe_detect_timeout(raw.get("detect_timeout_sec")),
             download_timeout_sec=self._safe_download_timeout(raw.get("download_timeout_sec")),
             download_retry_count=self._safe_download_retry_count(raw.get("download_retry_count")),
@@ -146,7 +146,7 @@ class SessionStore:
         payload = {
             "cookie": session.cookie if session.remember_login else "",
             "remember_login": session.remember_login,
-            "last_download_dir": session.last_download_dir,
+            "last_download_dir": str(session.last_download_dir or "").strip() or DEFAULT_DOWNLOAD_DIR,
             "detect_timeout_sec": self._safe_detect_timeout(session.detect_timeout_sec),
             "download_timeout_sec": self._safe_download_timeout(session.download_timeout_sec),
             "download_retry_count": self._safe_download_retry_count(session.download_retry_count),

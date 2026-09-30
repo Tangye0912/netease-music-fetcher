@@ -146,7 +146,9 @@ def parse_song_id(value: str) -> str:
 
 def parse_input_resource(value: str) -> tuple[str, str]:
     raw = value.strip()
-    if raw.isdigit():
+    # str.isdigit() is true for superscripts ("²") and other non-ASCII digits,
+    # which int() then rejects far away from here (see fetch_playable_candidates).
+    if raw.isascii() and raw.isdigit():
         logger.info("Parsed numeric song id directly: %s", raw)
         return "song", raw
 
@@ -402,8 +404,16 @@ def fetch_playable_candidates(song_id: str, cookie: str, timeout: int) -> list[P
     candidates: list[PlayableCandidate] = []
     seen_urls: set[str] = set()
 
+    try:
+        numeric_id = int(song_id)
+    except (TypeError, ValueError, OverflowError):
+        # Reachable from hand-typed input: str.isdigit() accepts "²", and int()
+        # refuses strings above 4300 digits.  Without this guard the ValueError
+        # escapes into the TUI (which only catches MusicFetchError).
+        raise MusicFetchError(ErrorCode.INVALID_URL, f"Invalid song id: {song_id!r}") from None
+
     for level, encode_type in PLAYABLE_REQUEST_PROFILES:
-        payload = {"ids": json.dumps([int(song_id)]), "level": level, "encodeType": encode_type, "csrf_token": csrf}
+        payload = {"ids": json.dumps([numeric_id]), "level": level, "encodeType": encode_type, "csrf_token": csrf}
         status, body = perform_json_post(PLAYER_URL_API, payload, headers, timeout=timeout)
         logger.info("Requested playable url. song_id=%s level=%s encode=%s status=%s api_code=%s", song_id, level, encode_type, status, body.get("code"))
         if status in (401, 403):
@@ -742,9 +752,16 @@ def search_songs(keyword: str, cookie: str, timeout: int = 10, limit: int = 30) 
 
 
 def _safe_int(value: object) -> int:
-    """Coerce an untyped API field to int; unusable values become 0."""
+    """Coerce an untyped API field to int; unusable values become 0.
+
+    Integer-looking input is converted exactly — a float round-trip loses
+    precision above 2**53 — while scientific notation still works.
+    """
+    text = str(value).strip()
+    if text.isascii() and (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+        return int(text)
     try:
-        return int(float(str(value)))
+        return int(float(text))
     except (TypeError, ValueError, OverflowError):
         return 0
 

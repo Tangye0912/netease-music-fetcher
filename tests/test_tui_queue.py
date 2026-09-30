@@ -404,6 +404,12 @@ def test_batch_rows_are_paged_with_global_numbering(app):
     assert len(rendered) == 2
     assert rendered[0][0][0] == "1"    # the first page starts at row 1…
     assert rendered[1][0][0] == "16"   # …and the second keeps global numbering
+    # Assert the content too: numbering alone would not notice a page that
+    # renders the wrong slice (the first mutation attempt escaped this test).
+    assert rendered[0][0][1] == "歌 1"
+    assert rendered[0][-1][1] == "歌 15"
+    assert rendered[1][0][1] == "歌 16"
+    assert rendered[1][-1][1] == "歌 20"
     assert [call.args[0] for call in ask_mock.call_args_list] == ["n 下一页；p 上一页；回车继续"] * 2
 
 

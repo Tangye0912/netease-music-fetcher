@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from music_fetch.api import MusicFetchError
+from music_fetch.app_settings import DEFAULT_DOWNLOAD_DIR, APP_VERSION
 from music_fetch.app_stores import DownloadHistoryStore, SessionStore
 from music_fetch.batch_models import BatchDetectRow
 from music_fetch.download_queue import DownloadProgressSnapshot, DownloadRequest
@@ -360,7 +361,10 @@ class BatchExportTests(TuiScreenTestCase):
         target = Path(self._tmp.name) / "batch"
         with offline_ui(confirm=True, ask=str(target)) as ui:
             self.app._offer_batch_export(self._rows())
-        self.assertTrue(target.with_suffix(".csv").exists())
+        written = target.with_suffix(".csv")
+        self.assertTrue(written.exists())
+        # Content, not just existence: writing an empty file used to pass.
+        self.assertIn("A", written.read_text(encoding="utf-8-sig"))
         ui["print_success"].assert_called()
 
     def test_export_can_be_declined(self):
@@ -387,7 +391,7 @@ class QueueStatusTests(TuiScreenTestCase):
         self.assertEqual(self.app._queue_status(), "")
 
     def test_status_reports_counts_progress_and_flags(self):
-        item = self.app.queue.enqueue(DownloadRequest("1", "song", Path(self._tmp.name) / "1.mp3"))
+        self.app.queue.enqueue(DownloadRequest("1", "song", Path(self._tmp.name) / "1.mp3"))
         self.app.queue._items[0].state = "running"
         self.app.queue._items[0].progress = DownloadProgressSnapshot(50, 100, 1234)
         self.app.queue._history_error = "history broken"
@@ -397,7 +401,6 @@ class QueueStatusTests(TuiScreenTestCase):
         self.assertIn("任务 |", text)
         self.assertIn("下载中", text)
         self.assertIn("历史保存失败", text)
-        self.assertIn(item.request.song_id, [entry.request.song_id for entry in self.app.queue.snapshot()])
 
 
 class TaskPageKeyTests(TuiScreenTestCase):
@@ -582,7 +585,9 @@ class HistoryScreenTests(TuiScreenTestCase):
         target = Path(self._tmp.name) / "history"
         with offline_ui(confirm=True, ask=str(target)) as ui:
             self.app._export_history_csv(self.history_store.load())
-        self.assertTrue(target.with_suffix(".csv").exists())
+        written = target.with_suffix(".csv")
+        self.assertTrue(written.exists())
+        self.assertIn("歌 1", written.read_text(encoding="utf-8-sig"))
         ui["print_success"].assert_called()
 
     def test_export_history_csv_handles_no_rows_and_errors(self):
@@ -764,6 +769,58 @@ class BatchFlowInteractionTests(TuiScreenTestCase):
             self.app._batch_flow("x")
         export_mock.assert_not_called()
 
+    def test_preview_prompt_stays_readable_for_huge_batches(self):
+        rows = [
+            BatchDetectRow(str(index), song_id=str(index), song_name=f"歌 {index}", status="ready")
+            for index in range(1, 101)
+        ]
+        picks = iter([2, 3])  # 试听某首 → 返回
+        with self._detect(rows), mock.patch.object(self.app, "_preview_song"), offline_ui(
+            side_effect_menu=lambda *args, **kwargs: next(picks), ask="0"
+        ) as ui:
+            self.app._batch_flow("x")
+        prompts = [str(call.args[0]) for call in ui["ask"].call_args_list if "试听" in str(call.args[0])]
+        self.assertEqual(len(prompts), 1)
+        # Listing all 100 ready numbers used to build a ~400-character prompt
+        # (thousands of tracks made it unreadable).
+        self.assertLess(len(prompts[0]), 200)
+        self.assertIn("…", prompts[0])
+
+    def test_checklist_numbers_entries_by_table_row(self):
+        rows = [
+            BatchDetectRow("1", song_id="101", song_name="A", status="ready"),
+            BatchDetectRow("2", song_id="102", song_name="B", status="unavailable"),
+            BatchDetectRow("3", song_id="103", song_name="C", status="ready"),
+        ]
+        with self._detect(rows), mock.patch.object(self.app, "_offer_batch_export"), mock.patch.object(
+            self.app, "_ask_with_cancel", return_value=None
+        ), offline_ui(menu=1, multiselect=[0]) as ui:
+            self.app._batch_flow("x")
+        entries = ui["multiselect"].call_args.args[1]
+        labels = [label for label, _selected in entries]
+        # Only ready rows are listed, but they keep the table numbering so a user
+        # counting rows on screen cannot queue the wrong song.
+        self.assertEqual(labels, ["1. A（未知大小）", "3. C（未知大小）"])
+
+
+class SessionNormalizationTests(unittest.TestCase):
+    def test_a_blank_download_dir_falls_back_to_the_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            path.write_text('{"last_download_dir": "   "}', encoding="utf-8")
+            self.assertEqual(SessionStore(path).load().last_download_dir, DEFAULT_DOWNLOAD_DIR)
+
+    def test_saving_never_persists_a_blank_download_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "session.json"
+            store = SessionStore(path)
+            session = store.load()
+            session.last_download_dir = "  "
+            store.save(session)
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8"))["last_download_dir"], DEFAULT_DOWNLOAD_DIR
+            )
+
 
 class DiagnosticsAndUpdateTests(TuiScreenTestCase):
     def test_diagnostics_exports_a_report(self):
@@ -773,6 +830,8 @@ class DiagnosticsAndUpdateTests(TuiScreenTestCase):
         ), offline_ui(confirm=True, ask=str(target)) as ui:
             self.app._screen_diagnostics()
         self.assertTrue(target.exists())
+        report = target.read_text(encoding="utf-8")
+        self.assertIn(APP_VERSION, report)  # the report really describes this build
         ui["print_warning"].assert_called()  # the warning line from the log tail
         ui["print_success"].assert_called()
 
@@ -830,6 +889,17 @@ class OpenPathTests(TuiScreenTestCase):
             TuiApp._open_path(target)
         self.assertEqual(run_mock.call_args.args[0][0], "open")
 
+    def test_windows_branch_uses_startfile(self):
+        # os.startfile only exists on Windows, hence create=True (this is the one
+        # branch the rest of the suite never executes).
+        target = Path(self._tmp.name) / "song.mp3"
+        target.write_bytes(b"x")
+        with mock.patch("music_fetch.tui.sys.platform", "win32"), mock.patch(
+            "music_fetch.tui.os.startfile", create=True
+        ) as startfile_mock:
+            TuiApp._open_path(target)
+        startfile_mock.assert_called_once_with(str(target))
+
     def test_failures_are_reported(self):
         target = Path(self._tmp.name) / "song.mp3"
         target.write_bytes(b"x")
@@ -854,8 +924,10 @@ class SettingsScreenTests(TuiScreenTestCase):
         self.assertEqual(self.app.session.detect_timeout_sec, 7)
 
     def test_saving_persists_the_settings(self):
-        picks = iter([7, 1, 9])  # theme → 深色, then 保存设置
+        # Pick the *non-default* theme: choosing 深色 would equal DEFAULT_UI_THEME
+        # and a dead theme branch would stay invisible.
+        picks = iter([7, 2, 9])  # 界面主题 → 浅色, then 保存设置
         with offline_ui(side_effect_menu=lambda *args, **kwargs: next(picks)) as ui:
             self.app._screen_settings()
-        self.assertEqual(self.session_store.load().ui_theme, "dark")
+        self.assertEqual(self.session_store.load().ui_theme, "light")
         ui["print_success"].assert_called()

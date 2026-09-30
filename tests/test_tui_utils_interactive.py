@@ -1,7 +1,7 @@
 """Coverage for the interactive helpers and narrow-window table rendering."""
 
-import contextlib
 import io
+import threading
 import unittest
 from unittest import mock
 
@@ -19,15 +19,31 @@ class ClearScreenTests(unittest.TestCase):
         self.assertIn("\x1b[2J", safe_mock.call_args.args[0])
 
     def test_safe_print_falls_back_to_plain_text_without_a_console(self):
-        # CI runners and piped stdout take this branch: ANSI must be stripped and
-        # characters the console cannot encode must not raise.
+        # CI runners and piped stdout take this branch: ANSI must be stripped.
+        # Assert on the real argument — str(call_args) is a repr, where a raw ESC
+        # becomes the four characters "\x1b", so an assertNotIn("\x1b", repr)
+        # could never fail (it did not, before this fix).
         with mock.patch(
             "music_fetch.tui_utils.print_formatted_text", side_effect=RuntimeError("no console")
         ), mock.patch("builtins.print") as print_mock:
-            U.print_info("\x1b[32m✓ 完成\x1b[0m")
-        printed = str(print_mock.call_args)
-        self.assertIn("完成", printed)
+            U.print_info("\x1b[32mOK\x1b[0m")
+        printed = print_mock.call_args.args[0]
+        self.assertEqual(printed, "OK")
         self.assertNotIn("\x1b", printed)
+
+    def test_safe_print_replaces_characters_the_console_cannot_encode(self):
+        # The fallback re-encodes with the console codec and errors="replace", so
+        # a CJK string on a Western code page degrades instead of raising.
+        fake_stdout = mock.Mock(encoding="ascii")
+        with mock.patch(
+            "music_fetch.tui_utils.print_formatted_text", side_effect=RuntimeError("no console")
+        ), mock.patch("music_fetch.tui_utils.sys.stdout", fake_stdout), mock.patch(
+            "builtins.print"
+        ) as print_mock:
+            U.print_info("完成")
+        printed = print_mock.call_args.args[0]
+        self.assertTrue(printed)
+        self.assertLessEqual(set(printed), {"?"})
 
 
 class AskHelperTests(unittest.TestCase):
@@ -72,14 +88,27 @@ class AskHelperTests(unittest.TestCase):
 
 
 class SpinnerTests(unittest.TestCase):
-    def test_spinner_animates_and_cleans_up_its_line(self):
+    def test_spinner_draws_frames_and_clears_its_line(self):
+        # Event-driven instead of time-based: the worker must draw a second frame.
+        # (Asserting "animates" from the initial frame + final clear proved nothing
+        # — a no-op worker passed too.)
         buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
+        second_frame = threading.Event()
+        frames = 0
+
+        def recording_write(text: str) -> int:
+            nonlocal frames
+            frames += 1
+            if frames >= 2:
+                second_frame.set()
+            return buffer.write(text)
+
+        fake_stdout = mock.Mock(write=recording_write, flush=lambda: None)
+        with mock.patch("music_fetch.tui_utils.sys.stdout", fake_stdout):
             with U.spinner("working", delay=0.01):
-                pass
-        output = buffer.getvalue()
-        self.assertIn("working", output)
-        self.assertTrue(output.endswith("\r"))  # the spinner line is cleared
+                self.assertTrue(second_frame.wait(2), "the spinner worker never drew a frame")
+        self.assertIn("working", buffer.getvalue())
+        self.assertTrue(buffer.getvalue().endswith("\r"))  # the line is cleared
 
 
 class FormatTableTests(unittest.TestCase):

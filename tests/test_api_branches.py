@@ -18,16 +18,17 @@ from urllib import parse
 
 class ResourceIdFallbackTests(unittest.TestCase):
     def test_fallback_pattern_recovers_the_id(self):
-        parsed = parse.urlparse("https://music.163.com/playlist?id=42&userid=7")
-        self.assertEqual(_extract_resource_id(parsed, "https://music.163.com/playlist?id=42&userid=7"), "42")
+        # parse_qs already handles "?id=…", so the regex fallback is only
+        # reachable for input without a query string; the previous version of
+        # this test took the parse_qs path and never covered the fallback.
+        self.assertEqual(_extract_resource_id(parse.urlparse("id=42"), "id=42"), "42")
 
     def test_returns_empty_when_no_id_is_present(self):
-        parsed = parse.urlparse("https://music.163.com/playlist")
-        self.assertEqual(_extract_resource_id(parsed, "https://music.163.com/playlist"), "")
+        url = "https://music.163.com/playlist"
+        self.assertEqual(_extract_resource_id(parse.urlparse(url), url), "")
 
     def test_parse_input_resource_uses_the_fallback(self):
-        resource_type, resource_id = parse_input_resource("https://music.163.com/album?id=99")
-        self.assertEqual((resource_type, resource_id), ("album", "99"))
+        self.assertEqual(parse_input_resource("id=99"), ("song", "99"))
 
 
 class PlayableCandidateBranchTests(unittest.TestCase):
@@ -53,17 +54,24 @@ class PlaylistPagingBranchTests(unittest.TestCase):
         with mock.patch(
             "music_fetch.api.perform_json_get",
             side_effect=[(200, first), MusicFetchError(ErrorCode.NETWORK_ERROR, "boom")],
-        ):
+        ) as get_mock:
             ids = fetch_playlist_song_ids("7", "MUSIC_U=test")
         self.assertEqual(len(ids), 1000)
         self.assertEqual(ids[0], "1")
+        # The cursor must really advance, otherwise a stuck offset would look
+        # like a successful partial fetch.
+        self.assertEqual(get_mock.call_count, 2)
+        self.assertIn("s=1000", get_mock.call_args_list[1].args[0])
 
     def test_the_first_page_failure_still_raises(self):
         with mock.patch(
             "music_fetch.api.perform_json_get", side_effect=MusicFetchError(ErrorCode.NETWORK_ERROR, "boom")
         ):
-            with self.assertRaises(MusicFetchError):
+            with self.assertRaises(MusicFetchError) as ctx:
                 fetch_playlist_song_ids("7", "MUSIC_U=test")
+        # The code matters: the later "playlist is empty" path raises the same
+        # exception class, so a bare assertRaises would also pass on it.
+        self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
 
     def test_legacy_tracks_field_is_used_when_track_ids_are_missing(self):
         body = {"code": 200, "playlist": {"trackIds": [], "tracks": [{"id": 11}, {"id": 12}, {"id": "skip"}]}}
@@ -78,3 +86,55 @@ class LyricFailureTests(unittest.TestCase):
         ):
             result = fetch_lyric("42")
         self.assertEqual(result.lyric, "")
+
+
+class InvalidSongIdTests(unittest.TestCase):
+    """A bad song id must fail as MusicFetchError, not as a raw ValueError.
+
+    The TUI only catches MusicFetchError, so a ValueError here would escape into
+    main()'s last-resort handler and close the whole app.
+    """
+
+    def test_superscript_digit_id_is_rejected_before_any_request(self):
+        with mock.patch("music_fetch.api.perform_json_post") as post_mock:
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("\u00b2", "MUSIC_U=test", timeout=5)
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+        post_mock.assert_not_called()
+
+    def test_absurdly_long_id_is_rejected_before_any_request(self):
+        with mock.patch("music_fetch.api.perform_json_post") as post_mock:
+            with self.assertRaises(MusicFetchError) as ctx:
+                fetch_playable_candidates("9" * 5000, "MUSIC_U=test", timeout=5)
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+        post_mock.assert_not_called()
+
+    def test_parse_input_resource_rejects_non_ascii_digits(self):
+        with self.assertRaises(MusicFetchError) as ctx:
+            parse_input_resource("\u00b2")
+        self.assertEqual(ctx.exception.code, "INVALID_URL")
+
+
+class SafeIntTests(unittest.TestCase):
+    def test_integer_strings_are_converted_exactly(self):
+        from music_fetch.api import _safe_int
+
+        big = "109951169929593913"
+        self.assertEqual(_safe_int(big), 109951169929593913)  # a float round-trip loses 7
+
+    def test_unusable_values_become_zero(self):
+        from music_fetch.api import _safe_int
+
+        for value in (None, True, "", "   ", "abc", "\u00b2", "1e999", "nan", "inf", [], {}, b"x"):
+            with self.subTest(value=value):
+                self.assertEqual(_safe_int(value), 0)
+
+    def test_other_numeric_shapes_still_work(self):
+        from music_fetch.api import _safe_int
+
+        self.assertEqual(_safe_int(42), 42)
+        self.assertEqual(_safe_int(-7), -7)
+        self.assertEqual(_safe_int("-7"), -7)
+        self.assertEqual(_safe_int(" 42 "), 42)
+        self.assertEqual(_safe_int("1e3"), 1000)
+        self.assertEqual(_safe_int(3.9), 3)

@@ -24,6 +24,8 @@
 
 - [ ] 分组视图的批次信息跨重启保留（当前 `_batches` 仅存在于本次运行）。
 - [ ] Windows（含 GBK 控制台）与 SSH 真机冒烟：任务页 live_ask 渲染、bottom_toolbar、明暗主题、登录恢复与下载任务控制（v3.5/v3.6 遗留验收项）。冻结包启动与主菜单渲染已在 v3.6.1 的 Windows 构建上本地验证（无缺失导入、版本号正确），其余交互项仍待人工验证。
+- [ ] 「我喜欢的音乐」直达需真机确认：代码假设网易云把该歌单挂在账号自己的 ID 下（`playlist?id=<uid>`），离线无法验证；若接口不是这样，改一行 URL 即可。同时确认超过 1000 首时不会被 `trackIds` 分页静默截断（`fetch_playlist_song_ids` 在"下一页返回同一批 ID"时会停止）。
+- [ ] 批量识别阶段接入取消：`run_batch_detect` 支持 `cancel_event`，但 `_batch_flow` 未传入；喜欢列表动辄上千首，Ctrl+C 只能等已派发的检测请求结束（`ThreadPoolExecutor` 退出时等待在飞任务）。
 
 ### v4.0 — Fullscreen Experiment（待定）
 
@@ -38,6 +40,9 @@
 ### Quality and Architecture
 
 - [ ] 将 `batch_results.BatchResultRow` Protocol 收敛为明确的数据类，减少跨模块隐式约定。
+- [ ] 决定 `version_check.fetch_release_download_url` 的归宿：它只匹配 `.exe/.dmg/.zip`，产物改名后（`music-fetch-macos`/`music-fetch-linux`）只能返回 Windows 包，且当前没有任何生产调用方（更新检查只打印 Release 页面地址）。要么删除，要么接进更新页。
+- [ ] 合并重复的搜索实现：`search_songs` 与 `search_playlists` 仅 `type` 与行解析不同，约 25 行需要同步维护。
+- [ ] 合并两处分页逻辑：`_paginated_pick`（0 返回、非法输入重问）与 `_show_batch_rows`（除 n/p 外一律继续）语义不同，各自需要单独维护。
 - [ ] 继续把覆盖率从当前的 93.6% 推向 95%：剩余缺口集中在 `main()` 启动装配、`browser_login` 的 CDP 异常分支与 `audio` 的转码/ffmpeg 错误路径（CI 门槛已随本轮提升到 90%）。
 - [ ] 在 Windows Terminal、macOS Terminal 和常见 Linux 终端验证明暗主题、中文对齐与键盘交互。
 

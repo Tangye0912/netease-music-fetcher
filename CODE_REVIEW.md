@@ -397,3 +397,41 @@ selected indices -> [0, 1]        # 只勾了第一行，却返回两行
 - **`eapi.py` 死代码**：删除属于结构性清理（需同时删 `tests/test_eapi.py` 并评估对外部引用），不属于缺陷修复，保留现状并在报告里标注。
   - **2026-09-30 处置**：已按决策删除 `music_fetch/eapi.py`、`tests/test_eapi.py`、`pycryptodome` 依赖与 `music-fetch.spec` 的 `Crypto*` hiddenimports，并新增断言防止重新引入（见 CHANGELOG 的 Unreleased → Removed）。
 - **同一 stem 不同格式共用 `.lrc`**：会话内由队列的 stem 预留避免，跨会话冲突概率极低，改变命名（如 `song.mp3.lrc`）会动到用户可见的文件名，保留现状。
+
+---
+
+# 第二轮审查（v3.7.0 发布后，范围 `69f23de..HEAD`）
+
+对象是本轮新增/改动的代码：发布收口、`eapi` 清理、三个 TUI 功能（我喜欢的音乐 / 歌单搜索 / 大歌单分页）、以及为此新增的测试。审查分三路独立进行（新功能正确性、启动与发布链路、新测试诚实性），每条结论都要求可复现证据；随后用变异测试逐条复核修复是否被测试守住（7/7 捕获）。
+
+## 已修复
+
+| # | 问题 | 证据 | 修复 |
+|---|---|---|---|
+| 1 | **非法歌曲 ID 带崩程序**：`parse_input_resource` 用 `str.isdigit()`（对上标 `²` 也为真）判定纯数字，`fetch_playable_candidates` 在联网前 `int(song_id)` 抛 `ValueError`，而 TUI 只捕获 `MusicFetchError` → 整个程序以"发生未预期的错误"退出；粘贴超长数字串撞上 `int()` 的 4300 位上限同理 | 脚本复现：`parse_input_resource('²')` → `('song','²')`；`fetch_playable_candidates('²')` → `ValueError`（未发出请求） | 数字判定限定 ASCII；播放地址请求在 ID 无法转换时按 `INVALID_URL` 上报（新增 3 条测试） |
+| 2 | **自己的测试是假绿（两条）**：`test_safe_print_falls_back_to_plain_text_without_a_console` 断言的是 `repr`（转义符在 repr 里是字面量 `\x1b`，断言恒真）；"资源 ID 兜底"用例走的其实是 `parse_qs` 分支，兜底正则无人覆盖 | 变异证明：删掉 ANSI 剥离 / 删掉整段兜底正则，测试与全量套件全绿 | 改为断言真实参数、并用真正触发兜底正则的输入（`id=42`）；变异复核均被捕获 |
+| 3 | **试听提示随歌单长度失控**：列出全部可试听序号，1000 首约 3900 字符、3000 首约 13900 字符 | 实测 `len("、".join(...))` | 只显示前 15 个序号 + 省略号，任意序号仍可输入 |
+| 4 | **勾选列表编号与表格行号不一致**：列表只含"可下载"子集却按子集序号编号，用户数表行会选错歌（3 行里第 2 项实为第 3 首） | 脚本：`rows=[ready A, unavailable B, ready C]`，勾第 2 项 → 入队 `song_id 103` | 列表改用识别结果中的真实行号（新增测试固定标签） |
+| 5 | **空白默认值被当作有效输入**：`ask()` 已 strip，故手打空格早被拒；真正被接受的是**空白默认值**（手编 `session.json` 的 `last_download_dir`）。此前 CHANGELOG 把原因写成"输入一个空格即算通过"，与事实不符 | 只 stub `prompt` 的探针：手打空格 + 默认 `""` 会循环；空白默认值此前直接通过 | `ask_required` 以 strip 后判空；会话下载目录读写时规范化（空白回退默认）；CHANGELOG 措辞已更正 |
+| 6 | **`_safe_int` 对大整数字符串丢精度**：`int(float(str(v)))` 使 `"109951169929593913"` 变成 `…920`（差 7）；同名助手在 `app_stores` 里是精确转换 | 实测该值 | 整数字符串走精确转换（ASCII 判定避免 `²` 再次漏网），科学计数法仍支持（新增 3 条测试） |
+| 7 | **无交互输入时静默退出**：POSIX 下 stdin 关闭/重定向直接以 0 退出、毫无提示；Windows 无控制台分支的注释把成因写成"stdin 被管道"，实际是输出侧拿不到控制台 | 代码路径 + prompt_toolkit 源码位置 | 补"输入已结束，退出。"提示；注释与 CHANGELOG 按实际机制更正 |
+
+## 记录未改
+
+| # | 问题 | 处置 |
+|---|---|---|
+| A | 喜欢列表动辄上千首，识别阶段无取消（`run_batch_detect` 支持 `cancel_event`，`_batch_flow` 未传），Ctrl+C 需等在飞请求结束 | 设计性改动，记入 ROADMAP |
+| B | 搜索接口不需要鉴权，故 `search_playlists` 的 `AUTH_EXPIRED` 分支实际不可达（与 `search_songs` 一致，属防御性代码） | 保留（与既有实现一致） |
+| C | `search_songs` 与 `search_playlists` 约 25 行高度重复；`_paginated_pick` 与 `_show_batch_rows` 两套分页语义不同 | 记入 ROADMAP |
+| D | `version_check.fetch_release_download_url` 只匹配 `.exe/.dmg/.zip`（改名后只能返回 Windows 包）且无生产调用方 | 记入 ROADMAP，待决定删除或接线 |
+| E | 可能被 `trackIds` 分页静默截断在 1000 首 | 记入 ROADMAP 的真机确认项 |
+
+## 已验证无问题
+
+- **发布链路**：三个平台产物名唯一；`music-fetch.spec` 是 one-file EXE，`build.py` 会断言产物路径；`cp` 保留执行位，且 README 已说明需要 `chmod +x`。**远端实测**：v3.7.0 三个资产的 magic bytes 分别为 PE / Mach-O / ELF（修复前 macOS 用户下到的是 Linux ELF）。
+- **启动顺序修复完整**：`DownloadQueue.__init__` 设置的属性覆盖 `restore_saved()` 所需，队列不会回调 `TuiApp`，其线程只在 `run()` 启动。
+- **`_safe_int` 对任何 JSON 可达类型都不会抛异常**（None/bool/float/1e308/超长串/`"1e999"`/`"abc"`/`"²"`/list/dict/bytes 等逐一验证）。
+- **`_show_batch_rows` 分页数学与交互**：页 1 = #1-15、页 2 = #16-20，无 off-by-one；单页不额外提示；只有 n/p 会翻页，其余输入直接继续，无法卡死；空行不可达。翻页后仍可用全局行号试听（脚本端到端复现：在第 2 页输入 `19` → 试听第 19 首）。
+- **`search_playlists` 的返回结构经真实请求确认**（`result.playlists[*].{id,name,coverImgUrl,creator.nickname,trackCount}`，int 与 str 两种 id 都解析正常）；空/空白关键词不发请求。
+- **新功能确实可达**：冻结包真实渲染的主菜单第 03/05 项即"我喜欢的音乐 / 歌单搜索"；`AccountProfile.user_id` 由 `profile["userId"]`（回退 `account["id"]`）填充，非整数时退化为"无法确定账号 ID"提示而不崩。
+- **测试卫生**：三份新测试文件无真实出网、约 1 秒跑完；不存在分隔符/权限/`os.startfile` 等平台依赖（`_open_path` 三分支现均被覆盖）；表格用例对 `COLUMNS` 不敏感。`_batch_flow` 删除的 `if not ready_numbers:` 确为不可达（前置守卫已保证 `ready` 非空）。
