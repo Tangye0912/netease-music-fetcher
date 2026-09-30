@@ -226,7 +226,7 @@ git push origin v3.0.0
 | `music_fetch/ui_texts.py` / `error_texts.py` | 共享文案与错误码到用户提示的映射。 |
 | `music-fetch` | macOS/Linux 包装脚本（进入 TUI）。 |
 | `start_mac.command` / `start_windows.bat` | macOS/Windows 双击启动 TUI 脚本。 |
-| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`pycryptodome`、`requests[socks]`、`websocket-client`、`wcwidth`）。 |
+| `pyproject.toml` | 项目元数据与依赖（`mutagen`、`prompt-toolkit`、`requests[socks]`、`websocket-client`、`wcwidth`）。 |
 | `.github/workflows/ci.yml` / `build.yml` | CI：push/PR 跑测试与静态检查；打 `v*` tag 触发三平台打包发布。 |
 | `tests/` | 完整的单元/回归测试与参数化子测试（全部可在无显示环境运行）；`tests/conftest.py` 会拦截任何真实出网请求。 |
 | `CHANGELOG.md` / `ROADMAP.md` | 版本历史与迭代路线。 |

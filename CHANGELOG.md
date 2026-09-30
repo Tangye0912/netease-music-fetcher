@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- **删除 `eapi.py`**：该模块（`/eapi/` AES-128-ECB 加密传输）已无任何引用——扫码登录早已迁到浏览器 CDP，加密传输也未接入任何调用，属于审查报告标注的死代码。随之移除 `pycryptodome` 依赖、`music-fetch.spec` 里的 `Crypto*` hiddenimports 与 `tests/test_eapi.py`；新增断言防止它被重新引入。
+
 ## v3.7.0 (2026-09-30)
 
 ### Added

@@ -20,6 +20,10 @@ class EntryPointTests(unittest.TestCase):
         spec = importlib.util.find_spec("music_fetch.cli")
         self.assertIsNone(spec, "music_fetch.cli module should no longer exist")
 
+    def test_eapi_module_removed(self):
+        spec = importlib.util.find_spec("music_fetch.eapi")
+        self.assertIsNone(spec, "music_fetch.eapi was dead code and should be gone")
+
     def test_pyproject_script_points_to_app_main(self):
         data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(data["project"]["scripts"]["music-fetch"], "music_fetch.app:main")

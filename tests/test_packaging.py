@@ -35,9 +35,16 @@ class PackagingConfigTests(unittest.TestCase):
     def test_spec_does_not_reference_removed_modules(self):
         """Guard against the frozen build re-importing deleted modules."""
         spec = (REPO_ROOT / "music-fetch.spec").read_text(encoding="utf-8")
-        for removed in ("batch_download", "music_fetch.cli", "weapi", "qrcode"):
+        for removed in ("batch_download", "music_fetch.cli", "weapi", "qrcode", "eapi", "Crypto"):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, spec)
+
+    def test_pycryptodome_is_gone_after_the_eapi_removal(self):
+        """eapi.py was the only Crypto consumer, so the dependency must be gone."""
+        data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        deps = " ".join(data["project"]["dependencies"]).lower()
+        self.assertNotIn("pycryptodome", deps)
+        self.assertFalse((REPO_ROOT / "music_fetch" / "eapi.py").exists())
 
     def test_spec_collects_cjk_width_dependency(self):
         """wcwidth is imported directly by tui_utils, so the freeze needs it."""

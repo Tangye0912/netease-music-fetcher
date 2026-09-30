@@ -395,4 +395,5 @@ selected indices -> [0, 1]        # 只勾了第一行，却返回两行
 
 - **`cancel()`/`cancel_all()` 仍在队列锁内写历史**（原报告"未确认"项）：`poll()` 这条热路径已不持锁写盘，剩余的 `cancel` 调用点要彻底移出需要把 `cancel_all`/`close` 的锁边界一起重构；收益是极小的锁竞争，风险是改动队列这套已有充分测试的同步逻辑，故本轮不动。
 - **`eapi.py` 死代码**：删除属于结构性清理（需同时删 `tests/test_eapi.py` 并评估对外部引用），不属于缺陷修复，保留现状并在报告里标注。
+  - **2026-09-30 处置**：已按决策删除 `music_fetch/eapi.py`、`tests/test_eapi.py`、`pycryptodome` 依赖与 `music-fetch.spec` 的 `Crypto*` hiddenimports，并新增断言防止重新引入（见 CHANGELOG 的 Unreleased → Removed）。
 - **同一 stem 不同格式共用 `.lrc`**：会话内由队列的 stem 预留避免，跨会话冲突概率极低，改变命名（如 `song.mp3.lrc`）会动到用户可见的文件名，保留现状。

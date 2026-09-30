@@ -32,10 +32,6 @@ a = Analysis(
         'prompt_toolkit.history',
         'prompt_toolkit.filters',
         'prompt_toolkit.cursor_shapes',
-        # eapi transport encryption (kept for future encrypted endpoints).
-        'Crypto',
-        'Crypto.Cipher',
-        'Crypto.Cipher.AES',
         # Proxy support loads Requests and its SOCKS transport at runtime.
         'requests',
         'socks',
