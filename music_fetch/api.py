@@ -684,13 +684,15 @@ def fetch_album_songs(album_id: str, cookie: str, timeout: int = 20) -> AlbumDet
         raise MusicFetchError(ErrorCode.NETWORK_ERROR, message)
     album = body.get("album") if isinstance(body.get("album"), dict) else {}
     name = str(album.get("name") or "").strip()
-    album_songs = album.get("songs")
-    body_songs = body.get("songs")
-    raw_songs: list[object] = (
-        album_songs if isinstance(album_songs, list)
-        else body_songs if isinstance(body_songs, list)
-        else []
-    )
+    # Verified live 2026-10-10 on three albums: the API answers with album.songs
+    # emptied (0 rows) and the actual tracks in the top-level "songs" list, whose
+    # length equals album.size.  Take whichever list really has rows, otherwise the
+    # album flow reports "Album is empty or unavailable" for every album.
+    raw_songs: list[object] = []
+    for candidate_rows in (album.get("songs"), body.get("songs")):
+        if isinstance(candidate_rows, list) and candidate_rows:
+            raw_songs = candidate_rows
+            break
     song_ids: list[str] = []
     seen: set[str] = set()
     for row in raw_songs:

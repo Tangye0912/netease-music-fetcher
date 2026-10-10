@@ -25,8 +25,13 @@
 
 > 离线无法确认的假设已写成可执行检查，一条命令跑完：
 > `MUSIC_FETCH_LIVE_COOKIE="MUSIC_U=…" python -m pytest tests/test_live_api.py -v`
-> 不带该环境变量时这四条自动跳过，普通测试仍然禁止真实联网（守卫只对这**一个**模块放开，且必须同时设置该变量）。
+> 不带该环境变量时这些检查自动跳过，普通测试仍然禁止真实联网（守卫只对这**一个**模块放开，且必须同时设置该变量）。
+> 2026-10-10 一轮"形状审计"已让四条公开接口的检查在真实响应上跑通（下表标 ✓），并借此发现两处"只有 mock 验证过"的真缺陷（专辑展开、歌曲元数据）。
 
+- [x] ✓ `test_every_field_is_filled_for_public_songs`：详情/批量两条路径的艺人、专辑、时长、封面都非空（原先全为 `None`）。
+- [x] ✓ `test_lyrics_are_parsed`：歌词接口形状未变、返回 LRC 时间轴。
+- [x] ✓ `test_cover_url_really_downloads_as_an_image`：封面 URL 真能下载且是 JPEG/PNG。
+- [x] ✓ `test_album_link_expands_into_tracks`：专辑展开取到曲目（原先任何专辑都报"为空"）。
 - [ ] `test_liked_songs_are_reachable_under_the_account_id`：「我喜欢的音乐」是否真的挂在账号自己的 ID 下 → 失败则改 `_screen_liked` 的入口 URL（一行）。
 - [ ] `test_paging_advances_when_the_playlist_exceeds_one_request`：喜欢列表超过 1000 首时 `trackIds` 的分页偏移是否推进 → 失败则 `fetch_playlist_song_ids` 需要换分页方式，否则会静默截断。
 - [ ] `test_playable_candidates_and_reported_size`：鉴权下播放地址接口是否返回非 0 `size`（**只报告不判定**）→ 为 0 时批量识别回退 HEAD 探测，不会变慢，但省不掉那次请求。

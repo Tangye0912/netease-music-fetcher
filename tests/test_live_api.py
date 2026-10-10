@@ -12,9 +12,12 @@ fails, the ROADMAP entry referenced in its docstring says what to change.
 
 from __future__ import annotations
 
+import json
 import os
+import pathlib
+import tempfile
 import unittest
-from urllib import parse
+from urllib import parse, request
 
 import pytest
 
@@ -22,7 +25,10 @@ from music_fetch.api import (
     PLAYABLE_REQUEST_PROFILES,
     PLAYER_URL_API,
     PLAYLIST_DETAIL_API,
+    SONG_DETAIL_API,
     fetch_account_profile,
+    fetch_album_songs,
+    fetch_lyric,
     fetch_playable_candidates,
     fetch_playlist_song_ids,
     fetch_song_metadata,
@@ -31,6 +37,9 @@ from music_fetch.api import (
     perform_json_post,
     search_songs,
 )
+from music_fetch.network import open_url
+from music_fetch.app_settings import APP_VERSION
+from music_fetch.version_check import check_for_updates_cached
 
 COOKIE = (os.environ.get("MUSIC_FETCH_LIVE_COOKIE") or "").strip()
 
@@ -40,6 +49,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 _PAGE_SIZE = 1000
+
+
+def _headers(cookie: str = COOKIE) -> dict[str, str]:
+    return {"User-Agent": "music-fetch", "Referer": "https://music.163.com/", "Cookie": cookie}
 
 
 def _liked_song_ids() -> list[str]:
@@ -120,6 +133,59 @@ class MetadataShapeTests(unittest.TestCase):
             with self.subTest(song_id=song_id, path="batch"):
                 self.assertIsNotNone(metadata, "批量路径没有返回这首歌")
                 self.assertTrue(metadata.artist and metadata.album_name and metadata.duration_ms and metadata.cover_url)
+
+
+class LyricsAndAssetTests(unittest.TestCase):
+    def test_lyrics_are_parsed(self):
+        song_id = search_songs("周杰伦", COOKIE, limit=1)[0].song_id
+        lyric = fetch_lyric(song_id, timeout=15)
+        self.assertTrue(lyric.lyric, "歌词为空——接口形状可能又变了")
+        self.assertIn("[", lyric.lyric, "歌词看起来不是 LRC（缺时间轴方括号）")
+
+    def test_cover_url_really_downloads_as_an_image(self):
+        """Cover art was silently dead until 2026-10-10; check the URL end to end."""
+        song_id = search_songs("周杰伦", COOKIE, limit=1)[0].song_id
+        _name, _duration, cover_url, _artist, _album = fetch_song_metadata(song_id, COOKIE, timeout=15)
+        self.assertTrue(cover_url, "封面 URL 为空")
+
+        with open_url(request.Request(cover_url, headers={"User-Agent": "Mozilla/5.0"}), timeout=15) as resp:
+            head = resp.read(8)
+        is_jpeg = head[:3] == b"\xff\xd8\xff"
+        is_png = head[:8] == b"\x89PNG\r\n\x1a\n"
+        self.assertTrue(is_jpeg or is_png, f"封面不是 JPEG/PNG：{head.hex()}")
+
+    def test_album_link_expands_into_tracks(self):
+        """Guards the second 2026-10-10 bug: album.songs comes back empty and the
+        tracks live in the top-level songs list, so every album used to report
+        "Album is empty or unavailable"."""
+        song_id = search_songs("周杰伦", COOKIE, limit=1)[0].song_id
+        include = parse.urlencode({"c": json.dumps([{"id": int(song_id)}], separators=(",", ":"))})
+        _status, body = perform_json_get(f"{SONG_DETAIL_API}?{include}", _headers(), timeout=15)
+        album = ((body.get("songs") or [{}])[0].get("al") or {})
+        self.assertIsNotNone(album.get("id"), "没有从歌曲详情里拿到专辑 ID")
+
+        detail = fetch_album_songs(str(album["id"]), COOKIE, timeout=20)
+        self.assertTrue(detail.name, "专辑名为空")
+        self.assertTrue(detail.song_ids, "专辑展开没有取到曲目")
+        print(f"\n专辑 {album['id']}：{detail.name!r} -> {len(detail.song_ids)} 首")
+
+
+class UpdateCheckTests(unittest.TestCase):
+    def test_the_update_check_reaches_github(self):
+        """The TUI's 检查更新 path has only ever run against mocks."""
+        cache = pathlib.Path(tempfile.gettempdir()) / "music-fetch-update-check-live.json"
+        self.addCleanup(lambda: cache.unlink(missing_ok=True))
+        try:
+            latest, url = check_for_updates_cached(timeout=10, cache_file=cache)
+        except RuntimeError as err:
+            # The anonymous GitHub API allows 60 requests/hour; our code turns that
+            # into a friendly message, which this skip also verifies.
+            if "频率" in str(err):
+                self.skipTest(f"GitHub 匿名限流（代码给出了友好提示）：{err}")
+            raise
+        print(f"\n检查更新：GitHub 报告最新 {latest}（当前 v{APP_VERSION}）")
+        self.assertTrue(latest.lower().startswith("v"), f"版本号不像 tag：{latest!r}")
+        self.assertTrue(url.startswith("https://"), f"发布页地址异常：{url!r}")
 
 
 class PlayableResponseTests(unittest.TestCase):

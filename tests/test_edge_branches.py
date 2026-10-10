@@ -314,6 +314,20 @@ class ApiEdgeTests(unittest.TestCase):
                 fetch_album_songs("1", "MUSIC_U=test", timeout=5)
         self.assertEqual(ctx.exception.code, "NETWORK_ERROR")
 
+    def test_album_tracks_are_read_from_the_top_level_list(self):
+        """Live shape: album.songs is empty and the tracks live in body["songs"]."""
+        body = {"code": 200, "album": {"name": "专辑", "songs": [], "size": 2}, "songs": [{"id": 7}, {"id": 8}]}
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(200, body)):
+            album = fetch_album_songs("1", "MUSIC_U=test", timeout=5)
+        self.assertEqual(album.song_ids, ["7", "8"])
+        self.assertEqual(album.name, "专辑")
+
+    def test_album_tracks_prefer_the_album_list_when_it_has_rows(self):
+        body = {"code": 200, "album": {"name": "专辑", "songs": [{"id": 1}]}, "songs": [{"id": 2}]}
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(200, body)):
+            album = fetch_album_songs("1", "MUSIC_U=test", timeout=5)
+        self.assertEqual(album.song_ids, ["1"])
+
     def test_album_rows_must_be_objects_with_integer_ids(self):
         body = {"code": 200, "album": {"name": "专辑", "songs": ["junk", {"id": "text"}, {"id": 7}]}}
         with mock.patch("music_fetch.api.perform_json_get", return_value=(200, body)):
