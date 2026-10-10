@@ -1,5 +1,6 @@
 """Extra branch coverage for music_fetch.api."""
 
+import json
 import unittest
 from unittest import mock
 
@@ -149,7 +150,40 @@ class BatchedMetadataTests(unittest.TestCase):
         with mock.patch("music_fetch.api.perform_json_get", return_value=(200, self._body("1"))) as get_mock:
             fetch_songs_metadata(["1", "1", "1"], "MUSIC_U=test", timeout=5)
         sent = parse.parse_qs(parse.urlparse(get_mock.call_args.args[0]).query)
-        self.assertEqual(sent["ids"], ["[1]"])
+        self.assertEqual(json.loads(sent["c"][0]), [{"id": 1}])
+
+    def test_metadata_uses_the_modern_detail_endpoint(self):
+        """The legacy endpoint answers with a shape that loses artist/album/cover."""
+        with mock.patch("music_fetch.api.perform_json_get", return_value=(200, {"code": 200, "songs": []})) as get_mock:
+            fetch_songs_metadata(["1"], "MUSIC_U=test", timeout=5)
+        self.assertIn("/api/v3/song/detail", get_mock.call_args.args[0])
+
+    def test_both_response_shapes_fill_every_field(self):
+        modern = {
+            "id": 1, "name": "Modern", "dt": 1000,
+            "al": {"name": "Al", "picUrl": "https://cover/1.jpg"}, "ar": [{"name": "A1"}, {"name": "A2"}],
+        }
+        legacy = {"id": 2, "name": "Legacy", "duration": 2000, "album": {"name": "Al2"}, "artists": [{"name": "B1"}]}
+        with mock.patch(
+            "music_fetch.api.perform_json_get", return_value=(200, {"code": 200, "songs": [modern, legacy]})
+        ):
+            metadata = fetch_songs_metadata(["1", "2"], "MUSIC_U=test", timeout=5)
+
+        self.assertEqual(
+            (metadata["1"].song_name, metadata["1"].duration_ms, metadata["1"].artist,
+             metadata["1"].album_name, metadata["1"].cover_url),
+            ("Modern", 1000, "A1 / A2", "Al", "https://cover/1.jpg"),
+        )
+        self.assertEqual(
+            (metadata["2"].song_name, metadata["2"].duration_ms, metadata["2"].artist, metadata["2"].album_name),
+            ("Legacy", 2000, "B1", "Al2"),
+        )
+        self.assertIsNone(metadata["2"].cover_url)  # the legacy shape carries no cover URL
+
+    def test_non_numeric_ids_are_not_requested(self):
+        with mock.patch("music_fetch.api.perform_json_get") as get_mock:
+            self.assertEqual(fetch_songs_metadata(["abc", "12x", ""], "MUSIC_U=test", timeout=5), {})
+        get_mock.assert_not_called()
 
     def test_malformed_rows_and_trailing_garbage_are_ignored(self):
         body = {"code": 200, "songs": ["junk", {"name": "no id"}, {"id": 5, "name": "ok"}]}

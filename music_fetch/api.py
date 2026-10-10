@@ -50,7 +50,10 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 )
 PLAYER_URL_API = "https://music.163.com/api/song/enhance/player/url/v1"
-SONG_DETAIL_API = "https://music.163.com/api/song/detail"
+# The modern detail endpoint.  The legacy /api/song/detail answers with the old
+# shape (duration/album/artists, cover id only), which silently cost the app its
+# artist/album tags and every cover art until 2026-10-10.
+SONG_DETAIL_API = "https://music.163.com/api/v3/song/detail"
 PLAYLIST_DETAIL_API = "https://music.163.com/api/v6/playlist/detail"
 ACCOUNT_STATUS_API = "https://music.163.com/api/nuser/account/get"
 OUTER_MEDIA_URL_API = "https://music.163.com/song/media/outer/url?id={song_id}.mp3"
@@ -480,23 +483,31 @@ class SongMetadata:
 
 
 def _parse_song_detail(song: dict[str, Any]) -> SongMetadata:
-    """Extract the fields the app displays from one /api/song/detail row."""
+    """Extract the fields the app displays from one song-detail row.
+
+    Both response shapes are accepted: the modern ``/api/v3`` one (``dt``/``al``/
+    ``ar``, whose album carries a cover URL) and the legacy ``/api/song/detail``
+    one (``duration``/``album``/``artists``, no cover URL).  The two disagree, and
+    a shape change must never again silently drop artist, album, duration and
+    cover art the way it did while this parser only knew the modern keys.
+    """
     raw_name = song.get("name")
     name = raw_name.strip() or None if isinstance(raw_name, str) else None
-    duration_ms = song.get("dt")
+    duration_ms = song.get("dt") if isinstance(song.get("dt"), int) else song.get("duration")
     if not isinstance(duration_ms, int):
         duration_ms = None
-    album = song.get("al")
-    cover_url = album.get("picUrl") or None if isinstance(album, dict) else None
+    raw_album = song.get("al") if isinstance(song.get("al"), dict) else song.get("album")
+    album = raw_album if isinstance(raw_album, dict) else {}
+    cover_url = album.get("picUrl") or None
+    raw_artists = song.get("ar") if isinstance(song.get("ar"), list) else song.get("artists")
     artist_names: list[str] = []
-    artists = song.get("ar")
-    if isinstance(artists, list):
-        for ar in artists:
+    if isinstance(raw_artists, list):
+        for ar in raw_artists:
             if isinstance(ar, dict):
                 ar_name = ar.get("name")
                 if isinstance(ar_name, str) and ar_name.strip():
                     artist_names.append(ar_name.strip())
-    album_name = album.get("name") if isinstance(album, dict) else None
+    album_name = album.get("name")
     if isinstance(album_name, str):
         album_name = album_name.strip() or None
     return SongMetadata(
@@ -527,11 +538,12 @@ def fetch_songs_metadata(
     path) rather than failing the whole batch.
     """
     headers = {"User-Agent": USER_AGENT, "Referer": "https://music.163.com/", "Cookie": cookie}
-    # str(None) would become "None" and be requested as if it were an id.
+    # The modern endpoint takes integer ids; str(None) would become "None", and a
+    # non-numeric id cannot be requested at all.
     unique_ids = [
         song_id
         for song_id in dict.fromkeys(str(value).strip() for value in song_ids if value is not None)
-        if song_id
+        if song_id.isascii() and song_id.isdigit()
     ]
     results: dict[str, SongMetadata] = {}
     step = max(1, int(chunk_size))
@@ -539,7 +551,8 @@ def fetch_songs_metadata(
         if cancel_event is not None and cancel_event.is_set():
             break
         chunk = unique_ids[start:start + step]
-        query = parse.urlencode({"ids": "[" + ",".join(chunk) + "]"})
+        c_param = json.dumps([{"id": int(song_id)} for song_id in chunk], separators=(",", ":"))
+        query = parse.urlencode({"c": c_param})
         try:
             status, body = perform_json_get(f"{SONG_DETAIL_API}?{query}", headers, timeout=timeout)
         except MusicFetchError as err:

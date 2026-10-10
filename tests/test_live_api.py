@@ -25,8 +25,11 @@ from music_fetch.api import (
     fetch_account_profile,
     fetch_playable_candidates,
     fetch_playlist_song_ids,
+    fetch_song_metadata,
+    fetch_songs_metadata,
     perform_json_get,
     perform_json_post,
+    search_songs,
 )
 
 COOKIE = (os.environ.get("MUSIC_FETCH_LIVE_COOKIE") or "").strip()
@@ -89,6 +92,34 @@ class LikedSongsTests(unittest.TestCase):
         print(f"第二页返回 {len(second_page)} 个 id，与首页重叠 {len(overlap)} 个")
         self.assertTrue(second_page, "第二页没有任何 id：分页偏移被忽略，喜欢列表会被截断在 1000 首")
         self.assertFalse(overlap, "第二页与首页内容相同：分页偏移被忽略，喜欢列表会被截断在 1000 首")
+
+
+class MetadataShapeTests(unittest.TestCase):
+    def test_every_field_is_filled_for_public_songs(self):
+        """Guards the bug found 2026-10-10: the legacy detail endpoint answers with
+        duration/album/artists and no cover URL, so a parser that only knows
+        dt/al/ar silently lost artist, album, duration and every cover art.
+        """
+        results = search_songs("周杰伦", COOKIE, limit=3)
+        if not results:
+            self.skipTest("搜索没有返回结果，无法取样")
+        ids = [song.song_id for song in results]
+
+        for song_id in ids:
+            name, duration, cover, artist, album = fetch_song_metadata(song_id, COOKIE, timeout=15)
+            with self.subTest(song_id=song_id, path="single"):
+                self.assertTrue(name, "歌名为空")
+                self.assertTrue(artist, "艺人为空")
+                self.assertTrue(album, "专辑为空")
+                self.assertTrue(duration, "时长为空")
+                self.assertTrue(cover, "封面 URL 为空")
+
+        batch = fetch_songs_metadata(ids, COOKIE, timeout=20)
+        for song_id in ids:
+            metadata = batch.get(song_id)
+            with self.subTest(song_id=song_id, path="batch"):
+                self.assertIsNotNone(metadata, "批量路径没有返回这首歌")
+                self.assertTrue(metadata.artist and metadata.album_name and metadata.duration_ms and metadata.cover_url)
 
 
 class PlayableResponseTests(unittest.TestCase):
