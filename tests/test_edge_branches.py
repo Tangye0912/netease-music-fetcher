@@ -344,6 +344,76 @@ class ApiEdgeTests(unittest.TestCase):
             self.assertEqual(fetch_lyric("1").lyric, "")
 
 
+class AudioConversionEdgeTests(unittest.TestCase):
+    """Failure paths of the transcoding step: a failed run must not leave junk."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+
+    def _ffmpeg(self):
+        return mock.patch("music_fetch.audio.shutil.which", return_value="/usr/bin/ffmpeg")
+
+    def test_a_failed_conversion_removes_the_partial_output(self):
+        from music_fetch.audio import convert_audio_file
+
+        source = self.base / "source.m4a"
+        source.write_bytes(b"audio")
+        output = self.base / "target.mp3"
+        output.write_bytes(b"half-written by ffmpeg")
+        failed = mock.Mock(returncode=1, stderr="line one\nInvalid data found when processing input\n")
+
+        with self._ffmpeg(), mock.patch("music_fetch.audio.subprocess.run", return_value=failed):
+            with self.assertRaises(MusicFetchError) as ctx:
+                convert_audio_file(source, output, "mp3")
+
+        self.assertEqual(ctx.exception.code, "CONVERT_FAILED")
+        # The last stderr line is surfaced, so the user sees why it failed.
+        self.assertIn("Invalid data found", ctx.exception.message)
+        self.assertFalse(output.exists(), "a failed conversion must not leave a partial file")
+
+    def test_a_failed_conversion_without_stderr_still_reports_something(self):
+        from music_fetch.audio import convert_audio_file
+
+        failed = mock.Mock(returncode=1, stderr="")
+        with self._ffmpeg(), mock.patch("music_fetch.audio.subprocess.run", return_value=failed):
+            with self.assertRaises(MusicFetchError) as ctx:
+                convert_audio_file(self.base / "s.flac", self.base / "t.mp3", "mp3")
+        self.assertIn("unknown conversion error", ctx.exception.message)
+
+    def test_preferred_format_uses_the_encode_type_when_the_url_has_no_extension(self):
+        from music_fetch.api import PlayableCandidate
+        from music_fetch.audio import prioritize_candidates_by_format
+
+        aac = PlayableCandidate("https://cdn/abc", None, "higher", "aac")
+        mp4 = PlayableCandidate("https://cdn/def", None, "exhigh", "mp4")
+        mp3 = PlayableCandidate("https://cdn/ghi", None, "standard", "mp3")
+
+        ordered = prioritize_candidates_by_format([mp3, aac, mp4], prefer_format="m4a")
+
+        # aac/mp4 both land in the m4a family; mp3 sorts last for an m4a request.
+        self.assertEqual([candidate.encode_type for candidate in ordered], ["aac", "mp4", "mp3"])
+
+    def test_outer_url_fallback_failure_becomes_the_reported_error(self):
+        from music_fetch.api import PlayableCandidate
+        from music_fetch.audio import download_song_with_fallback
+
+        candidate = PlayableCandidate("https://cdn/only.mp3", 1000, "standard", "mp3")
+        blocked = MusicFetchError(ErrorCode.DOWNLOAD_FAILED, "download failed (HTTP 403)")
+
+        with mock.patch("music_fetch.audio.fetch_playable_candidates", return_value=[candidate]), mock.patch(
+            "music_fetch.audio._download_audio_stream", side_effect=blocked
+        ), mock.patch("music_fetch.audio.fetch_outer_media_url", return_value="https://outer/x.mp3"):
+            with self.assertRaises(MusicFetchError) as ctx:
+                download_song_with_fallback("1", "MUSIC_U=test", self.base / "out.mp3", timeout=5)
+
+        # Both the candidate and the fallback were rejected with 403: that is
+        # reported as a download failure (retriable), not as "song unavailable".
+        self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+        self.assertIn("403", ctx.exception.message)
+
+
 class ProgressSnapshotTests(unittest.TestCase):
     def test_snapshot_fields_are_exposed(self):
         snapshot = DownloadProgressSnapshot(10, 20, 30)
